@@ -72,3 +72,40 @@ bool ConfigureTunMtu(const Config& cfg) {
 bool ParseIpv6(const std::string& ip, in6_addr* out) {
     return InetPtonA(AF_INET6, ip.c_str(), out) == 1;
 }
+
+std::string Ipv4ProtocolToString(const uint8_t* packet, size_t len) {
+	if (packet == nullptr || len < 20) {
+		return "Unknown";
+	}
+	const uint8_t protocol = packet[9];
+	switch (protocol) {
+		case 1:
+			return "ICMP";
+		case 2:
+			return "IGMP";
+		case 4:
+			return "IP-in-IP";
+		case 6:
+			return "TCP";
+		case 17:
+			return "UDP";
+		case 41:
+			return "IPv6";
+		case 47:
+			return "GRE";
+		case 50:
+			return "ESP";
+		case 51:
+			return "AH";
+		case 58:
+			return "ICMPv6";
+		case 89:
+			return "OSPF";
+		case 112:
+			return "VRRP";
+		case 132:
+			return "SCTP";
+		default:
+			return "Proto-" + std::to_string(static_cast<unsigned>(protocol));
+	}
+}

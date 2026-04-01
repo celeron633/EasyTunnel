@@ -241,7 +241,9 @@ int main(int argc, char** argv) {
 					if (sent < 0) {
 						Log(LogLevel::Error, "sendto failed. err=" + std::to_string(WSAGetLastError()));
 					} else {
-						Log(LogLevel::Debug, "TX IPv4 packet from TUN to IPv6 socket, bytes=" + std::to_string(sent));
+						Log(LogLevel::Debug,
+							"TX IPv4 [" + Ipv4ProtocolToString(packet, packetSize)
+							+ "] packet from TUN to IPv6 socket, bytes=" + std::to_string(sent));
 					}
 				} else {
 					Log(LogLevel::Debug, "Skip non-IPv4 packet from TUN, bytes=" + std::to_string(packetSize));
@@ -288,7 +290,9 @@ int main(int argc, char** argv) {
 				std::memcpy(out, buf.data(), static_cast<size_t>(recvLen));
 				WtSendPacket(session, out);
 
-				Log(LogLevel::Debug, "RX IPv4 packet from IPv6 socket to TUN, bytes=" + std::to_string(recvLen));
+				Log(LogLevel::Debug,
+					"RX IPv4 [" + Ipv4ProtocolToString(buf.data(), static_cast<size_t>(recvLen))
+					+ "] packet from IPv6 socket to TUN, bytes=" + std::to_string(recvLen));
 			}
 		});
 
