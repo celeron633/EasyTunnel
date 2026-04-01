@@ -19,6 +19,7 @@ add_executable(6tunnel
 )
 
 target_compile_options(6tunnel PRIVATE /W4)
+target_link_options(6tunnel PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
 
 target_link_libraries(6tunnel PRIVATE ws2_32 iphlpapi)
 
