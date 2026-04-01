@@ -23,6 +23,7 @@ Windows 下基于 Wintun 的 IPv4-over-IPv6 隧道。
 - `udp_port`：两端一致
 - `local_tun_ipv4`：本地 TUN 口 IPv4
 - `tun_prefix`：掩码前缀
+- `log_level`：日志级别，支持 `Debug` / `Info` / `Warn` / `Error`（默认 `Info`）
 
 建议两端分别配置：
 

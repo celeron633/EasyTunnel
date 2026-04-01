@@ -10,4 +10,7 @@ enum class LogLevel {
 };
 
 const char* LevelToString(LogLevel level);
+bool TryParseLogLevel(const std::string& text, LogLevel* out);
+void SetLogLevel(LogLevel level);
+LogLevel GetLogLevel();
 void Log(LogLevel level, const std::string& msg);

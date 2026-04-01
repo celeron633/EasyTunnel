@@ -98,10 +98,13 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	SetLogLevel(cfg.log_level);
+
 	SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
 	Log(LogLevel::Info, "6Tunnel starting...");
 	Log(LogLevel::Info, "Config file: " + configPath);
+	Log(LogLevel::Info, "Log level: " + std::string(LevelToString(cfg.log_level)));
 	Log(LogLevel::Info, "Local IPv6: " + cfg.local_ipv6 + ", Peer IPv6: " + cfg.peer_ipv6 + ", UDP port: " + std::to_string(cfg.udp_port));
 	Log(LogLevel::Info, "Adapter: " + cfg.adapter_name + ", local tun IPv4: " + cfg.local_tun_ipv4 + "/" + std::to_string(cfg.tun_prefix));
 
@@ -232,14 +235,12 @@ int main(int argc, char** argv) {
 											sizeof(peerAddr));
 					if (sent < 0) {
 						Log(LogLevel::Error, "sendto failed. err=" + std::to_string(WSAGetLastError()));
-					} else if (cfg.verbose_debug) {
+					} else {
 						Log(LogLevel::Debug, "TX IPv4 packet from TUN to IPv6 socket, bytes=" + std::to_string(sent));
 					}
 				} else {
-					if (cfg.verbose_debug) {
-						Log(LogLevel::Debug, "Skip non-IPv4 packet from TUN, bytes=" + std::to_string(packetSize));
-						LogHexdumpDebug("TUN skip packet", packet, packetSize);
-					}
+					Log(LogLevel::Debug, "Skip non-IPv4 packet from TUN, bytes=" + std::to_string(packetSize));
+					LogHexdumpDebug("TUN skip packet", packet, packetSize);
 				}
 				WtReleaseReceivePacket(session, packet);
 			}
@@ -269,10 +270,8 @@ int main(int argc, char** argv) {
 				}
 
 				if (!IsIpv4Packet(buf.data(), static_cast<size_t>(recvLen))) {
-					if (cfg.verbose_debug) {
-						Log(LogLevel::Debug, "RX non-IPv4 frame over IPv6 socket, drop bytes=" + std::to_string(recvLen));
-						LogHexdumpDebug("IPv6 socket drop packet", buf.data(), static_cast<size_t>(recvLen));
-					}
+					Log(LogLevel::Debug, "RX non-IPv4 frame over IPv6 socket, drop bytes=" + std::to_string(recvLen));
+					LogHexdumpDebug("IPv6 socket drop packet", buf.data(), static_cast<size_t>(recvLen));
 					continue;
 				}
 
@@ -284,9 +283,7 @@ int main(int argc, char** argv) {
 				std::memcpy(out, buf.data(), static_cast<size_t>(recvLen));
 				WtSendPacket(session, out);
 
-				if (cfg.verbose_debug) {
-					Log(LogLevel::Debug, "RX IPv4 packet from IPv6 socket to TUN, bytes=" + std::to_string(recvLen));
-				}
+				Log(LogLevel::Debug, "RX IPv4 packet from IPv6 socket to TUN, bytes=" + std::to_string(recvLen));
 			}
 		});
 

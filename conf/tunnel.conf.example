@@ -16,4 +16,4 @@ local_tun_ipv4=10.66.0.1
 tun_prefix=24
 
 auto_config_ipv4=true
-verbose_debug=true
+log_level=Info

@@ -80,8 +80,11 @@ bool LoadConfig(const std::string& file, Config* out) {
     if (!get("auto_config_ipv4").empty()) {
         out->auto_config_ipv4 = ParseBool(get("auto_config_ipv4"));
     }
-    if (!get("verbose_debug").empty()) {
-        out->verbose_debug = ParseBool(get("verbose_debug"));
+    if (!get("log_level").empty()) {
+        if (!TryParseLogLevel(get("log_level"), &out->log_level)) {
+            Log(LogLevel::Error, "Invalid log_level: " + get("log_level") + ", must be one of: Debug, Info, Warn, Error");
+            return false;
+        }
     }
 
     if (out->peer_ipv6.empty() || out->local_tun_ipv4.empty()) {
