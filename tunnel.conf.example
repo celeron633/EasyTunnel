@@ -1,0 +1,19 @@
+# 6Tunnel config (key=value)
+# Required:
+#   local_ipv6     : this host public IPv6
+#   peer_ipv6      : peer host public IPv6
+#   local_tun_ipv4 : local Wintun interface IPv4
+
+local_ipv6=2001:db8:1::10
+peer_ipv6=2001:db8:1::20
+udp_port=44556
+
+adapter_name=6Tunnel
+# Optional tunnel type label for Wintun
+# tunnel_type=6Tunnel
+
+local_tun_ipv4=10.66.0.1
+tun_prefix=24
+
+auto_config_ipv4=true
+verbose_debug=true
