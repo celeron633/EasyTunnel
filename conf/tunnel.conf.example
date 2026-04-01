@@ -1,10 +1,10 @@
 # 6Tunnel config (key=value)
 # Required:
-#   local_ipv6     : this host public IPv6
+#   local_ipv6     : local bind IPv6 (use :: to listen on all local IPv6)
 #   peer_ipv6      : peer host public IPv6
 #   local_tun_ipv4 : local Wintun interface IPv4
 
-local_ipv6=2001:db8:1::10
+local_ipv6=::
 peer_ipv6=2001:db8:1::20
 udp_port=44556
 

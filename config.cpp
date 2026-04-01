@@ -60,6 +60,9 @@ bool LoadConfig(const std::string& file, Config* out) {
     };
 
     out->local_ipv6 = get("local_ipv6");
+    if (out->local_ipv6.empty()) {
+        out->local_ipv6 = "::";
+    }
     out->peer_ipv6 = get("peer_ipv6");
     if (!get("udp_port").empty()) {
         out->udp_port = static_cast<uint16_t>(std::stoi(get("udp_port")));
@@ -81,8 +84,8 @@ bool LoadConfig(const std::string& file, Config* out) {
         out->verbose_debug = ParseBool(get("verbose_debug"));
     }
 
-    if (out->local_ipv6.empty() || out->peer_ipv6.empty() || out->local_tun_ipv4.empty()) {
-        Log(LogLevel::Error, "Missing required config keys: local_ipv6 / peer_ipv6 / local_tun_ipv4");
+    if (out->peer_ipv6.empty() || out->local_tun_ipv4.empty()) {
+        Log(LogLevel::Error, "Missing required config keys: peer_ipv6 / local_tun_ipv4");
         return false;
     }
     if (out->tun_prefix > 32) {

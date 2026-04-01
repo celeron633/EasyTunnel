@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(6Tunnel LANGUAGES CXX)
 
+if(NOT MSVC)
+    message(FATAL_ERROR "This project is currently configured for MSVC only.")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -8,11 +12,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(6tunnel
     main.cpp
     config.cpp
+    hexdump.cpp
     log.cpp
     util.cpp
+    wintun_loader.cpp
 )
 
-target_compile_options(6tunnel PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(6tunnel PRIVATE /W4)
 
 target_link_libraries(6tunnel PRIVATE ws2_32 iphlpapi)
 
@@ -59,25 +65,24 @@ if(NOT WINTUN_SDK_DIR)
     set(WINTUN_SDK_DIR "${WINTUN_EXTRACT_DIR}")
 endif()
 
-set(WINTUN_INCLUDE_DIR "${WINTUN_SDK_DIR}/include")
-set(WINTUN_LIB_PATH "${WINTUN_SDK_DIR}/lib/${WINTUN_ARCH}/wintun.lib")
-set(WINTUN_DLL_PATH "${WINTUN_SDK_DIR}/bin/${WINTUN_ARCH}/wintun.dll")
-
-if(NOT EXISTS "${WINTUN_LIB_PATH}")
-    # Compatibility with older/custom SDK layouts.
-    set(WINTUN_LIB_PATH "${WINTUN_SDK_DIR}/lib/wintun.lib")
+# Some archives extract as <root>/wintun/include, others as <root>/include.
+set(WINTUN_SDK_ROOT "${WINTUN_SDK_DIR}")
+if(EXISTS "${WINTUN_SDK_DIR}/wintun/include/wintun.h")
+    set(WINTUN_SDK_ROOT "${WINTUN_SDK_DIR}/wintun")
 endif()
+
+set(WINTUN_INCLUDE_DIR "${WINTUN_SDK_ROOT}/include")
+set(WINTUN_DLL_PATH "${WINTUN_SDK_ROOT}/bin/${WINTUN_ARCH}/wintun.dll")
 
 if(NOT EXISTS "${WINTUN_INCLUDE_DIR}/wintun.h")
     message(FATAL_ERROR "wintun.h not found in ${WINTUN_INCLUDE_DIR}")
 endif()
 
-if(NOT EXISTS "${WINTUN_LIB_PATH}")
-    message(FATAL_ERROR "wintun.lib not found, checked ${WINTUN_LIB_PATH}")
+if(NOT EXISTS "${WINTUN_DLL_PATH}")
+    message(FATAL_ERROR "wintun.dll not found, checked ${WINTUN_DLL_PATH}")
 endif()
 
 target_include_directories(6tunnel PRIVATE "${WINTUN_INCLUDE_DIR}")
-target_link_libraries(6tunnel PRIVATE "${WINTUN_LIB_PATH}")
 
 if(EXISTS "${WINTUN_DLL_PATH}")
     add_custom_command(TARGET 6tunnel POST_BUILD

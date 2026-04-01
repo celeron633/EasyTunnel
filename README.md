@@ -1,6 +1,6 @@
 # 6Tunnel
 
-Windows 下基于 Wintun 的 IPv4-over-IPv6 隧道示例。
+Windows 下基于 Wintun 的 IPv4-over-IPv6 隧道。
 
 - 本地从 Wintun 读到 IPv4 报文
 - 直接封装为 UDP/IPv6 负载发送到对端
@@ -18,7 +18,7 @@ Windows 下基于 Wintun 的 IPv4-over-IPv6 隧道示例。
 
 复制 `tunnel.conf.example` 为 `tunnel.conf`，按两端实际地址修改：
 
-- `local_ipv6`：本机公网 IPv6
+- `local_ipv6`：本地绑定 IPv6（建议先用 `::` 监听全部本机 IPv6）
 - `peer_ipv6`：对端公网 IPv6
 - `udp_port`：两端一致
 - `local_tun_ipv4`：本地 TUN 口 IPv4
@@ -100,6 +100,7 @@ cmake --build build-vs --config Release
 - 放通 `udp_port` 的 IPv6 入站/出站防火墙规则
 - 确认两端都可直连对方公网 IPv6
 - 启动后可互 ping 对端 TUN IPv4 地址
+- 若出现 `bind failed. err=10049`：说明 `local_ipv6` 不是本机已分配地址，改为 `local_ipv6=::` 或填本机真实 IPv6
 
 ## 注意
 
