@@ -84,6 +84,15 @@ endif()
 
 target_include_directories(6tunnel PRIVATE "${WINTUN_INCLUDE_DIR}")
 
+if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
+    add_custom_command(TARGET 6tunnel POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
+                "$<TARGET_FILE_DIR:6tunnel>/tunnel.conf.example"
+        COMMENT "Copy tunnel.conf.example to output directory"
+    )
+endif()
+
 if(EXISTS "${WINTUN_DLL_PATH}")
     add_custom_command(TARGET 6tunnel POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

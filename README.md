@@ -16,7 +16,7 @@ Windows 下基于 Wintun 的 IPv4-over-IPv6 隧道。
 
 ## 配置文件
 
-复制 `tunnel.conf.example` 为 `tunnel.conf`，按两端实际地址修改：
+复制 `conf/tunnel.conf.example` 为 `tunnel.conf`，按两端实际地址修改：
 
 - `local_ipv6`：本地绑定 IPv6（建议先用 `::` 监听全部本机 IPv6）
 - `peer_ipv6`：对端公网 IPv6
