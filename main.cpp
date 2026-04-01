@@ -106,7 +106,8 @@ int main(int argc, char** argv) {
 	Log(LogLevel::Info, "Config file: " + configPath);
 	Log(LogLevel::Info, "Log level: " + std::string(LevelToString(cfg.log_level)));
 	Log(LogLevel::Info, "Local IPv6: " + cfg.local_ipv6 + ", Peer IPv6: " + cfg.peer_ipv6 + ", UDP port: " + std::to_string(cfg.udp_port));
-	Log(LogLevel::Info, "Adapter: " + cfg.adapter_name + ", local tun IPv4: " + cfg.local_tun_ipv4 + "/" + std::to_string(cfg.tun_prefix));
+	Log(LogLevel::Info, "Adapter: " + cfg.adapter_name + ", local tun IPv4: " + cfg.local_tun_ipv4 + "/" + std::to_string(cfg.tun_prefix)
+		+ ", tun MTU: " + std::to_string(cfg.tun_mtu));
 
 	WINTUN_ADAPTER_HANDLE adapter = nullptr;
 	WINTUN_SESSION_HANDLE session = nullptr;
@@ -145,8 +146,12 @@ int main(int argc, char** argv) {
 				Log(LogLevel::Error, "Failed to set adapter IPv4. Run as administrator.");
 				break;
 			}
+			if (!ConfigureTunMtu(cfg)) {
+				Log(LogLevel::Error, "Failed to set adapter MTU. Run as administrator.");
+				break;
+			}
 		} else {
-			Log(LogLevel::Info, "auto_config_ipv4=false, skip netsh IPv4 setup.");
+			Log(LogLevel::Info, "auto_config_ipv4=false, skip netsh IPv4/MTU setup.");
 		}
 
 		session = WtStartSession(adapter, kWintunRingCapacity);

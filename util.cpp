@@ -61,6 +61,14 @@ bool ConfigureTunIpv4(const Config& cfg) {
     return RunCommand(ss.str());
 }
 
+bool ConfigureTunMtu(const Config& cfg) {
+    std::ostringstream ss;
+    ss << "netsh interface ipv4 set subinterface \""
+       << cfg.adapter_name
+       << "\" mtu=" << cfg.tun_mtu << " store=persistent";
+    return RunCommand(ss.str());
+}
+
 bool ParseIpv6(const std::string& ip, in6_addr* out) {
     return InetPtonA(AF_INET6, ip.c_str(), out) == 1;
 }

@@ -14,4 +14,5 @@ std::wstring Utf8ToWide(const std::string& s);
 std::string PrefixToMask(uint8_t prefix);
 bool RunCommand(const std::string& cmd);
 bool ConfigureTunIpv4(const Config& cfg);
+bool ConfigureTunMtu(const Config& cfg);
 bool ParseIpv6(const std::string& ip, in6_addr* out);

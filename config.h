@@ -13,6 +13,7 @@ struct Config {
     std::string tunnel_type = "6Tunnel";
     std::string local_tun_ipv4;
     uint8_t tun_prefix = 24;
+    uint16_t tun_mtu = 1452;
     bool auto_config_ipv4 = true;
     LogLevel log_level = LogLevel::Info;
 };
