@@ -1,10 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(6Tunnel LANGUAGES CXX)
 
-if(NOT MSVC)
-    message(FATAL_ERROR "This project is currently configured for MSVC only.")
-endif()
-
 include(FetchContent)
 
 FetchContent_Declare(
@@ -27,8 +23,12 @@ add_executable(6tunnel
     wintun_loader.cpp
 )
 
-target_compile_options(6tunnel PRIVATE /W4)
-target_link_options(6tunnel PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+if(MSVC)
+    target_compile_options(6tunnel PRIVATE /W4)
+    target_link_options(6tunnel PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+else()
+    target_compile_options(6tunnel PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 
 target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi)
 

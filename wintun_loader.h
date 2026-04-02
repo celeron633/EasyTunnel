@@ -2,7 +2,14 @@
 
 #include <string>
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#endif
 #include "wintun.h"
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 bool LoadWintunLibrary(const std::wstring& dllPath);
 void UnloadWintunLibrary();
