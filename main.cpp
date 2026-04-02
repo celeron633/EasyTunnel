@@ -133,8 +133,12 @@ int main(int argc, char** argv) {
 				Log(LogLevel::Error, "Failed to set adapter MTU. Run as administrator.");
 				break;
 			}
+			if (!DisableTunIpv6(cfg)) {
+				Log(LogLevel::Error, "Failed to disable adapter IPv6 binding. Run as administrator.");
+				break;
+			}
 		} else {
-			Log(LogLevel::Info, "auto_config_ipv4=false, skip netsh IPv4/MTU setup.");
+			Log(LogLevel::Info, "auto_config_ipv4=false, skip adapter IPv4/MTU/IPv6 setup.");
 		}
 
 		session = WtStartSession(adapter, kWintunRingCapacity);

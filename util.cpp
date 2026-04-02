@@ -69,6 +69,29 @@ bool ConfigureTunMtu(const Config& cfg) {
     return RunCommand(ss.str());
 }
 
+bool DisableTunIpv6(const Config& cfg) {
+    // Use adapter binding toggle for reliable suppression of IPv6 noise on this tunnel NIC.
+    // This is reversible. Restore command example:
+    //   Enable-NetAdapterBinding -Name "<adapter>" -ComponentID ms_tcpip6
+    std::ostringstream ps;
+    ps << "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
+       << "$ErrorActionPreference='Stop';"
+       << "$name='" << cfg.adapter_name << "';"
+       << "$b=Get-NetAdapterBinding -Name $name -ComponentID ms_tcpip6 -ErrorAction Stop;"
+       << "if($b.Enabled){Disable-NetAdapterBinding -Name $name -ComponentID ms_tcpip6 -Confirm:$false -ErrorAction Stop | Out-Null}"
+       << "\"";
+
+    if (!RunCommand(ps.str())) {
+        return false;
+    }
+
+    Log(LogLevel::Info,
+        "IPv6 binding disabled on adapter. To restore later: Enable-NetAdapterBinding -Name \""
+        + cfg.adapter_name + "\" -ComponentID ms_tcpip6");
+
+    return true;
+}
+
 bool ParseIpv6(const std::string& ip, in6_addr* out) {
     return InetPtonA(AF_INET6, ip.c_str(), out) == 1;
 }

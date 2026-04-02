@@ -15,6 +15,7 @@ std::string PrefixToMask(uint8_t prefix);
 bool RunCommand(const std::string& cmd);
 bool ConfigureTunIpv4(const Config& cfg);
 bool ConfigureTunMtu(const Config& cfg);
+bool DisableTunIpv6(const Config& cfg);
 bool ParseIpv6(const std::string& ip, in6_addr* out);
 std::string IpProtoToName(uint8_t proto);
 std::string NonIpv4PacketType(const uint8_t* packet, size_t len);
