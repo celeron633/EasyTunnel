@@ -17,7 +17,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -34,28 +33,12 @@ namespace {
 
 constexpr DWORD kWintunRingCapacity = 0x400000;
 constexpr int kMaxPacketSize = 65535;
-constexpr size_t kMaxHexdumpBytes = 256;
 constexpr int kSocketRecvTimeoutMs = 1000;
 constexpr int kForceExitTimeoutMs = 4000;
 
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_shutdownCompleted{false};
 std::atomic<int> g_stopSignalCount{0};
-
-void LogHexdumpDebug(const std::string& title, const uint8_t* data, size_t len) {
-	const size_t dumpLen = (std::min)(len, kMaxHexdumpBytes);
-	Log(LogLevel::Debug, title + ", hexdump bytes=" + std::to_string(dumpLen) + "/" + std::to_string(len));
-
-	std::istringstream iss(HexdumpC(data, dumpLen));
-	std::string line;
-	while (std::getline(iss, line)) {
-		Log(LogLevel::Debug, line);
-	}
-
-	if (dumpLen < len) {
-		Log(LogLevel::Debug, "hexdump truncated (max " + std::to_string(kMaxHexdumpBytes) + " bytes)");
-	}
-}
 
 BOOL WINAPI ConsoleHandler(DWORD signal) {
 	switch (signal) {
@@ -246,7 +229,9 @@ int main(int argc, char** argv) {
 							+ "] packet from TUN to IPv6 socket, bytes=" + std::to_string(sent));
 					}
 				} else {
-					Log(LogLevel::Debug, "Skip non-IPv4 packet from TUN, bytes=" + std::to_string(packetSize));
+					Log(LogLevel::Debug,
+						"Skip non-IPv4 [" + NonIpv4PacketType(packet, packetSize)
+						+ "] packet from TUN, bytes=" + std::to_string(packetSize));
 					LogHexdumpDebug("TUN skip packet", packet, packetSize);
 				}
 				WtReleaseReceivePacket(session, packet);
@@ -277,7 +262,9 @@ int main(int argc, char** argv) {
 				}
 
 				if (!IsIpv4Packet(buf.data(), static_cast<size_t>(recvLen))) {
-					Log(LogLevel::Debug, "RX non-IPv4 frame over IPv6 socket, drop bytes=" + std::to_string(recvLen));
+					Log(LogLevel::Debug,
+						"RX non-IPv4 [" + NonIpv4PacketType(buf.data(), static_cast<size_t>(recvLen))
+						+ "] frame over IPv6 socket, drop bytes=" + std::to_string(recvLen));
 					LogHexdumpDebug("IPv6 socket drop packet", buf.data(), static_cast<size_t>(recvLen));
 					continue;
 				}

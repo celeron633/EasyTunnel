@@ -73,6 +73,45 @@ bool ParseIpv6(const std::string& ip, in6_addr* out) {
     return InetPtonA(AF_INET6, ip.c_str(), out) == 1;
 }
 
+std::string IpProtoToName(uint8_t proto) {
+    switch (proto) {
+        case 6:
+            return "TCP";
+        case 17:
+            return "UDP";
+        case 58:
+            return "ICMPv6";
+        case 41:
+            return "IPv6";
+        case 47:
+            return "GRE";
+        case 50:
+            return "ESP";
+        case 51:
+            return "AH";
+        default:
+            return "Proto-" + std::to_string(static_cast<unsigned>(proto));
+    }
+}
+
+std::string NonIpv4PacketType(const uint8_t* packet, size_t len) {
+    if (packet == nullptr || len == 0) {
+        return "Empty";
+    }
+    const uint8_t version = (packet[0] >> 4U) & 0x0FU;
+    if (version == 6) {
+        if (len >= 40) {
+            const uint8_t nextHeader = packet[6];
+            return "IPv6/" + IpProtoToName(nextHeader);
+        }
+        return "IPv6";
+    }
+    if (version == 4) {
+        return "IPv4";
+    }
+    return "Unknown(v=" + std::to_string(static_cast<unsigned>(version)) + ")";
+}
+
 std::string Ipv4ProtocolToString(const uint8_t* packet, size_t len) {
 	if (packet == nullptr || len < 20) {
 		return "Unknown";
@@ -89,16 +128,12 @@ std::string Ipv4ProtocolToString(const uint8_t* packet, size_t len) {
 			return "TCP";
 		case 17:
 			return "UDP";
-		case 41:
-			return "IPv6";
-		case 47:
-			return "GRE";
-		case 50:
-			return "ESP";
-		case 51:
-			return "AH";
+        case 41:
+        case 47:
+        case 50:
+        case 51:
 		case 58:
-			return "ICMPv6";
+            return IpProtoToName(protocol);
 		case 89:
 			return "OSPF";
 		case 112:
