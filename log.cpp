@@ -1,16 +1,42 @@
 #include "log.h"
 
-#include <chrono>
 #include <cctype>
-#include <ctime>
-#include <iomanip>
-#include <iostream>
+#include <memory>
 #include <mutex>
+
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 namespace {
 
-std::mutex g_logMutex;
+std::once_flag g_loggerInitOnce;
+std::shared_ptr<spdlog::logger> g_logger;
 LogLevel g_minLogLevel = LogLevel::Info;
+
+spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
+    switch (level) {
+        case LogLevel::Debug:
+            return spdlog::level::debug;
+        case LogLevel::Info:
+            return spdlog::level::info;
+        case LogLevel::Warn:
+            return spdlog::level::warn;
+        case LogLevel::Error:
+            return spdlog::level::err;
+        default:
+            return spdlog::level::info;
+    }
+}
+
+std::shared_ptr<spdlog::logger> GetLogger() {
+    std::call_once(g_loggerInitOnce, []() {
+        g_logger = spdlog::stdout_color_mt("6tunnel");
+        g_logger->set_pattern("%Y-%m-%d %H:%M:%S.%e %v");
+        g_logger->set_level(ToSpdlogLevel(g_minLogLevel));
+        g_logger->flush_on(spdlog::level::debug);
+    });
+    return g_logger;
+}
 
 std::string ToLowerAscii(const std::string& s) {
     std::string out = s;
@@ -67,12 +93,11 @@ bool TryParseLogLevel(const std::string& text, LogLevel* out) {
 }
 
 void SetLogLevel(LogLevel level) {
-    std::lock_guard<std::mutex> lock(g_logMutex);
     g_minLogLevel = level;
+    GetLogger()->set_level(ToSpdlogLevel(level));
 }
 
 LogLevel GetLogLevel() {
-    std::lock_guard<std::mutex> lock(g_logMutex);
     return g_minLogLevel;
 }
 
@@ -81,16 +106,7 @@ void Log(LogLevel level, const std::string& msg) {
         return;
     }
 
-    using namespace std::chrono;
-    const auto now = system_clock::now();
-    const auto t = system_clock::to_time_t(now);
-    const auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
-
-    std::tm localTm{};
-    localtime_s(&localTm, &t);
-
-    std::lock_guard<std::mutex> lock(g_logMutex);
-    std::cout << std::put_time(&localTm, "%Y-%m-%d %H:%M:%S")
-              << '.' << std::setfill('0') << std::setw(3) << ms.count()
-              << " [" << LevelToString(level) << "] " << msg << std::endl;
+    auto logger = GetLogger();
+    const std::string text = "[" + std::string(LevelToString(level)) + "] " + msg;
+    logger->log(ToSpdlogLevel(level), text);
 }

@@ -5,6 +5,15 @@ if(NOT MSVC)
     message(FATAL_ERROR "This project is currently configured for MSVC only.")
 endif()
 
+include(FetchContent)
+
+FetchContent_Declare(
+    spdlog
+    URL https://github.com/gabime/spdlog/archive/refs/tags/v1.14.1.zip
+)
+
+FetchContent_MakeAvailable(spdlog)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -21,7 +30,7 @@ add_executable(6tunnel
 target_compile_options(6tunnel PRIVATE /W4)
 target_link_options(6tunnel PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
 
-target_link_libraries(6tunnel PRIVATE ws2_32 iphlpapi)
+target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi)
 
 set(WINTUN_VERSION "0.14.1" CACHE STRING "Wintun SDK version used for auto-download")
 set(WINTUN_SDK_DIR "" CACHE PATH "Optional local Wintun SDK directory override")
