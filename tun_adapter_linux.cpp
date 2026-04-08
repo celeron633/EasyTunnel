@@ -99,6 +99,11 @@ public:
 
 		const ssize_t n = ::read(fd_, buf, bufSize);
 		if (n < 0) {
+			// poll() can produce spurious POLLIN on some kernels; treat
+			// EAGAIN / EWOULDBLOCK as a soft timeout rather than a fatal error.
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				return true;  // no packet yet
+			}
 			Log(LogLevel::Error,
 				std::string("read() from TUN fd failed: ") + std::strerror(errno));
 			return false;
@@ -112,6 +117,14 @@ public:
 		if (n < 0) {
 			Log(LogLevel::Error,
 				std::string("write() to TUN fd failed: ") + std::strerror(errno));
+			return false;
+		}
+		// TUN writes are atomic (one write = one IP packet), but guard against
+		// the unexpected case of a partial write.
+		if (static_cast<size_t>(n) != len) {
+			Log(LogLevel::Error,
+				"write() to TUN fd: partial write, expected="
+				+ std::to_string(len) + " got=" + std::to_string(n));
 			return false;
 		}
 		return true;
