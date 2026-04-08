@@ -3,10 +3,19 @@
 
 #include "tun_adapter.h"
 
+#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+
 #include <cstring>
 #include <string>
-
-#include <windows.h>
 
 #include "log.h"
 #include "util.h"
@@ -107,7 +116,7 @@ public:
 			}
 			Log(LogLevel::Error,
 				"WintunReceivePacket failed. err=" + std::to_string(err));
-			return true;  // non-fatal, let caller retry
+			return false;  // unexpected receive error is fatal
 		}
 
 		if (pktSize > static_cast<DWORD>(bufSize)) {

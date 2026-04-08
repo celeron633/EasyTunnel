@@ -1,5 +1,7 @@
 #include "wintun_loader.h"
 
+#ifdef _WIN32
+
 #include <string>
 
 namespace {
@@ -119,3 +121,5 @@ BYTE* WtAllocateSendPacket(WINTUN_SESSION_HANDLE session, DWORD packetSize) {
 void WtSendPacket(WINTUN_SESSION_HANDLE session, const BYTE* packet) {
     g_sendPacket(session, packet);
 }
+
+#endif  // _WIN32

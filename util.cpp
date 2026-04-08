@@ -1,9 +1,158 @@
 #include "util.h"
 
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <sstream>
+#include <thread>
 
 #include "log.h"
+
+#ifndef _WIN32
+#include <cerrno>
+#include <csignal>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+
+// ---------------------------------------------------------------------------
+// Program control globals
+// ---------------------------------------------------------------------------
+std::atomic<bool> g_running{true};
+std::atomic<bool> g_shutdownCompleted{false};
+
+namespace {
+std::atomic<int> g_stopSignalCount{0};
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Signal / console-event handlers
+// ---------------------------------------------------------------------------
+#ifdef _WIN32
+
+namespace {
+constexpr int kForceExitTimeoutMs = 4000;
+
+BOOL WINAPI ConsoleHandler(DWORD signal) {
+    switch (signal) {
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT: {
+            const int count = g_stopSignalCount.fetch_add(1) + 1;
+            if (count == 1) {
+                g_running.store(false);
+                Log(LogLevel::Warn,
+                    "Stop signal received, shutting down..."
+                    " Press Ctrl+C again to force exit.");
+                std::thread([]() {
+                    std::this_thread::sleep_for(
+                        std::chrono::milliseconds(kForceExitTimeoutMs));
+                    if (!g_shutdownCompleted.load()) {
+                        Log(LogLevel::Error,
+                            "Graceful shutdown timeout, force terminating process.");
+                        TerminateProcess(GetCurrentProcess(), 130);
+                    }
+                }).detach();
+            } else {
+                Log(LogLevel::Error,
+                    "Second stop signal received, force terminating immediately.");
+                TerminateProcess(GetCurrentProcess(), 130);
+            }
+            return TRUE;
+        }
+        default:
+            return FALSE;
+    }
+}
+}  // namespace
+
+#else  // POSIX
+
+namespace {
+void PosixSignalHandler(int /*sig*/) {
+    const int count = g_stopSignalCount.fetch_add(1) + 1;
+    if (count == 1) {
+        g_running.store(false);
+    } else {
+        std::_Exit(130);
+    }
+}
+}  // namespace
+
+#endif  // _WIN32
+
+void RegisterSignalHandlers() {
+#ifdef _WIN32
+    SetConsoleCtrlHandler(ConsoleHandler, TRUE);
+#else
+    struct sigaction sa {};
+    sa.sa_handler = PosixSignalHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGINT, &sa, nullptr);
+    sigaction(SIGTERM, &sa, nullptr);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Cross-platform socket helpers
+// ---------------------------------------------------------------------------
+
+void SetSocketRecvTimeoutMs(socket_t sock, int timeoutMs) {
+#ifdef _WIN32
+    const DWORD ms = static_cast<DWORD>(timeoutMs);
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+               reinterpret_cast<const char*>(&ms), sizeof(ms));
+#else
+    struct timeval tv;
+    tv.tv_sec = timeoutMs / 1000;
+    tv.tv_usec = (timeoutMs % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+}
+
+void ShutdownSocket(socket_t sock) {
+    if (sock != kInvalidSocket) {
+#ifdef _WIN32
+        shutdown(sock, SD_BOTH);
+#else
+        shutdown(sock, SHUT_RDWR);
+#endif
+    }
+}
+
+void CloseSocket(socket_t& sock) {
+    if (sock != kInvalidSocket) {
+#ifdef _WIN32
+        closesocket(sock);
+#else
+        ::close(sock);
+#endif
+        sock = kInvalidSocket;
+    }
+}
+
+int GetSocketError() {
+#ifdef _WIN32
+    return WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+bool IsRecvTimeout(int err) {
+#ifdef _WIN32
+    return err == WSAETIMEDOUT || err == WSAEWOULDBLOCK || err == WSAEINTR;
+#else
+    return err == EAGAIN || err == EWOULDBLOCK || err == EINTR || err == ETIMEDOUT;
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Packet / protocol helpers
+// ---------------------------------------------------------------------------
 
 bool IsIpv4Packet(const uint8_t* data, size_t len) {
     if (len < 20) {
@@ -101,9 +250,10 @@ bool ParseIpv6(const std::string& ip, in6_addr* out) {
 #else  // Linux / POSIX
 
 bool ConfigureTunIpv4(const Config& cfg) {
-    // Assign the IPv4 address using CIDR notation.
+    // Use "replace" for idempotency: succeeds whether or not the address
+    // is already assigned (avoids "RTNETLINK answers: File exists" on restart).
     std::ostringstream ss;
-    ss << "ip addr add " << cfg.local_tun_ipv4
+    ss << "ip addr replace " << cfg.local_tun_ipv4
        << "/" << static_cast<int>(cfg.tun_prefix)
        << " dev " << cfg.adapter_name;
     if (!RunCommand(ss.str())) {

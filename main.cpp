@@ -24,15 +24,9 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <unistd.h>
-
-#include <cerrno>
-#include <csignal>
 
 #endif  // _WIN32
 
-#include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <memory>
@@ -46,115 +40,9 @@
 #include "tun_adapter.h"
 #include "util.h"
 
-// ---------------------------------------------------------------------------
-// Platform type aliases for sockets
-// ---------------------------------------------------------------------------
-#ifdef _WIN32
-using socket_t = SOCKET;
-constexpr socket_t kInvalidSocket = INVALID_SOCKET;
-#else
-using socket_t = int;
-constexpr socket_t kInvalidSocket = -1;
-#endif
-
 namespace {
-
 constexpr int kMaxPacketSize = 65535;
 constexpr int kSocketRecvTimeoutMs = 1000;
-#ifdef _WIN32
-constexpr int kForceExitTimeoutMs = 4000;
-#endif
-
-std::atomic<bool> g_running{true};
-std::atomic<bool> g_shutdownCompleted{false};
-std::atomic<int> g_stopSignalCount{0};
-
-// ---------------------------------------------------------------------------
-// Platform-specific signal / console-event handling
-// ---------------------------------------------------------------------------
-#ifdef _WIN32
-
-BOOL WINAPI ConsoleHandler(DWORD signal) {
-	switch (signal) {
-		case CTRL_C_EVENT:
-		case CTRL_BREAK_EVENT:
-		case CTRL_CLOSE_EVENT:
-		case CTRL_LOGOFF_EVENT:
-		case CTRL_SHUTDOWN_EVENT:
-		{
-			const int count = g_stopSignalCount.fetch_add(1) + 1;
-			if (count == 1) {
-				g_running.store(false);
-				Log(LogLevel::Warn,
-					"Stop signal received, shutting down..."
-					" Press Ctrl+C again to force exit.");
-
-				std::thread([]() {
-					std::this_thread::sleep_for(
-						std::chrono::milliseconds(kForceExitTimeoutMs));
-					if (!g_shutdownCompleted.load()) {
-						Log(LogLevel::Error,
-							"Graceful shutdown timeout, force terminating process.");
-						TerminateProcess(GetCurrentProcess(), 130);
-					}
-				}).detach();
-			} else {
-				Log(LogLevel::Error,
-					"Second stop signal received, force terminating immediately.");
-				TerminateProcess(GetCurrentProcess(), 130);
-			}
-			return TRUE;
-		}
-		default:
-			return FALSE;
-	}
-}
-
-#else  // POSIX
-
-void SignalHandler(int /*sig*/) {
-	const int count = g_stopSignalCount.fetch_add(1) + 1;
-	if (count == 1) {
-		g_running.store(false);
-	} else {
-		std::_Exit(130);
-	}
-}
-
-#endif  // _WIN32
-
-// ---------------------------------------------------------------------------
-// Helpers that paper over Winsock vs POSIX differences
-// ---------------------------------------------------------------------------
-
-void CloseSocket(socket_t& sock) {
-	if (sock != kInvalidSocket) {
-#ifdef _WIN32
-		closesocket(sock);
-#else
-		::close(sock);
-#endif
-		sock = kInvalidSocket;
-	}
-}
-
-int GetSocketError() {
-#ifdef _WIN32
-	return WSAGetLastError();
-#else
-	return errno;
-#endif
-}
-
-bool IsRecvTimeout(int err) {
-#ifdef _WIN32
-	return err == WSAETIMEDOUT || err == WSAEWOULDBLOCK || err == WSAEINTR;
-#else
-	return err == EAGAIN || err == EWOULDBLOCK || err == EINTR
-		|| err == ETIMEDOUT;
-#endif
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -166,17 +54,7 @@ int main(int argc, char** argv) {
 	}
 
 	SetLogLevel(cfg.log_level);
-
-#ifdef _WIN32
-	SetConsoleCtrlHandler(ConsoleHandler, TRUE);
-#else
-	struct sigaction sa {};
-	sa.sa_handler = SignalHandler;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = 0;
-	sigaction(SIGINT, &sa, nullptr);
-	sigaction(SIGTERM, &sa, nullptr);
-#endif
+	RegisterSignalHandlers();
 
 	Log(LogLevel::Info, "6Tunnel starting...");
 	Log(LogLevel::Info, "Config file: " + configPath);
@@ -218,17 +96,7 @@ int main(int argc, char** argv) {
 		int v6only = 1;
 		setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY,
 			reinterpret_cast<char*>(&v6only), sizeof(v6only));
-
-#ifdef _WIN32
-		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
-			reinterpret_cast<const char*>(&kSocketRecvTimeoutMs),
-			sizeof(kSocketRecvTimeoutMs));
-#else
-		struct timeval tv;
-		tv.tv_sec = kSocketRecvTimeoutMs / 1000;
-		tv.tv_usec = (kSocketRecvTimeoutMs % 1000) * 1000;
-		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#endif
+		SetSocketRecvTimeoutMs(sock, kSocketRecvTimeoutMs);
 
 		sockaddr_in6 localAddr{};
 		localAddr.sin6_family = AF_INET6;
@@ -284,10 +152,10 @@ int main(int argc, char** argv) {
 			while (g_running.load()) {
 				size_t pktLen = 0;
 				if (!tunAdapter->ReadPacket(buf.data(), buf.size(), pktLen)) {
-					if (!g_running.load()) {
-						break;
-					}
-					continue;
+					Log(LogLevel::Error,
+						"TUN read failed; stopping data plane.");
+					g_running.store(false);
+					break;
 				}
 				if (pktLen == 0) {
 					continue;  // timeout
@@ -327,12 +195,12 @@ int main(int argc, char** argv) {
 		std::thread netToTun([&]() {
 			std::vector<uint8_t> buf(kMaxPacketSize);
 			while (g_running.load()) {
-				sockaddr_in6 src{};
 #ifdef _WIN32
-				int srcLen = sizeof(src);
+				int srcLen = sizeof(sockaddr_in6);
 #else
-				socklen_t srcLen = sizeof(src);
+				socklen_t srcLen = sizeof(sockaddr_in6);
 #endif
+				sockaddr_in6 src{};
 				const int recvLen = recvfrom(
 					sock,
 					reinterpret_cast<char*>(buf.data()),
@@ -384,11 +252,7 @@ int main(int argc, char** argv) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		}
 
-#ifdef _WIN32
-		shutdown(sock, SD_BOTH);
-#else
-		shutdown(sock, SHUT_RDWR);
-#endif
+		ShutdownSocket(sock);
 
 		if (tunToNet.joinable()) {
 			tunToNet.join();

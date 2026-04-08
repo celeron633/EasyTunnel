@@ -15,6 +15,8 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(spdlog)
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -57,9 +59,9 @@ endif()
 # Platform-specific link libraries
 # ---------------------------------------------------------------------------
 if(WIN32)
-    target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi)
+    target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi Threads::Threads)
 else()
-    target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only)
+    target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only Threads::Threads)
 endif()
 
 # ---------------------------------------------------------------------------

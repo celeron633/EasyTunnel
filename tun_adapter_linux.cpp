@@ -38,6 +38,13 @@ public:
 		struct ifreq ifr {};
 		ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
 		if (!cfg.adapter_name.empty()) {
+			if (cfg.adapter_name.size() >= IFNAMSIZ) {
+				Log(LogLevel::Error,
+					"adapter_name is too long (max " + std::to_string(IFNAMSIZ - 1)
+					+ " chars): " + cfg.adapter_name);
+				Close();
+				return false;
+			}
 			std::strncpy(ifr.ifr_name, cfg.adapter_name.c_str(), IFNAMSIZ - 1);
 		}
 

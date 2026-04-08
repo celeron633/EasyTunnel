@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef _WIN32
+
 #include <string>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -25,3 +27,5 @@ BYTE* WtReceivePacket(WINTUN_SESSION_HANDLE session, DWORD* packetSize);
 void WtReleaseReceivePacket(WINTUN_SESSION_HANDLE session, const BYTE* packet);
 BYTE* WtAllocateSendPacket(WINTUN_SESSION_HANDLE session, DWORD packetSize);
 void WtSendPacket(WINTUN_SESSION_HANDLE session, const BYTE* packet);
+
+#endif  // _WIN32
