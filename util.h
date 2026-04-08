@@ -5,18 +5,26 @@
 
 #include "config.h"
 
+#ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#endif
 
 bool IsIpv4Packet(const uint8_t* data, size_t len);
-std::wstring Utf8ToWide(const std::string& s);
 std::string PrefixToMask(uint8_t prefix);
 bool RunCommand(const std::string& cmd);
 bool ConfigureTunIpv4(const Config& cfg);
 bool ConfigureTunMtu(const Config& cfg);
-bool DisableTunIpv6(const Config& cfg);
 bool ParseIpv6(const std::string& ip, in6_addr* out);
 std::string IpProtoToName(uint8_t proto);
 std::string NonIpv4PacketType(const uint8_t* packet, size_t len);
 std::string Ipv4ProtocolToString(const uint8_t* packet, size_t len);
+
+#ifdef _WIN32
+std::wstring Utf8ToWide(const std::string& s);
+bool DisableTunIpv6(const Config& cfg);
+#endif

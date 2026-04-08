@@ -13,19 +13,6 @@ bool IsIpv4Packet(const uint8_t* data, size_t len) {
     return version == 4;
 }
 
-std::wstring Utf8ToWide(const std::string& s) {
-    if (s.empty()) {
-        return std::wstring();
-    }
-    const int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
-    if (size <= 0) {
-        return std::wstring();
-    }
-    std::wstring w(size - 1, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], size);
-    return w;
-}
-
 std::string PrefixToMask(uint8_t prefix) {
     uint32_t mask = 0;
     if (prefix == 0) {
@@ -49,6 +36,21 @@ bool RunCommand(const std::string& cmd) {
         return false;
     }
     return true;
+}
+
+#ifdef _WIN32
+
+std::wstring Utf8ToWide(const std::string& s) {
+    if (s.empty()) {
+        return std::wstring();
+    }
+    const int size = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    if (size <= 0) {
+        return std::wstring();
+    }
+    std::wstring w(size - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], size);
+    return w;
 }
 
 bool ConfigureTunIpv4(const Config& cfg) {
@@ -95,6 +97,35 @@ bool DisableTunIpv6(const Config& cfg) {
 bool ParseIpv6(const std::string& ip, in6_addr* out) {
     return InetPtonA(AF_INET6, ip.c_str(), out) == 1;
 }
+
+#else  // Linux / POSIX
+
+bool ConfigureTunIpv4(const Config& cfg) {
+    // Assign the IPv4 address using CIDR notation.
+    std::ostringstream ss;
+    ss << "ip addr add " << cfg.local_tun_ipv4
+       << "/" << static_cast<int>(cfg.tun_prefix)
+       << " dev " << cfg.adapter_name;
+    if (!RunCommand(ss.str())) {
+        return false;
+    }
+    // Bring the interface up.
+    std::ostringstream up;
+    up << "ip link set " << cfg.adapter_name << " up";
+    return RunCommand(up.str());
+}
+
+bool ConfigureTunMtu(const Config& cfg) {
+    std::ostringstream ss;
+    ss << "ip link set " << cfg.adapter_name << " mtu " << cfg.tun_mtu;
+    return RunCommand(ss.str());
+}
+
+bool ParseIpv6(const std::string& ip, in6_addr* out) {
+    return inet_pton(AF_INET6, ip.c_str(), out) == 1;
+}
+
+#endif  // _WIN32
 
 std::string IpProtoToName(uint8_t proto) {
     switch (proto) {
