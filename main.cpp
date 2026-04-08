@@ -195,12 +195,12 @@ int main(int argc, char** argv) {
 		std::thread netToTun([&]() {
 			std::vector<uint8_t> buf(kMaxPacketSize);
 			while (g_running.load()) {
-#ifdef _WIN32
-				int srcLen = sizeof(sockaddr_in6);
-#else
-				socklen_t srcLen = sizeof(sockaddr_in6);
-#endif
 				sockaddr_in6 src{};
+#ifdef _WIN32
+				int srcLen = sizeof(src);
+#else
+				socklen_t srcLen = sizeof(src);
+#endif
 				const int recvLen = recvfrom(
 					sock,
 					reinterpret_cast<char*>(buf.data()),
