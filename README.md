@@ -1,18 +1,19 @@
 # 6Tunnel
 
-Windows 下基于 Wintun 的 IPv4-over-IPv6 隧道。
+Windows/Linux 下基于 Wintun/tun 的 IPv4-over-IPv6 隧道。
 
-- 本地从 Wintun 读到 IPv4 报文
+- 本地从 TUN 读到 IPv4 报文
 - 直接封装为 UDP/IPv6 负载发送到对端
-- 对端收到后写回本地 Wintun
+- 对端收到后写回本地 TUN
 - 不做加密，仅做隧道转发
+- 支持 Console 和 GUI (ImGui) 两种模式
 
 ## 依赖
 
-- Windows 10/11
-- MSYS2 (建议 `mingw64` 环境)
-- CMake + Ninja
-- 构建机可访问 `wintun.net`（默认自动下载 Wintun SDK）
+- Windows 10/11 或 Linux
+- CMake 3.20+ / Ninja (或 Visual Studio 2022)
+- 构建机可访问外网（默认自动下载 Wintun SDK、GLFW、ImGui）
+- Linux 额外依赖：`libgl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev`
 
 ## 配置文件
 
@@ -31,7 +32,24 @@ Windows 下基于 Wintun 的 IPv4-over-IPv6 隧道。
 - A 端：`local_tun_ipv4=10.66.0.1`
 - B 端：`local_tun_ipv4=10.66.0.2`
 
-## 构建 (MSYS2)
+## 构建
+
+### Linux
+
+```bash
+sudo apt install libgl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+生成两个可执行文件：
+- `build/6tunnel` — Console 模式
+- `build/6tunnel_gui` — GUI 模式 (ImGui)
+
+若只需 Console 模式，可禁用 GUI：`cmake -S . -B build -DBUILD_GUI=OFF`
+
+### Windows (MSYS2)
 
 在 MSYS2 MinGW64 终端：
 
@@ -47,64 +65,55 @@ cmake --build build
 - 配置阶段会自动下载并解压 Wintun SDK 到 `build/_deps`。
 - 若你想使用本地 SDK，可覆盖：`-DWINTUN_SDK_DIR=/c/dev/wintun`。
 
-## 构建 (Visual Studio)
+### Windows (Visual Studio)
 
-可使用 Visual Studio 2022（安装“使用 C++ 的桌面开发”组件）。
-
-### 方式 1：Developer PowerShell / x64 Native Tools 命令行
+可使用 Visual Studio 2022（安装"使用 C++ 的桌面开发"组件）。
 
 ```powershell
 cmake -S . -B build-vs -G "Visual Studio 17 2022" -A x64
 cmake --build build-vs --config Release
 ```
 
-生成的可执行文件通常在：
+## GUI 模式
 
-`build-vs/Release/6tunnel.exe`
+GUI 模式 (`6tunnel_gui`) 提供：
 
-### 方式 2：Visual Studio GUI
+1. **连接页面**：选择本地 IPv6 地址（自动枚举本机所有网卡 IPv6）、输入对方 IPv6（支持历史记录）、连接/断开按钮、收发包统计
+2. **设置页面**：网络设置（UDP端口、MTU）、TUN 适配器设置（适配器名、IPv4地址、掩码）、日志级别
+3. **状态栏**：实时显示连接状态和收发包数量
 
-1. 在 VS 中选择“打开本地文件夹”，打开项目目录。
-2. VS 会识别 `CMakeLists.txt`，点击“CMake 设置”。
-3. 选择 x64 + Release 配置，执行“生成全部”（首次会自动下载 SDK）。
-
-可选：如果不希望自动下载，可在 CMake 变量中添加 `WINTUN_SDK_DIR`（例如 `C:/dev/wintun`）。
-
-### 运行（VS 构建产物）
-
-1. 将 `wintun.dll` 放到 `6tunnel.exe` 同目录，或放到系统 PATH。
-2. 以管理员权限运行（自动配置网卡 IPv4 需要管理员权限）。
-
-```powershell
-./build-vs/Release/6tunnel.exe tunnel.conf
-```
+连接历史自动保存到 `6Tunnel.ini`，下次启动可快速选择。
 
 ## 运行
 
-1. 将 `wintun.dll` 放到可执行文件同目录（或系统 PATH 可见目录）。
-2. 管理员权限运行（自动配置网卡 IP 需要管理员权限）。
+### Console 模式
 
 ```bash
+# Linux
+sudo ./build/6tunnel tunnel.conf
+
+# Windows (管理员权限)
 ./build/6tunnel.exe tunnel.conf
 ```
 
-提示：默认构建会尝试自动把 `wintun.dll` 复制到输出目录；若复制失败，再手动放置 DLL。
+### GUI 模式
 
-### Wintun 驱动说明
+```bash
+# Linux
+sudo ./build/6tunnel_gui
 
-- 仅有 `wintun.dll` 还不够，运行时仍然需要 Wintun 虚拟网卡驱动。
-- 常见部署方式是随程序分发官方 `wintun.dll`：首次创建适配器时，DLL 会触发驱动安装流程。
-- 首次安装/创建适配器通常需要管理员权限。
-- 若创建适配器失败，优先检查：是否管理员运行、系统策略是否禁止驱动安装、`wintun.dll` 是否来自官方版本且与架构匹配（x64）。
+# Windows (管理员权限)
+./build/6tunnel_gui.exe
+```
 
 ## 连通性建议
 
 - 放通 `udp_port` 的 IPv6 入站/出站防火墙规则
 - 确认两端都可直连对方公网 IPv6
 - 启动后可互 ping 对端 TUN IPv4 地址
-- 若出现 `bind failed. err=10049`：说明 `local_ipv6` 不是本机已分配地址，改为 `local_ipv6=::` 或填本机真实 IPv6
+- 若出现 `bind failed`：说明 `local_ipv6` 不是本机已分配地址，改为 `local_ipv6=::` 或填本机真实 IPv6
 
 ## 注意
 
-- 本项目演示的是“明文隧道”，没有做加密与认证。
+- 本项目演示的是"明文隧道"，没有做加密与认证。
 - 生产环境建议增加认证、重放保护和可选加密。

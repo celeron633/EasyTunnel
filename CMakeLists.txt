@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
-project(6Tunnel LANGUAGES CXX)
+project(6Tunnel LANGUAGES C CXX)
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
 include(FetchContent)
+
+option(BUILD_GUI "Build the ImGui-based GUI application" ON)
 
 FetchContent_Declare(
     spdlog
@@ -22,14 +24,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
-# Common sources (platform-independent)
+# Common sources (platform-independent) - shared between console and GUI
 # ---------------------------------------------------------------------------
 set(COMMON_SOURCES
-    main.cpp
     config.cpp
     hexdump.cpp
     log.cpp
     util.cpp
+    tunnel_engine.cpp
+    ipv6_utils.cpp
+    connection_history.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -46,7 +50,10 @@ else()
     )
 endif()
 
-add_executable(6tunnel ${COMMON_SOURCES})
+# ---------------------------------------------------------------------------
+# Console application (original)
+# ---------------------------------------------------------------------------
+add_executable(6tunnel main.cpp ${COMMON_SOURCES})
 
 if(MSVC)
     target_compile_options(6tunnel PRIVATE /W4)
@@ -150,3 +157,105 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
         COMMENT "Copy tunnel.conf.example to output directory"
     )
 endif()
+
+# ===========================================================================
+# GUI Application (ImGui + GLFW + OpenGL3)
+# ===========================================================================
+if(BUILD_GUI)
+    # -----------------------------------------------------------------------
+    # Fetch GLFW
+    # -----------------------------------------------------------------------
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG 3.4
+    )
+    FetchContent_MakeAvailable(glfw)
+
+    # -----------------------------------------------------------------------
+    # Fetch ImGui
+    # -----------------------------------------------------------------------
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.8
+    )
+    FetchContent_MakeAvailable(imgui)
+
+    # Build ImGui as a library
+    set(IMGUI_DIR ${imgui_SOURCE_DIR})
+    add_library(imgui_lib STATIC
+        ${IMGUI_DIR}/imgui.cpp
+        ${IMGUI_DIR}/imgui_demo.cpp
+        ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp
+        ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+        ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+    )
+    target_include_directories(imgui_lib PUBLIC
+        ${IMGUI_DIR}
+        ${IMGUI_DIR}/backends
+    )
+    target_link_libraries(imgui_lib PUBLIC glfw)
+
+    # Find OpenGL
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(imgui_lib PUBLIC OpenGL::GL)
+
+    # -----------------------------------------------------------------------
+    # GUI target
+    # -----------------------------------------------------------------------
+    set(GUI_SOURCES
+        gui/gui_main.cpp
+        gui/gui_app.cpp
+    )
+
+    add_executable(6tunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES})
+
+    target_include_directories(6tunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
+
+    if(MSVC)
+        target_compile_options(6tunnel_gui PRIVATE /W4)
+        target_link_options(6tunnel_gui PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+        # Use WinMain entry point to hide console on Windows
+        target_link_options(6tunnel_gui PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
+    else()
+        target_compile_options(6tunnel_gui PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_link_libraries(6tunnel_gui PRIVATE
+        spdlog::spdlog_header_only
+        imgui_lib
+        Threads::Threads
+    )
+
+    if(WIN32)
+        target_link_libraries(6tunnel_gui PRIVATE ws2_32 iphlpapi)
+        if(DEFINED WINTUN_INCLUDE_DIR)
+            target_include_directories(6tunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
+        endif()
+        if(EXISTS "${WINTUN_DLL_PATH}")
+            add_custom_command(TARGET 6tunnel_gui POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${WINTUN_DLL_PATH}"
+                        "$<TARGET_FILE_DIR:6tunnel_gui>/wintun.dll"
+                COMMENT "Copy wintun.dll to GUI output directory"
+            )
+        endif()
+    endif()
+
+    if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
+        add_custom_command(TARGET 6tunnel_gui POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
+                    "$<TARGET_FILE_DIR:6tunnel_gui>/tunnel.conf.example"
+            COMMENT "Copy tunnel.conf.example to GUI output directory"
+        )
+    endif()
+endif()  # BUILD_GUI
