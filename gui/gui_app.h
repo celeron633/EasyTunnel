@@ -18,6 +18,9 @@ struct GLFWwindow;
 // ---------------------------------------------------------------------------
 class GuiApp {
 public:
+	static constexpr const char* kLogLevels[] = {"Debug", "Info", "Warn", "Error"};
+	static constexpr int kLogLevelCount = 4;
+
 	GuiApp();
 	~GuiApp();
 

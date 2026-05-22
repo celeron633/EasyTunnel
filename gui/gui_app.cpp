@@ -316,8 +316,7 @@ void GuiApp::RenderSettingsTab() {
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	const char* logLevels[] = {"Debug", "Info", "Warn", "Error"};
-	ImGui::Combo("Log Level", &logLevelIdx_, logLevels, IM_ARRAYSIZE(logLevels));
+	ImGui::Combo("Log Level", &logLevelIdx_, GuiApp::kLogLevels, GuiApp::kLogLevelCount);
 }
 
 void GuiApp::RenderStatusBar() {
@@ -374,9 +373,8 @@ void GuiApp::Connect() {
 	cfg.tun_mtu = static_cast<uint16_t>(tunMtu_);
 	cfg.auto_config_ipv4 = autoConfigIpv4_;
 
-	const char* logLevels[] = {"Debug", "Info", "Warn", "Error"};
 	LogLevel lvl = LogLevel::Info;
-	TryParseLogLevel(logLevels[logLevelIdx_], &lvl);
+	TryParseLogLevel(GuiApp::kLogLevels[logLevelIdx_], &lvl);
 	cfg.log_level = lvl;
 
 	// Validate local TUN IPv4
