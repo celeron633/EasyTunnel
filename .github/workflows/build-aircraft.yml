@@ -24,8 +24,10 @@ jobs:
       - name: Configure (CMake + MSVC)
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
-      - name: Build Release
-        run: cmake --build build --config Release --target 6tunnel
+      - name: Build Release (console + GUI)
+        run: |
+          cmake --build build --config Release --target 6tunnel
+          cmake --build build --config Release --target 6tunnel_gui
 
       - name: Package 6tunnel release
         shell: pwsh
@@ -35,6 +37,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/6tunnel | Out-Null
 
           Copy-Item "build/Release/6tunnel.exe" "dist/6tunnel/6tunnel.exe" -Force
+          Copy-Item "build/Release/6tunnel_gui.exe" "dist/6tunnel/6tunnel_gui.exe" -Force
 
           if (Test-Path "build/Release/wintun.dll") {
             Copy-Item "build/Release/wintun.dll" "dist/6tunnel/wintun.dll" -Force
