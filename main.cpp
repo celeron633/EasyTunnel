@@ -1,4 +1,4 @@
-// 6Tunnel: IPv4 over IPv6 tunnel.
+// 6Tunnel: IPv4 tunnel over UDP.
 // Supports Windows (Wintun) and Linux (/dev/net/tun).
 
 #ifdef _WIN32
@@ -61,7 +61,8 @@ int main(int argc, char** argv) {
 	Log(LogLevel::Info,
 		"Log level: " + std::string(LevelToString(cfg.log_level)));
 	Log(LogLevel::Info,
-		"Local IPv6: " + cfg.local_ipv6 + ", Peer IPv6: " + cfg.peer_ipv6
+		"Local address: " + (cfg.local_addr.empty() ? "auto" : cfg.local_addr)
+		+ ", peer address: " + cfg.peer_addr
 		+ ", UDP port: " + std::to_string(cfg.udp_port));
 	Log(LogLevel::Info,
 		"Adapter: " + cfg.adapter_name
@@ -85,68 +86,22 @@ int main(int argc, char** argv) {
 			break;
 		}
 
-		sock = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-		if (sock == kInvalidSocket) {
-			Log(LogLevel::Error,
-				"socket(AF_INET6, UDP) failed. err="
-				+ std::to_string(GetSocketError()));
+		UdpEndpoint peer{};
+		std::string boundAddr;
+		std::string peerAddr;
+		std::string socketError;
+		if (!OpenUdpSocket(cfg, kSocketRecvTimeoutMs, &sock, &peer,
+				&boundAddr, &peerAddr, &socketError)) {
+			Log(LogLevel::Error, socketError);
 			break;
 		}
-
-		int v6only = 1;
-		setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY,
-			reinterpret_cast<char*>(&v6only), sizeof(v6only));
-		SetSocketRecvTimeoutMs(sock, kSocketRecvTimeoutMs);
-
-		sockaddr_in6 localAddr{};
-		localAddr.sin6_family = AF_INET6;
-		localAddr.sin6_port = htons(cfg.udp_port);
-		if (!ParseIpv6(cfg.local_ipv6, &localAddr.sin6_addr)) {
-			Log(LogLevel::Error, "Invalid local_ipv6: " + cfg.local_ipv6);
-			break;
-		}
-
-		if (bind(sock, reinterpret_cast<const sockaddr*>(&localAddr),
-				sizeof(localAddr)) != 0) {
-			const int bindErr = GetSocketError();
-			Log(LogLevel::Warn,
-				"bind to configured local_ipv6 failed. err="
-				+ std::to_string(bindErr)
-				+ ", local_ipv6=" + cfg.local_ipv6 + ", fallback to ::");
-
-			sockaddr_in6 anyAddr{};
-			anyAddr.sin6_family = AF_INET6;
-			anyAddr.sin6_port = htons(cfg.udp_port);
-			if (!ParseIpv6("::", &anyAddr.sin6_addr)) {
-				Log(LogLevel::Error, "Internal parse failure for ::");
-				break;
-			}
-
-			if (bind(sock, reinterpret_cast<const sockaddr*>(&anyAddr),
-					sizeof(anyAddr)) != 0) {
-				Log(LogLevel::Error,
-					"bind fallback to :: failed. err="
-					+ std::to_string(GetSocketError()));
-				break;
-			}
-
-			Log(LogLevel::Info, "Socket bound to :: successfully.");
-		} else {
-			Log(LogLevel::Info,
-				"Socket bound to local_ipv6=" + cfg.local_ipv6);
-		}
-
-		sockaddr_in6 peerAddr{};
-		peerAddr.sin6_family = AF_INET6;
-		peerAddr.sin6_port = htons(cfg.udp_port);
-		if (!ParseIpv6(cfg.peer_ipv6, &peerAddr.sin6_addr)) {
-			Log(LogLevel::Error, "Invalid peer_ipv6: " + cfg.peer_ipv6);
-			break;
-		}
+		Log(LogLevel::Info,
+			"UDP socket bound to " + AddressFamilyName(peer.family)
+			+ " local=" + boundAddr + ", peer=" + peerAddr);
 
 		Log(LogLevel::Info, "Data plane is up. Press Ctrl+C to stop.");
 
-		// TUN → network thread
+		// TUN -> network thread
 		std::thread tunToNet([&]() {
 			std::vector<uint8_t> buf(kMaxPacketSize);
 			while (g_running.load()) {
@@ -167,8 +122,8 @@ int main(int argc, char** argv) {
 						reinterpret_cast<const char*>(buf.data()),
 						static_cast<int>(pktLen),
 						0,
-						reinterpret_cast<const sockaddr*>(&peerAddr),
-						sizeof(peerAddr));
+						reinterpret_cast<const sockaddr*>(&peer.addr),
+						peer.addr_len);
 					if (sent < 0) {
 						Log(LogLevel::Error,
 							"sendto failed. err="
@@ -177,7 +132,7 @@ int main(int argc, char** argv) {
 						Log(LogLevel::Debug,
 							"TX IPv4 ["
 							+ Ipv4ProtocolToString(buf.data(), pktLen)
-							+ "] packet from TUN to IPv6 socket, bytes="
+							+ "] packet from TUN to UDP socket, bytes="
 							+ std::to_string(sent));
 					}
 				} else {
@@ -191,16 +146,12 @@ int main(int argc, char** argv) {
 			}
 		});
 
-		// network → TUN thread
+		// network -> TUN thread
 		std::thread netToTun([&]() {
 			std::vector<uint8_t> buf(kMaxPacketSize);
 			while (g_running.load()) {
-				sockaddr_in6 src{};
-#ifdef _WIN32
-				int srcLen = sizeof(src);
-#else
-				socklen_t srcLen = sizeof(src);
-#endif
+				sockaddr_storage src{};
+				socket_len_t srcLen = static_cast<socket_len_t>(sizeof(src));
 				const int recvLen = recvfrom(
 					sock,
 					reinterpret_cast<char*>(buf.data()),
@@ -227,9 +178,9 @@ int main(int argc, char** argv) {
 						"RX non-IPv4 ["
 						+ NonIpv4PacketType(buf.data(),
 							static_cast<size_t>(recvLen))
-						+ "] frame over IPv6 socket, drop bytes="
+						+ "] frame over UDP socket, drop bytes="
 						+ std::to_string(recvLen));
-					LogHexdumpDebug("IPv6 socket drop packet", buf.data(),
+					LogHexdumpDebug("UDP socket drop packet", buf.data(),
 						static_cast<size_t>(recvLen));
 					continue;
 				}
@@ -243,7 +194,7 @@ int main(int argc, char** argv) {
 					"RX IPv4 ["
 					+ Ipv4ProtocolToString(buf.data(),
 						static_cast<size_t>(recvLen))
-					+ "] packet from IPv6 socket to TUN, bytes="
+					+ "] packet from UDP socket to TUN, bytes="
 					+ std::to_string(recvLen));
 			}
 		});

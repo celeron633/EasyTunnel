@@ -60,9 +60,11 @@ private:
 	// Local IPv6 addresses
 	std::vector<Ipv6AddrInfo> localAddresses_;
 	int selectedLocalIdx_ = 0;
+	char localAddrInput_[256] = {};
+	bool manualLocalAddr_ = false;
 
-	// Peer IPv6 input
-	char peerIpv6Input_[256] = {};
+	// Peer IP input
+	char peerAddrInput_[256] = {};
 	int selectedPeerHistoryIdx_ = -1;
 
 	// Status

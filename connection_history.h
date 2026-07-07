@@ -4,7 +4,7 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// ConnectionHistory: manages persistent history of peer IPv6 addresses
+// ConnectionHistory: manages persistent history of peer addresses
 // stored in a .ini file for quick re-selection.
 // ---------------------------------------------------------------------------
 

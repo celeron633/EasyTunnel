@@ -6,8 +6,8 @@
 #include "log.h"
 
 struct Config {
-    std::string local_ipv6;
-    std::string peer_ipv6;
+    std::string local_addr;
+    std::string peer_addr;
     uint16_t udp_port = 44556;
     std::string adapter_name = "6Tunnel";
     std::string tunnel_type = "6Tunnel";

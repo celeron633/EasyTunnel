@@ -81,7 +81,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 
 	Log(LogLevel::Info, "6Tunnel engine starting...");
 	Log(LogLevel::Info,
-		"Local IPv6: " + cfg.local_ipv6 + ", Peer IPv6: " + cfg.peer_ipv6
+		"Local address: " + (cfg.local_addr.empty() ? "auto" : cfg.local_addr)
+		+ ", peer address: " + cfg.peer_addr
 		+ ", UDP port: " + std::to_string(cfg.udp_port));
 
 	socket_t sock = kInvalidSocket;
@@ -93,54 +94,18 @@ void TunnelEngine::WorkerThread(Config cfg) {
 			break;
 		}
 
-		sock = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-		if (sock == kInvalidSocket) {
-			SetState(TunnelState::Error,
-				"socket(AF_INET6, UDP) failed. err=" + std::to_string(GetSocketError()));
+		UdpEndpoint peer{};
+		std::string boundAddr;
+		std::string peerAddr;
+		std::string socketError;
+		if (!OpenUdpSocket(cfg, kSocketRecvTimeoutMs, &sock, &peer,
+				&boundAddr, &peerAddr, &socketError)) {
+			SetState(TunnelState::Error, socketError);
 			break;
 		}
-
-		int v6only = 1;
-		setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY,
-			reinterpret_cast<char*>(&v6only), sizeof(v6only));
-		SetSocketRecvTimeoutMs(sock, kSocketRecvTimeoutMs);
-
-		sockaddr_in6 localAddr{};
-		localAddr.sin6_family = AF_INET6;
-		localAddr.sin6_port = htons(cfg.udp_port);
-		if (!ParseIpv6(cfg.local_ipv6, &localAddr.sin6_addr)) {
-			SetState(TunnelState::Error, "Invalid local_ipv6: " + cfg.local_ipv6);
-			break;
-		}
-
-		if (bind(sock, reinterpret_cast<const sockaddr*>(&localAddr),
-				sizeof(localAddr)) != 0) {
-			Log(LogLevel::Warn,
-				"bind to configured local_ipv6 failed, fallback to ::");
-
-			sockaddr_in6 anyAddr{};
-			anyAddr.sin6_family = AF_INET6;
-			anyAddr.sin6_port = htons(cfg.udp_port);
-			if (!ParseIpv6("::", &anyAddr.sin6_addr)) {
-				SetState(TunnelState::Error, "Internal parse failure for ::");
-				break;
-			}
-
-			if (bind(sock, reinterpret_cast<const sockaddr*>(&anyAddr),
-					sizeof(anyAddr)) != 0) {
-				SetState(TunnelState::Error,
-					"bind fallback to :: failed. err=" + std::to_string(GetSocketError()));
-				break;
-			}
-		}
-
-		sockaddr_in6 peerAddr{};
-		peerAddr.sin6_family = AF_INET6;
-		peerAddr.sin6_port = htons(cfg.udp_port);
-		if (!ParseIpv6(cfg.peer_ipv6, &peerAddr.sin6_addr)) {
-			SetState(TunnelState::Error, "Invalid peer_ipv6: " + cfg.peer_ipv6);
-			break;
-		}
+		Log(LogLevel::Info,
+			"UDP socket bound to " + AddressFamilyName(peer.family)
+			+ " local=" + boundAddr + ", peer=" + peerAddr);
 
 		SetState(TunnelState::Connected, "Data plane is up");
 		Log(LogLevel::Info, "Data plane is up.");
@@ -165,8 +130,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 						reinterpret_cast<const char*>(buf.data()),
 						static_cast<int>(pktLen),
 						0,
-						reinterpret_cast<const sockaddr*>(&peerAddr),
-						sizeof(peerAddr));
+						reinterpret_cast<const sockaddr*>(&peer.addr),
+						peer.addr_len);
 					if (sent < 0) {
 						Log(LogLevel::Error,
 							"sendto failed. err=" + std::to_string(GetSocketError()));
@@ -189,12 +154,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		std::thread netToTun([&]() {
 			std::vector<uint8_t> buf(kMaxPacketSize);
 			while (running_.load()) {
-				sockaddr_in6 src{};
-#ifdef _WIN32
-				int srcLen = sizeof(src);
-#else
-				socklen_t srcLen = sizeof(src);
-#endif
+				sockaddr_storage src{};
+				socket_len_t srcLen = static_cast<socket_len_t>(sizeof(src));
 				const int recvLen = recvfrom(
 					sock,
 					reinterpret_cast<char*>(buf.data()),

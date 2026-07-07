@@ -94,11 +94,14 @@ bool LoadConfig(const std::string& file, Config* out) {
         return it->second;
     };
 
-    out->local_ipv6 = get("local_ipv6");
-    if (out->local_ipv6.empty()) {
-        out->local_ipv6 = "::";
+    out->local_addr = get("local_addr");
+    if (out->local_addr.empty()) {
+        out->local_addr = get("local_ipv6");
     }
-    out->peer_ipv6 = get("peer_ipv6");
+    out->peer_addr = get("peer_addr");
+    if (out->peer_addr.empty()) {
+        out->peer_addr = get("peer_ipv6");
+    }
     if (!get("udp_port").empty()) {
         if (!ParseUInt16(get("udp_port"), &out->udp_port) || out->udp_port == 0) {
             Log(LogLevel::Error, "Invalid udp_port: " + get("udp_port") + ", must be 1..65535");
@@ -134,8 +137,8 @@ bool LoadConfig(const std::string& file, Config* out) {
         }
     }
 
-    if (out->peer_ipv6.empty() || out->local_tun_ipv4.empty()) {
-        Log(LogLevel::Error, "Missing required config keys: peer_ipv6 / local_tun_ipv4");
+    if (out->peer_addr.empty() || out->local_tun_ipv4.empty()) {
+        Log(LogLevel::Error, "Missing required config keys: peer_addr (or peer_ipv6) / local_tun_ipv4");
         return false;
     }
     if (out->tun_prefix > 32) {
@@ -147,7 +150,7 @@ bool LoadConfig(const std::string& file, Config* out) {
         return false;
     }
     if (out->tun_mtu > 1452) {
-        Log(LogLevel::Warn, "tun_mtu is greater than 1452; may cause IPv6/UDP outer fragmentation on 1500-byte paths");
+        Log(LogLevel::Warn, "tun_mtu is greater than 1452; may cause UDP outer fragmentation on 1500-byte IPv6 paths");
     }
     return true;
 }

@@ -1,7 +1,7 @@
 #include "gui_app.h"
 
-#include <algorithm>
-#include <cstring>
+#include <cfloat>
+#include <cstdio>
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -16,6 +16,52 @@
 static void GlfwErrorCallback(int error, const char* description) {
 	Log(LogLevel::Error, "GLFW Error " + std::to_string(error) + ": " + description);
 }
+
+namespace {
+
+constexpr float kFormLabelWidth = 155.0f;
+constexpr float kHistoryComboWidth = 96.0f;
+
+bool BeginForm(const char* id) {
+	if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) {
+		return false;
+	}
+	ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, kFormLabelWidth);
+	ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
+	return true;
+}
+
+void EndForm() {
+	ImGui::EndTable();
+}
+
+void FormField(const char* label) {
+	ImGui::TableNextRow();
+	ImGui::TableSetColumnIndex(0);
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(label);
+	ImGui::TableSetColumnIndex(1);
+	ImGui::SetNextItemWidth(-FLT_MIN);
+}
+
+void FormMessage(const ImVec4& color, const char* text) {
+	ImGui::TableNextRow();
+	ImGui::TableSetColumnIndex(1);
+	ImGui::TextColored(color, "%s", text);
+}
+
+float ButtonWidth(const char* label) {
+	const ImGuiStyle& style = ImGui::GetStyle();
+	return ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
+}
+
+float FieldWidthWithTrailing(float trailingWidth) {
+	const float spacing = ImGui::GetStyle().ItemSpacing.x;
+	const float width = ImGui::GetContentRegionAvail().x - trailingWidth - spacing;
+	return width > 120.0f ? width : 120.0f;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // GuiApp implementation
@@ -63,14 +109,16 @@ bool GuiApp::Init() {
 
 	// Populate peer input from history
 	if (!history_.GetPeers().empty()) {
-		std::strncpy(peerIpv6Input_, history_.GetPeers()[0].c_str(),
-			sizeof(peerIpv6Input_) - 1);
+		std::snprintf(peerAddrInput_, sizeof(peerAddrInput_), "%s",
+			history_.GetPeers()[0].c_str());
 		selectedPeerHistoryIdx_ = 0;
 	}
 
 	// Set local address from history
 	RefreshLocalAddresses();
 	if (!history_.GetLastLocalIpv6().empty()) {
+		std::snprintf(localAddrInput_, sizeof(localAddrInput_), "%s",
+			history_.GetLastLocalIpv6().c_str());
 		for (size_t i = 0; i < localAddresses_.size(); ++i) {
 			if (localAddresses_[i].address == history_.GetLastLocalIpv6()) {
 				selectedLocalIdx_ = static_cast<int>(i);
@@ -155,66 +203,86 @@ void GuiApp::RenderFrame() {
 
 void GuiApp::RenderConnectionTab() {
 	ImGui::Spacing();
-	ImGui::Text("Local IPv6 Address");
-	ImGui::Separator();
 
-	// Local IPv6 dropdown
-	if (!localAddresses_.empty()) {
-		// Build combo preview
-		std::string preview = localAddresses_[selectedLocalIdx_].address +
-			" (" + localAddresses_[selectedLocalIdx_].interface_name + ")";
+	if (BeginForm("##ConnectionForm")) {
+		FormField("Manual Local Address");
+		ImGui::Checkbox("##ManualLocalAddress", &manualLocalAddr_);
 
-		if (ImGui::BeginCombo("##LocalIPv6", preview.c_str())) {
-			for (int i = 0; i < static_cast<int>(localAddresses_.size()); ++i) {
-				std::string label = localAddresses_[i].address +
-					" (" + localAddresses_[i].interface_name + ")";
-				bool selected = (selectedLocalIdx_ == i);
-				if (ImGui::Selectable(label.c_str(), selected)) {
-					selectedLocalIdx_ = i;
+		FormField("Local Bind Address");
+		if (manualLocalAddr_) {
+			ImGui::InputText("##LocalAddressManual", localAddrInput_,
+				sizeof(localAddrInput_));
+		} else {
+			const float refreshWidth = ButtonWidth("Refresh");
+			ImGui::SetNextItemWidth(FieldWidthWithTrailing(refreshWidth));
+			if (!localAddresses_.empty()) {
+				std::string preview = localAddresses_[selectedLocalIdx_].address +
+					" (" + localAddresses_[selectedLocalIdx_].interface_name + ")";
+
+				if (ImGui::BeginCombo("##LocalIPv6", preview.c_str())) {
+					for (int i = 0; i < static_cast<int>(localAddresses_.size()); ++i) {
+						std::string label = localAddresses_[i].address +
+							" (" + localAddresses_[i].interface_name + ")";
+						bool selected = (selectedLocalIdx_ == i);
+						if (ImGui::Selectable(label.c_str(), selected)) {
+							selectedLocalIdx_ = i;
+						}
+						if (selected) {
+							ImGui::SetItemDefaultFocus();
+						}
+					}
+					ImGui::EndCombo();
 				}
-				if (selected) {
-					ImGui::SetItemDefaultFocus();
-				}
+			} else {
+				char emptyAddress[1] = {};
+				ImGui::BeginDisabled();
+				ImGui::InputText("##LocalIPv6Empty", emptyAddress,
+					sizeof(emptyAddress), ImGuiInputTextFlags_ReadOnly);
+				ImGui::EndDisabled();
 			}
-			ImGui::EndCombo();
-		}
-	}
 
-	ImGui::SameLine();
-	if (ImGui::Button("Refresh")) {
-		RefreshLocalAddresses();
-	}
-
-	ImGui::Spacing();
-	ImGui::Spacing();
-	ImGui::Text("Peer IPv6 Address");
-	ImGui::Separator();
-
-	// Peer IPv6 input
-	ImGui::InputText("##PeerIPv6", peerIpv6Input_, sizeof(peerIpv6Input_));
-
-	// History dropdown
-	const auto& peers = history_.GetPeers();
-	if (!peers.empty()) {
-		ImGui::SameLine();
-		if (ImGui::BeginCombo("##PeerHistory", "History", ImGuiComboFlags_NoPreview)) {
-			for (int i = 0; i < static_cast<int>(peers.size()); ++i) {
-				bool selected = (selectedPeerHistoryIdx_ == i);
-				if (ImGui::Selectable(peers[i].c_str(), selected)) {
-					selectedPeerHistoryIdx_ = i;
-					std::strncpy(peerIpv6Input_, peers[i].c_str(),
-						sizeof(peerIpv6Input_) - 1);
-					peerIpv6Input_[sizeof(peerIpv6Input_) - 1] = '\0';
-				}
+			ImGui::SameLine();
+			if (ImGui::Button("Refresh")) {
+				RefreshLocalAddresses();
 			}
-			ImGui::EndCombo();
 		}
+
+		FormField("Peer Address");
+		const auto& peers = history_.GetPeers();
+		if (!peers.empty()) {
+			ImGui::SetNextItemWidth(FieldWidthWithTrailing(kHistoryComboWidth));
+		}
+		ImGui::InputText("##PeerAddress", peerAddrInput_, sizeof(peerAddrInput_));
+
+		if (!peers.empty()) {
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(kHistoryComboWidth);
+			if (ImGui::BeginCombo("##PeerHistory", "History", ImGuiComboFlags_NoPreview)) {
+				for (int i = 0; i < static_cast<int>(peers.size()); ++i) {
+					bool selected = (selectedPeerHistoryIdx_ == i);
+					if (ImGui::Selectable(peers[i].c_str(), selected)) {
+						selectedPeerHistoryIdx_ = i;
+						std::snprintf(peerAddrInput_, sizeof(peerAddrInput_),
+							"%s", peers[i].c_str());
+					}
+				}
+				ImGui::EndCombo();
+			}
+		}
+
+		EndForm();
 	}
 
 	// Validation hint
-	std::string peerStr(peerIpv6Input_);
-	if (!peerStr.empty() && !ValidateIpv6Address(peerStr)) {
-		ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Invalid IPv6 address format");
+	std::string localStr(localAddrInput_);
+	if (manualLocalAddr_ && !localStr.empty() && !ValidateIpAddress(localStr)) {
+		ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
+			"Invalid local bind address format");
+	}
+
+	std::string peerStr(peerAddrInput_);
+	if (!peerStr.empty() && !ValidateIpAddress(peerStr)) {
+		ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Invalid IP address format");
 	}
 
 	ImGui::Spacing();
@@ -280,16 +348,22 @@ void GuiApp::RenderSettingsTab() {
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	ImGui::InputInt("UDP Port", &udpPort_);
-	if (udpPort_ < 1) udpPort_ = 1;
-	if (udpPort_ > 65535) udpPort_ = 65535;
+	if (BeginForm("##NetworkSettingsForm")) {
+		FormField("UDP Port");
+		ImGui::InputInt("##UdpPort", &udpPort_);
+		if (udpPort_ < 1) udpPort_ = 1;
+		if (udpPort_ > 65535) udpPort_ = 65535;
 
-	ImGui::InputInt("TUN MTU", &tunMtu_);
-	if (tunMtu_ < 576) tunMtu_ = 576;
-	if (tunMtu_ > 9000) tunMtu_ = 9000;
-	if (tunMtu_ > 1452) {
-		ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f),
-			"Warning: MTU > 1452 may cause IPv6/UDP fragmentation");
+		FormField("TUN MTU");
+		ImGui::InputInt("##TunMtu", &tunMtu_);
+		if (tunMtu_ < 576) tunMtu_ = 576;
+		if (tunMtu_ > 9000) tunMtu_ = 9000;
+		if (tunMtu_ > 1452) {
+			FormMessage(ImVec4(1.0f, 0.8f, 0.0f, 1.0f),
+				"Warning: MTU > 1452 may cause UDP fragmentation");
+		}
+
+		EndForm();
 	}
 
 	ImGui::Spacing();
@@ -300,13 +374,24 @@ void GuiApp::RenderSettingsTab() {
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	ImGui::InputText("Adapter Name", adapterName_, sizeof(adapterName_));
-	ImGui::InputText("Tunnel Type", tunnelType_, sizeof(tunnelType_));
-	ImGui::InputText("Local TUN IPv4", localTunIpv4_, sizeof(localTunIpv4_));
+	if (BeginForm("##TunSettingsForm")) {
+		FormField("Adapter Name");
+		ImGui::InputText("##AdapterName", adapterName_, sizeof(adapterName_));
 
-	ImGui::SliderInt("TUN Prefix (CIDR)", &tunPrefix_, 0, 32);
+		FormField("Tunnel Type");
+		ImGui::InputText("##TunnelType", tunnelType_, sizeof(tunnelType_));
 
-	ImGui::Checkbox("Auto Configure IPv4", &autoConfigIpv4_);
+		FormField("Local TUN IPv4");
+		ImGui::InputText("##LocalTunIpv4", localTunIpv4_, sizeof(localTunIpv4_));
+
+		FormField("TUN Prefix (CIDR)");
+		ImGui::SliderInt("##TunPrefix", &tunPrefix_, 0, 32);
+
+		FormField("Auto Configure IPv4");
+		ImGui::Checkbox("##AutoConfigureIpv4", &autoConfigIpv4_);
+
+		EndForm();
+	}
 
 	ImGui::Spacing();
 	ImGui::Spacing();
@@ -316,7 +401,11 @@ void GuiApp::RenderSettingsTab() {
 	ImGui::Separator();
 	ImGui::Spacing();
 
-	ImGui::Combo("Log Level", &logLevelIdx_, GuiApp::kLogLevels, GuiApp::kLogLevelCount);
+	if (BeginForm("##LoggingForm")) {
+		FormField("Log Level");
+		ImGui::Combo("##LogLevel", &logLevelIdx_, GuiApp::kLogLevels, GuiApp::kLogLevelCount);
+		EndForm();
+	}
 }
 
 void GuiApp::RenderStatusBar() {
@@ -346,25 +435,45 @@ void GuiApp::RenderStatusBar() {
 }
 
 void GuiApp::Connect() {
-	std::string peerStr(peerIpv6Input_);
+	std::string peerStr(peerAddrInput_);
 	if (peerStr.empty()) {
 		std::lock_guard<std::mutex> lock(statusMutex_);
-		statusMessage_ = "Error: Peer IPv6 address is required";
+		statusMessage_ = "Error: Peer address is required";
 		currentState_ = TunnelState::Error;
 		return;
 	}
 
-	if (!ValidateIpv6Address(peerStr)) {
+	UdpEndpoint peerEndpoint{};
+	if (!ParseUdpEndpoint(peerStr, static_cast<uint16_t>(udpPort_), &peerEndpoint)) {
 		std::lock_guard<std::mutex> lock(statusMutex_);
-		statusMessage_ = "Error: Invalid peer IPv6 address";
+		statusMessage_ = "Error: Invalid peer address";
 		currentState_ = TunnelState::Error;
 		return;
+	}
+
+	UdpEndpoint localEndpoint{};
+	std::string localStr(localAddrInput_);
+	if (manualLocalAddr_) {
+		if (localStr.empty()) {
+			std::lock_guard<std::mutex> lock(statusMutex_);
+			statusMessage_ = "Error: Local bind address is required";
+			currentState_ = TunnelState::Error;
+			return;
+		}
+		if (!ParseUdpEndpoint(localStr, static_cast<uint16_t>(udpPort_), &localEndpoint)) {
+			std::lock_guard<std::mutex> lock(statusMutex_);
+			statusMessage_ = "Error: Invalid local bind address";
+			currentState_ = TunnelState::Error;
+			return;
+		}
 	}
 
 	// Build config from UI settings
 	Config cfg;
-	cfg.local_ipv6 = localAddresses_.empty() ? "::" : localAddresses_[selectedLocalIdx_].address;
-	cfg.peer_ipv6 = peerStr;
+	cfg.local_addr = manualLocalAddr_ ? localStr : ((peerEndpoint.family == AF_INET)
+		? "0.0.0.0"
+		: (localAddresses_.empty() ? "::" : localAddresses_[selectedLocalIdx_].address));
+	cfg.peer_addr = peerStr;
 	cfg.udp_port = static_cast<uint16_t>(udpPort_);
 	cfg.adapter_name = adapterName_;
 	cfg.tunnel_type = tunnelType_;
@@ -388,7 +497,10 @@ void GuiApp::Connect() {
 
 	// Save to history
 	history_.AddPeer(peerStr);
-	history_.SetLastLocalIpv6(cfg.local_ipv6);
+	if (peerEndpoint.family == AF_INET6
+		&& (!manualLocalAddr_ || localEndpoint.family == AF_INET6)) {
+		history_.SetLastLocalIpv6(cfg.local_addr);
+	}
 	history_.Save();
 
 	// Start engine

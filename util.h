@@ -22,10 +22,18 @@
 #ifdef _WIN32
 using socket_t = SOCKET;
 constexpr socket_t kInvalidSocket = INVALID_SOCKET;
+using socket_len_t = int;
 #else
 using socket_t = int;
 constexpr socket_t kInvalidSocket = -1;
+using socket_len_t = socklen_t;
 #endif
+
+struct UdpEndpoint {
+    sockaddr_storage addr{};
+    socket_len_t addr_len = 0;
+    int family = AF_UNSPEC;
+};
 
 // ---------------------------------------------------------------------------
 // Program control state (defined in util.cpp, shared with signal handlers)
@@ -44,6 +52,9 @@ void RegisterSignalHandlers();
 // Cross-platform socket helpers
 // ---------------------------------------------------------------------------
 void SetSocketRecvTimeoutMs(socket_t sock, int timeoutMs);
+bool OpenUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
+                   UdpEndpoint* peer, std::string* localAddr,
+                   std::string* peerAddr, std::string* error);
 void ShutdownSocket(socket_t sock);
 void CloseSocket(socket_t& sock);
 int GetSocketError();
@@ -57,7 +68,11 @@ std::string PrefixToMask(uint8_t prefix);
 bool RunCommand(const std::string& cmd);
 bool ConfigureTunIpv4(const Config& cfg);
 bool ConfigureTunMtu(const Config& cfg);
+bool ParseIpv4(const std::string& ip, in_addr* out);
 bool ParseIpv6(const std::string& ip, in6_addr* out);
+bool ParseUdpEndpoint(const std::string& ip, uint16_t port, UdpEndpoint* out);
+bool ValidateIpAddress(const std::string& ip);
+std::string AddressFamilyName(int family);
 std::string IpProtoToName(uint8_t proto);
 std::string NonIpv4PacketType(const uint8_t* packet, size_t len);
 std::string Ipv4ProtocolToString(const uint8_t* packet, size_t len);

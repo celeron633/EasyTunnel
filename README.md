@@ -1,9 +1,9 @@
 # 6Tunnel
 
-Windows/Linux 下基于 Wintun/tun 的 IPv4-over-IPv6 隧道。
+Windows/Linux 下基于 Wintun/tun 的 IPv4-over-UDP 隧道，外层 UDP 可走 IPv6 或 IPv4。
 
 - 本地从 TUN 读到 IPv4 报文
-- 直接封装为 UDP/IPv6 负载发送到对端
+- 直接封装为 UDP 负载发送到对端
 - 对端收到后写回本地 TUN
 - 不做加密，仅做隧道转发
 - 支持 Console 和 GUI (ImGui) 两种模式
@@ -19,13 +19,15 @@ Windows/Linux 下基于 Wintun/tun 的 IPv4-over-IPv6 隧道。
 
 复制 `conf/tunnel.conf.example` 为 `tunnel.conf`，按两端实际地址修改：
 
-- `local_ipv6`：本地绑定 IPv6（建议先用 `::` 监听全部本机 IPv6）
-- `peer_ipv6`：对端公网 IPv6
+- `local_addr`：本地绑定 IPv4/IPv6；留空时按对端地址族监听任意地址
+- `peer_addr`：对端公网 IPv4 或 IPv6
 - `udp_port`：两端一致
 - `local_tun_ipv4`：本地 TUN 口 IPv4
 - `tun_prefix`：掩码前缀
-- `tun_mtu`：TUN 口 IPv4 MTU（默认 `1452`，适用于 UDP/IPv6 外层开销 48 字节时的 1500 链路）
+- `tun_mtu`：TUN 口 IPv4 MTU（默认 `1452`，适用于 UDP/IPv6 外层开销 48 字节时的 1500 链路；走 IPv4 外层时可按路径 MTU 调整）
 - `log_level`：日志级别，支持 `Debug` / `Info` / `Warn` / `Error`（默认 `Info`）
+
+旧配置名 `local_ipv6` / `peer_ipv6` 仍兼容读取。
 
 建议两端分别配置：
 
@@ -78,7 +80,7 @@ cmake --build build-vs --config Release
 
 GUI 模式 (`6tunnel_gui`) 提供：
 
-1. **连接页面**：选择本地 IPv6 地址（自动枚举本机所有网卡 IPv6）、输入对方 IPv6（支持历史记录）、连接/断开按钮、收发包统计
+1. **连接页面**：选择本地 IPv6 地址（IPv6 外层使用）、输入对方 IPv4/IPv6（支持历史记录）、连接/断开按钮、收发包统计
 2. **设置页面**：网络设置（UDP端口、MTU）、TUN 适配器设置（适配器名、IPv4地址、掩码）、日志级别
 3. **状态栏**：实时显示连接状态和收发包数量
 
@@ -108,10 +110,10 @@ sudo ./build/6tunnel_gui
 
 ## 连通性建议
 
-- 放通 `udp_port` 的 IPv6 入站/出站防火墙规则
-- 确认两端都可直连对方公网 IPv6
+- 放通 `udp_port` 的 IPv4/IPv6 入站/出站防火墙规则
+- 确认两端都可通过配置的公网 IPv4 或 IPv6 直连
 - 启动后可互 ping 对端 TUN IPv4 地址
-- 若出现 `bind failed`：说明 `local_ipv6` 不是本机已分配地址，改为 `local_ipv6=::` 或填本机真实 IPv6
+- 若出现 `bind failed`：说明 `local_addr` 不是本机已分配地址，可留空、改为 `0.0.0.0` / `::`，或填本机真实地址
 
 ## 注意
 

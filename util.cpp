@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <cstdlib>
 #include <sstream>
 #include <thread>
@@ -247,6 +248,10 @@ bool ParseIpv6(const std::string& ip, in6_addr* out) {
     return InetPtonA(AF_INET6, ip.c_str(), out) == 1;
 }
 
+bool ParseIpv4(const std::string& ip, in_addr* out) {
+    return InetPtonA(AF_INET, ip.c_str(), out) == 1;
+}
+
 #else  // Linux / POSIX
 
 bool ConfigureTunIpv4(const Config& cfg) {
@@ -275,7 +280,166 @@ bool ParseIpv6(const std::string& ip, in6_addr* out) {
     return inet_pton(AF_INET6, ip.c_str(), out) == 1;
 }
 
+bool ParseIpv4(const std::string& ip, in_addr* out) {
+    return inet_pton(AF_INET, ip.c_str(), out) == 1;
+}
+
 #endif  // _WIN32
+
+namespace {
+
+std::string AnyAddressForFamily(int family) {
+    return family == AF_INET ? "0.0.0.0" : "::";
+}
+
+std::string ConfiguredLocalAddress(const Config& cfg, int family) {
+    if (cfg.local_addr.empty()) {
+        return AnyAddressForFamily(family);
+    }
+    if (family == AF_INET && cfg.local_addr == "::") {
+        return "0.0.0.0";
+    }
+    if (family == AF_INET6 && cfg.local_addr == "0.0.0.0") {
+        return "::";
+    }
+    return cfg.local_addr;
+}
+
+const sockaddr* SockAddr(const UdpEndpoint& endpoint) {
+    return reinterpret_cast<const sockaddr*>(&endpoint.addr);
+}
+
+}  // namespace
+
+std::string AddressFamilyName(int family) {
+    if (family == AF_INET) {
+        return "IPv4";
+    }
+    if (family == AF_INET6) {
+        return "IPv6";
+    }
+    return "unknown";
+}
+
+bool ParseUdpEndpoint(const std::string& ip, uint16_t port, UdpEndpoint* out) {
+    if (out == nullptr) {
+        return false;
+    }
+
+    sockaddr_in addr4{};
+    addr4.sin_family = AF_INET;
+    addr4.sin_port = htons(port);
+    if (ParseIpv4(ip, &addr4.sin_addr)) {
+        UdpEndpoint endpoint{};
+        endpoint.family = AF_INET;
+        endpoint.addr_len = static_cast<socket_len_t>(sizeof(addr4));
+        std::memcpy(&endpoint.addr, &addr4, sizeof(addr4));
+        *out = endpoint;
+        return true;
+    }
+
+    sockaddr_in6 addr6{};
+    addr6.sin6_family = AF_INET6;
+    addr6.sin6_port = htons(port);
+    if (ParseIpv6(ip, &addr6.sin6_addr)) {
+        UdpEndpoint endpoint{};
+        endpoint.family = AF_INET6;
+        endpoint.addr_len = static_cast<socket_len_t>(sizeof(addr6));
+        std::memcpy(&endpoint.addr, &addr6, sizeof(addr6));
+        *out = endpoint;
+        return true;
+    }
+
+    return false;
+}
+
+bool ValidateIpAddress(const std::string& ip) {
+    UdpEndpoint endpoint{};
+    return ParseUdpEndpoint(ip, 0, &endpoint);
+}
+
+bool OpenUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
+                   UdpEndpoint* peer, std::string* localAddr,
+                   std::string* peerAddr, std::string* error) {
+    if (sock == nullptr || peer == nullptr) {
+        if (error != nullptr) {
+            *error = "Internal error: null socket output";
+        }
+        return false;
+    }
+
+    UdpEndpoint peerEndpoint{};
+    if (!ParseUdpEndpoint(cfg.peer_addr, cfg.udp_port, &peerEndpoint)) {
+        if (error != nullptr) {
+            *error = "Invalid peer_addr: " + cfg.peer_addr;
+        }
+        return false;
+    }
+
+    std::string bindAddr = ConfiguredLocalAddress(cfg, peerEndpoint.family);
+    UdpEndpoint localEndpoint{};
+    if (!ParseUdpEndpoint(bindAddr, cfg.udp_port, &localEndpoint)
+        || localEndpoint.family != peerEndpoint.family) {
+        if (error != nullptr) {
+            *error = "local_addr and peer_addr must both be IPv4 or both be IPv6";
+        }
+        return false;
+    }
+
+    socket_t opened = socket(peerEndpoint.family, SOCK_DGRAM, IPPROTO_UDP);
+    if (opened == kInvalidSocket) {
+        if (error != nullptr) {
+            *error = "socket(" + AddressFamilyName(peerEndpoint.family)
+                + ", UDP) failed. err=" + std::to_string(GetSocketError());
+        }
+        return false;
+    }
+
+    if (peerEndpoint.family == AF_INET6) {
+        int v6only = 1;
+        setsockopt(opened, IPPROTO_IPV6, IPV6_V6ONLY,
+                   reinterpret_cast<const char*>(&v6only), sizeof(v6only));
+    }
+    SetSocketRecvTimeoutMs(opened, recvTimeoutMs);
+
+    if (bind(opened, SockAddr(localEndpoint), localEndpoint.addr_len) != 0) {
+        const int bindErr = GetSocketError();
+        const std::string anyAddr = AnyAddressForFamily(peerEndpoint.family);
+        if (bindAddr == anyAddr) {
+            if (error != nullptr) {
+                *error = "bind local_addr=" + bindAddr
+                    + " failed. err=" + std::to_string(bindErr);
+            }
+            CloseSocket(opened);
+            return false;
+        }
+
+        Log(LogLevel::Warn,
+            "bind local_addr=" + bindAddr + " failed. err="
+            + std::to_string(bindErr) + ", fallback to " + anyAddr);
+
+        bindAddr = anyAddr;
+        if (!ParseUdpEndpoint(bindAddr, cfg.udp_port, &localEndpoint)
+            || bind(opened, SockAddr(localEndpoint), localEndpoint.addr_len) != 0) {
+            if (error != nullptr) {
+                *error = "bind fallback to " + anyAddr
+                    + " failed. err=" + std::to_string(GetSocketError());
+            }
+            CloseSocket(opened);
+            return false;
+        }
+    }
+
+    *sock = opened;
+    *peer = peerEndpoint;
+    if (localAddr != nullptr) {
+        *localAddr = bindAddr;
+    }
+    if (peerAddr != nullptr) {
+        *peerAddr = cfg.peer_addr;
+    }
+    return true;
+}
 
 std::string IpProtoToName(uint8_t proto) {
     switch (proto) {
