@@ -10,7 +10,7 @@
 
 class ConnectionHistory {
 public:
-	explicit ConnectionHistory(const std::string& filePath = "6Tunnel.ini");
+	explicit ConnectionHistory(const std::string& filePath = "EasyTunnel.ini");
 
 	// Load history from file
 	void Load();

@@ -30,7 +30,7 @@ spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
 
 std::shared_ptr<spdlog::logger> GetLogger() {
     std::call_once(g_loggerInitOnce, []() {
-        g_logger = spdlog::stdout_color_mt("6tunnel");
+        g_logger = spdlog::stdout_color_mt("EasyTunnel");
         g_logger->set_pattern("%Y-%m-%d %H:%M:%S.%e %v");
         g_logger->set_level(ToSpdlogLevel(g_minLogLevel));
         g_logger->flush_on(spdlog::level::debug);

@@ -1,4 +1,4 @@
-# 6Tunnel
+# EasyTunnel
 
 Windows/Linux 下基于 Wintun/tun 的 IPv4-over-UDP 隧道，外层 UDP 可走 IPv6 或 IPv4。
 
@@ -46,8 +46,8 @@ cmake --build build
 ```
 
 生成两个可执行文件：
-- `build/6tunnel` — Console 模式
-- `build/6tunnel_gui` — GUI 模式 (ImGui)
+- `build/EasyTunnel` — Console 模式
+- `build/EasyTunnel_gui` — GUI 模式 (ImGui)
 
 若只需 Console 模式，可禁用 GUI：`cmake -S . -B build -DBUILD_GUI=OFF`
 
@@ -78,13 +78,13 @@ cmake --build build-vs --config Release
 
 ## GUI 模式
 
-GUI 模式 (`6tunnel_gui`) 提供：
+GUI 模式 (`EasyTunnel_gui`) 提供：
 
 1. **连接页面**：选择本地 IPv6 地址（IPv6 外层使用）、输入对方 IPv4/IPv6（支持历史记录）、连接/断开按钮、收发包统计
 2. **设置页面**：网络设置（UDP端口、MTU）、TUN 适配器设置（适配器名、IPv4地址、掩码）、日志级别
 3. **状态栏**：实时显示连接状态和收发包数量
 
-连接历史自动保存到 `6Tunnel.ini`，下次启动可快速选择。
+连接历史自动保存到 `EasyTunnel.ini`，下次启动可快速选择。
 
 ## 运行
 
@@ -92,20 +92,20 @@ GUI 模式 (`6tunnel_gui`) 提供：
 
 ```bash
 # Linux
-sudo ./build/6tunnel tunnel.conf
+sudo ./build/EasyTunnel tunnel.conf
 
 # Windows (管理员权限)
-./build/6tunnel.exe tunnel.conf
+./build/EasyTunnel.exe tunnel.conf
 ```
 
 ### GUI 模式
 
 ```bash
 # Linux
-sudo ./build/6tunnel_gui
+sudo ./build/EasyTunnel_gui
 
 # Windows (管理员权限)
-./build/6tunnel_gui.exe
+./build/EasyTunnel_gui.exe
 ```
 
 ## 连通性建议

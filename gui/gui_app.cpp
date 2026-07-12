@@ -67,7 +67,7 @@ float FieldWidthWithTrailing(float trailingWidth) {
 // GuiApp implementation
 // ---------------------------------------------------------------------------
 
-GuiApp::GuiApp() : history_("6Tunnel.ini") {}
+GuiApp::GuiApp() : history_("EasyTunnel.ini") {}
 
 GuiApp::~GuiApp() {
 	Shutdown();
@@ -83,7 +83,7 @@ bool GuiApp::Init() {
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
-	window_ = glfwCreateWindow(800, 600, "6Tunnel", nullptr, nullptr);
+	window_ = glfwCreateWindow(800, 600, "EasyTunnel", nullptr, nullptr);
 	if (!window_) {
 		glfwTerminate();
 		return false;

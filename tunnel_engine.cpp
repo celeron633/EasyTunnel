@@ -79,7 +79,7 @@ void TunnelEngine::SetState(TunnelState state, const std::string& msg) {
 void TunnelEngine::WorkerThread(Config cfg) {
 	SetLogLevel(cfg.log_level);
 
-	Log(LogLevel::Info, "6Tunnel engine starting...");
+	Log(LogLevel::Info, "EasyTunnel engine starting...");
 	Log(LogLevel::Info,
 		"Local address: " + (cfg.local_addr.empty() ? "auto" : cfg.local_addr)
 		+ ", peer address: " + cfg.peer_addr
@@ -209,5 +209,5 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		SetState(TunnelState::Disconnected, "Tunnel stopped");
 	}
 
-	Log(LogLevel::Info, "6Tunnel engine stopped.");
+	Log(LogLevel::Info, "EasyTunnel engine stopped.");
 }

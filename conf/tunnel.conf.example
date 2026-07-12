@@ -1,4 +1,4 @@
-# 6Tunnel config (key=value)
+# EasyTunnel config (key=value)
 # Required:
 #   local_addr     : optional local bind IP; leave empty to bind any address
 #   peer_addr      : peer public IPv4 or IPv6
@@ -10,9 +10,9 @@ peer_addr=2001:db8:1::20
 # peer_addr=198.51.100.20
 udp_port=44556
 
-adapter_name=6Tunnel
+adapter_name=EasyTunnel
 # Optional tunnel type label for Wintun
-# tunnel_type=6Tunnel
+# tunnel_type=EasyTunnel
 
 local_tun_ipv4=10.66.0.1
 tun_prefix=24

@@ -1,4 +1,4 @@
-// 6Tunnel GUI entry point
+// EasyTunnel GUI entry point
 
 #ifdef _WIN32
 #ifndef UNICODE

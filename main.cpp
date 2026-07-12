@@ -1,4 +1,4 @@
-// 6Tunnel: IPv4 tunnel over UDP.
+// EasyTunnel: IPv4 tunnel over UDP.
 // Supports Windows (Wintun) and Linux (/dev/net/tun).
 
 #ifdef _WIN32
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
 	SetLogLevel(cfg.log_level);
 	RegisterSignalHandlers();
 
-	Log(LogLevel::Info, "6Tunnel starting...");
+	Log(LogLevel::Info, "EasyTunnel starting...");
 	Log(LogLevel::Info, "Config file: " + configPath);
 	Log(LogLevel::Info,
 		"Log level: " + std::string(LevelToString(cfg.log_level)));
@@ -223,6 +223,6 @@ int main(int argc, char** argv) {
 #endif
 
 	g_shutdownCompleted.store(true);
-	Log(LogLevel::Info, "6Tunnel exited.");
+	Log(LogLevel::Info, "EasyTunnel exited.");
 	return 0;
 }

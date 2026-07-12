@@ -9,8 +9,8 @@ struct Config {
     std::string local_addr;
     std::string peer_addr;
     uint16_t udp_port = 44556;
-    std::string adapter_name = "6Tunnel";
-    std::string tunnel_type = "6Tunnel";
+    std::string adapter_name = "EasyTunnel";
+    std::string tunnel_type = "EasyTunnel";
     std::string local_tun_ipv4;
     uint8_t tun_prefix = 24;
     uint16_t tun_mtu = 1452;

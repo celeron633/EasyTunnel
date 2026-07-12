@@ -14,7 +14,7 @@
 struct GLFWwindow;
 
 // ---------------------------------------------------------------------------
-// GuiApp: ImGui-based GUI application for 6Tunnel
+// GuiApp: ImGui-based GUI application for EasyTunnel
 // ---------------------------------------------------------------------------
 class GuiApp {
 public:
@@ -74,8 +74,8 @@ private:
 
 	// Settings (mirroring Config fields)
 	int udpPort_ = 44556;
-	char adapterName_[128] = "6Tunnel";
-	char tunnelType_[128] = "6Tunnel";
+	char adapterName_[128] = "EasyTunnel";
+	char tunnelType_[128] = "EasyTunnel";
 	char localTunIpv4_[64] = "10.66.0.1";
 	int tunPrefix_ = 24;
 	int tunMtu_ = 1452;

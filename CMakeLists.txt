@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(6Tunnel LANGUAGES C CXX)
+project(EasyTunnel LANGUAGES C CXX)
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
@@ -53,22 +53,22 @@ endif()
 # ---------------------------------------------------------------------------
 # Console application (original)
 # ---------------------------------------------------------------------------
-add_executable(6tunnel main.cpp ${COMMON_SOURCES})
+add_executable(EasyTunnel main.cpp ${COMMON_SOURCES})
 
 if(MSVC)
-    target_compile_options(6tunnel PRIVATE /W4)
-    target_link_options(6tunnel PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+    target_compile_options(EasyTunnel PRIVATE /W4)
+    target_link_options(EasyTunnel PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
 else()
-    target_compile_options(6tunnel PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(EasyTunnel PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # ---------------------------------------------------------------------------
 # Platform-specific link libraries
 # ---------------------------------------------------------------------------
 if(WIN32)
-    target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi Threads::Threads)
+    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi Threads::Threads)
 else()
-    target_link_libraries(6tunnel PRIVATE spdlog::spdlog_header_only Threads::Threads)
+    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only Threads::Threads)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -135,13 +135,13 @@ if(WIN32)
         message(FATAL_ERROR "wintun.dll not found, checked ${WINTUN_DLL_PATH}")
     endif()
 
-    target_include_directories(6tunnel PRIVATE "${WINTUN_INCLUDE_DIR}")
+    target_include_directories(EasyTunnel PRIVATE "${WINTUN_INCLUDE_DIR}")
 
     if(EXISTS "${WINTUN_DLL_PATH}")
-        add_custom_command(TARGET 6tunnel POST_BUILD
+        add_custom_command(TARGET EasyTunnel POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${WINTUN_DLL_PATH}"
-                    "$<TARGET_FILE_DIR:6tunnel>/wintun.dll"
+                    "$<TARGET_FILE_DIR:EasyTunnel>/wintun.dll"
             COMMENT "Copy wintun.dll to output directory"
         )
     else()
@@ -150,10 +150,10 @@ if(WIN32)
 endif()  # WIN32
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
-    add_custom_command(TARGET 6tunnel POST_BUILD
+    add_custom_command(TARGET EasyTunnel POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
-                "$<TARGET_FILE_DIR:6tunnel>/tunnel.conf.example"
+                "$<TARGET_FILE_DIR:EasyTunnel>/tunnel.conf.example"
         COMMENT "Copy tunnel.conf.example to output directory"
     )
 endif()
@@ -216,45 +216,45 @@ if(BUILD_GUI)
         gui/gui_app.cpp
     )
 
-    add_executable(6tunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES})
+    add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES})
 
-    target_include_directories(6tunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
+    target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
 
     if(MSVC)
-        target_compile_options(6tunnel_gui PRIVATE /W4)
-        target_link_options(6tunnel_gui PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+        target_compile_options(EasyTunnel_gui PRIVATE /W4)
+        target_link_options(EasyTunnel_gui PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
         # Use WinMain entry point to hide console on Windows
-        target_link_options(6tunnel_gui PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
+        target_link_options(EasyTunnel_gui PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
     else()
-        target_compile_options(6tunnel_gui PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(EasyTunnel_gui PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
-    target_link_libraries(6tunnel_gui PRIVATE
+    target_link_libraries(EasyTunnel_gui PRIVATE
         spdlog::spdlog_header_only
         imgui_lib
         Threads::Threads
     )
 
     if(WIN32)
-        target_link_libraries(6tunnel_gui PRIVATE ws2_32 iphlpapi)
+        target_link_libraries(EasyTunnel_gui PRIVATE ws2_32 iphlpapi)
         if(DEFINED WINTUN_INCLUDE_DIR)
-            target_include_directories(6tunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
+            target_include_directories(EasyTunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
         endif()
         if(EXISTS "${WINTUN_DLL_PATH}")
-            add_custom_command(TARGET 6tunnel_gui POST_BUILD
+            add_custom_command(TARGET EasyTunnel_gui POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${WINTUN_DLL_PATH}"
-                        "$<TARGET_FILE_DIR:6tunnel_gui>/wintun.dll"
+                        "$<TARGET_FILE_DIR:EasyTunnel_gui>/wintun.dll"
                 COMMENT "Copy wintun.dll to GUI output directory"
             )
         endif()
     endif()
 
     if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
-        add_custom_command(TARGET 6tunnel_gui POST_BUILD
+        add_custom_command(TARGET EasyTunnel_gui POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
-                    "$<TARGET_FILE_DIR:6tunnel_gui>/tunnel.conf.example"
+                    "$<TARGET_FILE_DIR:EasyTunnel_gui>/tunnel.conf.example"
             COMMENT "Copy tunnel.conf.example to GUI output directory"
         )
     endif()

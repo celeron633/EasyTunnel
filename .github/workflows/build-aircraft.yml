@@ -1,4 +1,4 @@
-name: Build 6Tunnel (MSVC)
+name: Build EasyTunnel (MSVC)
 
 on:
   workflow_dispatch:
@@ -26,45 +26,45 @@ jobs:
 
       - name: Build Release (console + GUI)
         run: |
-          cmake --build build --config Release --target 6tunnel
-          cmake --build build --config Release --target 6tunnel_gui
+          cmake --build build --config Release --target EasyTunnel
+          cmake --build build --config Release --target EasyTunnel_gui
 
-      - name: Package 6tunnel release
+      - name: Package EasyTunnel release
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          New-Item -ItemType Directory -Force -Path dist/6tunnel | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/EasyTunnel | Out-Null
 
-          Copy-Item "build/Release/6tunnel.exe" "dist/6tunnel/6tunnel.exe" -Force
-          Copy-Item "build/Release/6tunnel_gui.exe" "dist/6tunnel/6tunnel_gui.exe" -Force
+          Copy-Item "build/Release/EasyTunnel.exe" "dist/EasyTunnel/EasyTunnel.exe" -Force
+          Copy-Item "build/Release/EasyTunnel_gui.exe" "dist/EasyTunnel/EasyTunnel_gui.exe" -Force
 
           if (Test-Path "build/Release/wintun.dll") {
-            Copy-Item "build/Release/wintun.dll" "dist/6tunnel/wintun.dll" -Force
+            Copy-Item "build/Release/wintun.dll" "dist/EasyTunnel/wintun.dll" -Force
           }
 
           if (Test-Path "conf/tunnel.conf.example") {
-            Copy-Item "conf/tunnel.conf.example" "dist/6tunnel/tunnel.conf.example" -Force
+            Copy-Item "conf/tunnel.conf.example" "dist/EasyTunnel/tunnel.conf.example" -Force
           }
 
           if (Test-Path "README.md") {
-            Copy-Item "README.md" "dist/6tunnel/README.md" -Force
+            Copy-Item "README.md" "dist/EasyTunnel/README.md" -Force
           }
 
-          if (Test-Path "dist/6tunnel.zip") {
-            Remove-Item "dist/6tunnel.zip" -Force
+          if (Test-Path "dist/EasyTunnel.zip") {
+            Remove-Item "dist/EasyTunnel.zip" -Force
           }
 
-          Compress-Archive -Path "dist/6tunnel/*" -DestinationPath "dist/6tunnel.zip"
+          Compress-Archive -Path "dist/EasyTunnel/*" -DestinationPath "dist/EasyTunnel.zip"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 6tunnel-release
-          path: dist/6tunnel.zip
+          name: EasyTunnel-release
+          path: dist/EasyTunnel.zip
 
       - name: Upload tag build to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/6tunnel.zip
+          files: dist/EasyTunnel.zip
