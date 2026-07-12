@@ -29,16 +29,19 @@ private:
     void RenderSettingsTab();
     void RenderLogTab();
     void RenderStatusBar();
-    void StartConnection(const std::string& targetPeerId);
+    bool StartConnection(const std::string& targetPeerId);
+    void ConnectSelectedClient();
     void Disconnect();
     void RefreshClients();
     void OnStateChanged(TunnelState state, const std::string& message);
+    void SetStatusMessage(const std::string& message);
     void OnLog(LogLevel level, const std::string& message);
     bool ValidateCommonFields(std::string* error) const;
     bool LoadGuiConfig();
     bool SaveGuiConfig();
     void RenderConfigSaveStatus();
     void UpdateLiveStats();
+    void ProcessAutoWait();
 
     GLFWwindow* window_ = nullptr;
     TunnelEngine engine_;
@@ -60,6 +63,7 @@ private:
     int peerTimeout_ = 45;
     int punchTimeout_ = 30;
     int logLevelIdx_ = 1;
+    bool autoWaitForPeer_ = false;
 
     std::mutex statusMutex_;
     std::string statusMessage_ = "Disconnected";
@@ -86,4 +90,10 @@ private:
     uint64_t observedRxPackets_ = 0;
     std::chrono::steady_clock::time_point lastTxActivity_{};
     std::chrono::steady_clock::time_point lastRxActivity_{};
+    std::atomic<bool> autoWaitEnabledRuntime_{false};
+    std::atomic<bool> autoWaitPending_{false};
+    std::atomic<bool> suppressAutoWait_{false};
+    std::atomic<bool> shuttingDown_{false};
+    std::atomic<bool> waitingForPeer_{false};
+    std::atomic<int64_t> autoWaitRetryAfterMs_{0};
 };

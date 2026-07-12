@@ -155,7 +155,7 @@ std::string FormatByteValue(double bytes, int unit) {
 }
 
 bool RenderByteValueButton(const char* id, double bytes, int unit, bool perSecond) {
-    const std::string label = FormatByteValue(bytes, unit) + "##" + id;
+    const std::string label = FormatByteValue(bytes, unit) + "###" + id;
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5.0f, 1.0f));
     const bool clicked = ImGui::Button(label.c_str());
     ImGui::PopStyleVar();
@@ -205,12 +205,15 @@ bool GuiApp::Init() {
     engine_.SetStateCallback([this](TunnelState state, const std::string& message) {
         OnStateChanged(state, message);
     });
+    autoWaitEnabledRuntime_.store(autoWaitForPeer_);
+    autoWaitPending_.store(autoWaitForPeer_);
     return true;
 }
 
 void GuiApp::Run() {
     while (!glfwWindowShouldClose(window_)) {
         glfwPollEvents();
+        ProcessAutoWait();
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -225,10 +228,15 @@ void GuiApp::Run() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window_);
     }
+    shuttingDown_.store(true);
+    autoWaitPending_.store(false);
     Disconnect();
 }
 
 void GuiApp::Shutdown() {
+    shuttingDown_.store(true);
+    autoWaitPending_.store(false);
+    autoWaitEnabledRuntime_.store(false);
     if (!window_) return;
     engine_.Stop();
     ImGui_ImplOpenGL3_Shutdown();
@@ -270,6 +278,8 @@ void GuiApp::RenderFrame() {
 void GuiApp::RenderConnectionTab() {
     const TunnelState state = currentState_.load();
     const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
+    const bool waiting = active && waitingForPeer_.load();
+    const bool canBrowseClients = !active || waiting;
     bool configChanged = false;
     ImGui::Spacing();
     if (active) ImGui::BeginDisabled();
@@ -294,7 +304,7 @@ void GuiApp::RenderConnectionTab() {
 
     ImGui::Spacing();
     ImGui::SeparatorText("Online clients in this room");
-    if (!active && ImGui::Button("Refresh clients")) RefreshClients();
+    if (canBrowseClients && ImGui::Button("Refresh clients")) RefreshClients();
     ImGui::SameLine();
     ImGui::TextDisabled("Only clients currently waiting/connecting are listed");
 
@@ -302,7 +312,7 @@ void GuiApp::RenderConnectionTab() {
         if (clients_.empty()) ImGui::TextDisabled("No online clients");
         for (int i = 0; i < static_cast<int>(clients_.size()); ++i) {
             const bool selected = selectedClient_ == i;
-            if (ImGui::Selectable(clients_[i].c_str(), selected) && !active) {
+            if (ImGui::Selectable(clients_[i].c_str(), selected) && canBrowseClients) {
                 selectedClient_ = i;
             }
             if (selected) ImGui::SetItemDefaultFocus();
@@ -311,14 +321,22 @@ void GuiApp::RenderConnectionTab() {
     }
 
     ImGui::Spacing();
+    const bool canConnect = selectedClient_ >= 0
+        && selectedClient_ < static_cast<int>(clients_.size());
     if (!active) {
         if (ImGui::Button("Wait for peer", ImVec2(130, 0))) StartConnection("");
         ImGui::SameLine();
-        const bool canConnect = selectedClient_ >= 0
-            && selectedClient_ < static_cast<int>(clients_.size());
         if (!canConnect) ImGui::BeginDisabled();
         if (ImGui::Button("Connect selected", ImVec2(150, 0)) && canConnect) {
-            StartConnection(clients_[selectedClient_]);
+            ConnectSelectedClient();
+        }
+        if (!canConnect) ImGui::EndDisabled();
+    } else if (waiting) {
+        if (ImGui::Button("Disconnect", ImVec2(130, 0))) Disconnect();
+        ImGui::SameLine();
+        if (!canConnect) ImGui::BeginDisabled();
+        if (ImGui::Button("Connect selected", ImVec2(150, 0)) && canConnect) {
+            ConnectSelectedClient();
         }
         if (!canConnect) ImGui::EndDisabled();
     } else if (ImGui::Button("Disconnect", ImVec2(130, 0))) {
@@ -402,6 +420,26 @@ void GuiApp::RenderSettingsTab() {
         punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
         FormField("Log Level");
         configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
+        EndForm();
+    }
+    ImGui::Spacing();
+    ImGui::SeparatorText("Misc");
+    if (BeginForm("##MiscSettings")) {
+        FormField("Auto wait for peer");
+        const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer", &autoWaitForPeer_);
+        configChanged |= autoWaitChanged;
+        if (autoWaitChanged) {
+            autoWaitEnabledRuntime_.store(autoWaitForPeer_);
+            if (autoWaitForPeer_) {
+                autoWaitRetryAfterMs_.store(0);
+                const TunnelState state = currentState_.load();
+                if (state == TunnelState::Disconnected || state == TunnelState::Error) {
+                    autoWaitPending_.store(true);
+                }
+            } else {
+                autoWaitPending_.store(false);
+            }
+        }
         EndForm();
     }
     if (configChanged) SaveGuiConfig();
@@ -519,15 +557,15 @@ bool GuiApp::ValidateCommonFields(std::string* error) const {
     return true;
 }
 
-void GuiApp::StartConnection(const std::string& targetPeerId) {
+bool GuiApp::StartConnection(const std::string& targetPeerId) {
     std::string error;
     if (!ValidateCommonFields(&error)) {
         OnStateChanged(TunnelState::Error, error);
-        return;
+        return false;
     }
     if (!targetPeerId.empty() && targetPeerId == peerId_) {
         OnStateChanged(TunnelState::Error, "Cannot connect to this client itself");
-        return;
+        return false;
     }
     Config cfg;
     cfg.rendezvous_addr = serverAddress_;
@@ -545,32 +583,68 @@ void GuiApp::StartConnection(const std::string& targetPeerId) {
     cfg.peer_timeout = static_cast<uint16_t>(peerTimeout_);
     cfg.punch_timeout = static_cast<uint16_t>(punchTimeout_);
     TryParseLogLevel(kLogLevels[logLevelIdx_], &cfg.log_level);
-    engine_.Start(cfg);
+    const bool started = engine_.Start(cfg);
+    if (started) waitingForPeer_.store(targetPeerId.empty());
+    return started;
+}
+
+void GuiApp::ConnectSelectedClient() {
+    if (selectedClient_ < 0 || selectedClient_ >= static_cast<int>(clients_.size())) return;
+    const std::string target = clients_[selectedClient_];
+    suppressAutoWait_.store(true);
+    autoWaitPending_.store(false);
+    engine_.Stop();
+    waitingForPeer_.store(false);
+    suppressAutoWait_.store(false);
+    if (!StartConnection(target) && autoWaitEnabledRuntime_.load()) {
+        autoWaitPending_.store(true);
+    }
 }
 
 void GuiApp::RefreshClients() {
     std::string error;
     if (!ValidateCommonFields(&error)) {
-        OnStateChanged(TunnelState::Error, error);
+        SetStatusMessage(error);
         return;
     }
     std::vector<std::string> clients;
     if (!ListRendezvousClients(serverAddress_, static_cast<uint16_t>(serverPort_),
                                roomId_, authToken_, &clients, &error)) {
-        OnStateChanged(TunnelState::Error, error);
+        SetStatusMessage(error);
         return;
     }
     clients.erase(std::remove(clients.begin(), clients.end(), std::string(peerId_)), clients.end());
     std::sort(clients.begin(), clients.end());
     clients_ = std::move(clients);
     selectedClient_ = clients_.empty() ? -1 : 0;
-    OnStateChanged(TunnelState::Disconnected,
-        clients_.empty() ? "No online clients" : "Client list refreshed");
+    SetStatusMessage(clients_.empty() ? "No online clients" : "Client list refreshed");
 }
 
 void GuiApp::Disconnect() {
     engine_.Stop();
+    waitingForPeer_.store(false);
     OnStateChanged(TunnelState::Disconnected, "Disconnected");
+}
+
+void GuiApp::ProcessAutoWait() {
+    if (shuttingDown_.load() || !autoWaitEnabledRuntime_.load()
+        || !autoWaitPending_.load()) return;
+    const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (nowMs < autoWaitRetryAfterMs_.load()) return;
+    const TunnelState state = currentState_.load();
+    if (state != TunnelState::Disconnected && state != TunnelState::Error) return;
+    std::string error;
+    if (!ValidateCommonFields(&error)) {
+        OnStateChanged(TunnelState::Error, "Auto wait failed: " + error);
+        autoWaitPending_.store(false);
+        return;
+    }
+    if (StartConnection("")) {
+        autoWaitPending_.store(false);
+    } else {
+        autoWaitRetryAfterMs_.store(nowMs + 1000);
+    }
 }
 
 bool GuiApp::LoadGuiConfig() {
@@ -604,6 +678,7 @@ bool GuiApp::LoadGuiConfig() {
     JsonInt(json, "peer_timeout", &peerTimeout_);
     JsonInt(json, "punch_timeout", &punchTimeout_);
     JsonInt(json, "log_level", &logLevelIdx_);
+    JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
 
     serverPort_ = std::clamp(serverPort_, 1, 65535);
     tunPrefix_ = std::clamp(tunPrefix_, 0, 32);
@@ -641,7 +716,8 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"keepalive_interval\": " << keepaliveInterval_ << ",\n"
         << "  \"peer_timeout\": " << peerTimeout_ << ",\n"
         << "  \"punch_timeout\": " << punchTimeout_ << ",\n"
-        << "  \"log_level\": " << logLevelIdx_ << "\n"
+        << "  \"log_level\": " << logLevelIdx_ << ",\n"
+        << "  \"auto_wait_for_peer\": " << (autoWaitForPeer_ ? "true" : "false") << "\n"
         << "}\n";
     output.flush();
     if (!output.good()) {
@@ -665,8 +741,27 @@ void GuiApp::RenderConfigSaveStatus() {
 
 void GuiApp::OnStateChanged(TunnelState state, const std::string& message) {
     currentState_.store(state);
+    if (state == TunnelState::Connected) waitingForPeer_.store(false);
+    if (state == TunnelState::Disconnected || state == TunnelState::Error) {
+        waitingForPeer_.store(false);
+        if (state == TunnelState::Error) {
+            const int64_t retryAt = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count() + 1000;
+            autoWaitRetryAfterMs_.store(retryAt);
+        } else {
+            autoWaitRetryAfterMs_.store(0);
+        }
+        if (!shuttingDown_.load() && !suppressAutoWait_.load()
+            && autoWaitEnabledRuntime_.load()) {
+            autoWaitPending_.store(true);
+        }
+    }
+    SetStatusMessage(message.empty() ? "Disconnected" : message);
+}
+
+void GuiApp::SetStatusMessage(const std::string& message) {
     std::lock_guard<std::mutex> lock(statusMutex_);
-    statusMessage_ = message.empty() ? "Disconnected" : message;
+    statusMessage_ = message;
 }
 
 void GuiApp::OnLog(LogLevel /*level*/, const std::string& message) {
