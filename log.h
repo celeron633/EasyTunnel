@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 
 enum class LogLevel {
@@ -14,3 +15,8 @@ bool TryParseLogLevel(const std::string& text, LogLevel* out);
 void SetLogLevel(LogLevel level);
 LogLevel GetLogLevel();
 void Log(LogLevel level, const std::string& msg);
+
+using LogCallback = std::function<void(LogLevel, const std::string&)>;
+void SetLogCallback(LogCallback callback);
+void SetLogFilePath(const std::string& path);
+std::string GetLogFilePath();

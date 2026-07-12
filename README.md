@@ -1,121 +1,123 @@
-# EasyTunnel
+# EasyTunnel NAT traversal (`nat-dev`)
 
-Windows/Linux 下基于 Wintun/tun 的 IPv4-over-UDP 隧道，外层 UDP 可走 IPv6 或 IPv4。
+面向 IPv4 的 TUN-over-UDP 点对点隧道。公网服务器只负责客户端在线登记、列表查询和端点交换；打洞成功后，隧道数据由两个客户端直接传输，不经过服务器。
 
-- 本地从 TUN 读到 IPv4 报文
-- 直接封装为 UDP 负载发送到对端
-- 对端收到后写回本地 TUN
-- 不做加密，仅做隧道转发
-- 支持 Console 和 GUI (ImGui) 两种模式
+## 工作流程
 
-## 依赖
+1. 客户端使用最终承载隧道数据的 UDP socket 向会合服务器发送 `REG`。
+2. 服务器从 UDP 数据报源地址取得该 socket 的公网 `IPv4:port`，并维护房间在线列表。
+3. 发起方通过 `CONNECT` 指定目标 `peer_id`，服务器向双方发送 `PEER` 端点。
+4. 双方持续发送 `PUNCH`，收到预期端点的 `PUNCH/PUNCH_ACK` 后进入 Connected。
+5. TUN IPv4 包直接作为 UDP payload 发送；KEEPALIVE/ACK 用于维持 NAT/CGN 映射。
 
-- Windows 10/11 或 Linux
-- CMake 3.20+ / Ninja (或 Visual Studio 2022)
-- 构建机可访问外网（默认自动下载 Wintun SDK、GLFW、ImGui）
-- Linux 额外依赖：`libgl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev`
-
-## 配置文件
-
-复制 `conf/tunnel.conf.example` 为 `tunnel.conf`，按两端实际地址修改：
-
-- `local_addr`：本地绑定 IPv4/IPv6；留空时按对端地址族监听任意地址
-- `peer_addr`：对端公网 IPv4 或 IPv6
-- `udp_port`：两端一致
-- `local_tun_ipv4`：本地 TUN 口 IPv4
-- `tun_prefix`：掩码前缀
-- `tun_mtu`：TUN 口 IPv4 MTU（默认 `1452`，适用于 UDP/IPv6 外层开销 48 字节时的 1500 链路；走 IPv4 外层时可按路径 MTU 调整）
-- `log_level`：日志级别，支持 `Debug` / `Info` / `Warn` / `Error`（默认 `Info`）
-
-旧配置名 `local_ipv6` / `peer_ipv6` 仍兼容读取。
-
-建议两端分别配置：
-
-- A 端：`local_tun_ipv4=10.66.0.1`
-- B 端：`local_tun_ipv4=10.66.0.2`
+不需要单独实现 STUN：注册报文的源地址就是该数据 socket 对会合服务器形成的公网映射。
 
 ## 构建
 
-### Linux
-
-```bash
-sudo apt install libgl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
-
-cmake -S . -B build -G Ninja
-cmake --build build
+```powershell
+cmake -S . -B build -DBUILD_GUI=ON
+cmake --build build --config Release
 ```
 
-生成两个可执行文件：
-- `build/EasyTunnel` — Console 模式
-- `build/EasyTunnel_gui` — GUI 模式 (ImGui)
+生成：
 
-若只需 Console 模式，可禁用 GUI：`cmake -S . -B build -DBUILD_GUI=OFF`
+- `EasyTunnel`：Console 客户端。
+- `EasyTunnel_gui`：GUI 客户端。
+- `EasyTunnel_rendezvous`：公网会合服务器，不创建 TUN。
 
-### Windows (MSYS2)
+## 会合服务器配置
 
-在 MSYS2 MinGW64 终端：
+服务端默认读取当前工作目录的 `EasyTunnel_rendezvous.json`。首次运行时若文件不存在，会自动创建默认 JSON 并继续启动。也可以把其他配置路径作为唯一参数：
 
-```bash
-pacman -S --needed mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja
-
-cmake -S . -B build -G Ninja
-cmake --build build
+```text
+EasyTunnel_rendezvous [config.json]
 ```
 
-说明：
+默认配置：
 
-- 配置阶段会自动下载并解压 Wintun SDK 到 `build/_deps`。
-- 若你想使用本地 SDK，可覆盖：`-DWINTUN_SDK_DIR=/c/dev/wintun`。
+```json
+{
+  "bind_address": "0.0.0.0",
+  "port": 3478,
+  "auth_token": "",
+  "client_timeout_seconds": 60,
+  "max_clients_per_room": 32,
+  "log_level": "Info",
+  "log_file": "EasyTunnel_rendezvous.log"
+}
+```
 
-### Windows (Visual Studio)
+- `bind_address`：监听 IPv4。
+- `port`：监听 UDP 端口。
+- `auth_token`：可选的房间共享准入 Token；日志不会打印该值。
+- `client_timeout_seconds`：停止注册多久后从在线列表删除，范围 `5..3600`。
+- `max_clients_per_room`：每个房间最大客户端数，范围 `2..32`。
+- `log_level`：`Debug`、`Info`、`Warn` 或 `Error`。
+- `log_file`：日志文件路径；留空表示只输出到控制台。
 
-可使用 Visual Studio 2022（安装"使用 C++ 的桌面开发"组件）。
+服务端会记录启动/停止、配置载入、注册、注销、配对、客户端过期和拒绝原因。`Debug` 级别还会记录列表查询和目标尚未上线等诊断信息。
+
+仓库另提供 [conf/rendezvous.json.example](conf/rendezvous.json.example)。
+
+### Windows 运行服务器
 
 ```powershell
-cmake -S . -B build-vs -G "Visual Studio 17 2022" -A x64
-cmake --build build-vs --config Release
+EasyTunnel_rendezvous.exe
+# 或指定配置
+EasyTunnel_rendezvous.exe D:\config\rendezvous.json
 ```
 
-## GUI 模式
+需要在 Windows 防火墙和云安全组放行配置的 UDP 端口。
 
-GUI 模式 (`EasyTunnel_gui`) 提供：
+### Linux 运行服务器
 
-1. **连接页面**：选择本地 IPv6 地址（IPv6 外层使用）、输入对方 IPv4/IPv6（支持历史记录）、连接/断开按钮、收发包统计
-2. **设置页面**：网络设置（UDP端口、MTU）、TUN 适配器设置（适配器名、IPv4地址、掩码）、日志级别
-3. **状态栏**：实时显示连接状态和收发包数量
-
-连接历史自动保存到 `EasyTunnel.ini`，下次启动可快速选择。
-
-## 运行
-
-### Console 模式
+Linux 会合服务器使用 POSIX UDP socket，不创建 TUN，也不依赖 Wintun。建议关闭 GUI，只构建服务端目标：
 
 ```bash
-# Linux
-sudo ./build/EasyTunnel tunnel.conf
-
-# Windows (管理员权限)
-./build/EasyTunnel.exe tunnel.conf
+cmake -S . -B build -DBUILD_GUI=OFF
+cmake --build build --target EasyTunnel_rendezvous
+./build/EasyTunnel_rendezvous
 ```
 
-### GUI 模式
+也可以指定配置：
 
 ```bash
-# Linux
-sudo ./build/EasyTunnel_gui
-
-# Windows (管理员权限)
-./build/EasyTunnel_gui.exe
+./build/EasyTunnel_rendezvous /etc/easytunnel/rendezvous.json
 ```
 
-## 连通性建议
+默认端口 `3478` 大于 `1024`，通常不需要 root。需要放行云安全组和 Linux 防火墙的入站/出站 UDP 端口。当前服务器只监听 IPv4，可用 `SIGINT` 或 `SIGTERM` 正常停止。
 
-- 放通 `udp_port` 的 IPv4/IPv6 入站/出站防火墙规则
-- 确认两端都可通过配置的公网 IPv4 或 IPv6 直连
-- 启动后可互 ping 对端 TUN IPv4 地址
-- 若出现 `bind failed`：说明 `local_addr` 不是本机已分配地址，可留空、改为 `0.0.0.0` / `::`，或填本机真实地址
+## GUI 使用
 
-## 注意
+1. 两端填写相同的 Rendezvous Server、端口、Room ID 和 Auth Token。
+2. 两端填写不同的 My Peer ID、Adapter Name 和 Local TUN IPv4。
+3. A 端点击 **Wait for peer**，使用隧道数据 socket 注册并保持在线。
+4. B 端点击 **Refresh clients**，选择 A，再点击 **Connect selected**。
+5. 服务器向 A/B 下发彼此公网端点，双方开始打洞。
 
-- 本项目演示的是"明文隧道"，没有做加密与认证。
-- 生产环境建议增加认证、重放保护和可选加密。
+列表查询使用临时 UDP socket，仅用于展示；实际公网端点始终来自等待/连接引擎持有的数据 socket。
+
+GUI 的 **Log** 页显示运行日志，并在 exe 目录写入 `EasyTunnel_gui.log`。GUI 配置修改后自动保存到当前工作目录的 `EasyTunnel_gui.json`，启动时自动加载，界面会显示保存结果及绝对路径。`auth_token` 会明文写入 JSON，请注意文件权限。
+
+同一台 Windows 主机运行两个实例时，必须使用不同的 Adapter Name 和 Local TUN IPv4，避免争用同一个 Wintun Adapter。
+
+## Console 客户端配置
+
+复制 `conf/tunnel.conf.example`：
+
+- `rendezvous_addr`、`rendezvous_port`、`room_id`、`auth_token`：两端相同。
+- `peer_id`：两端不同，例如 `node-a` / `node-b`。
+- `target_peer_id`：留空表示注册并等待；填写目标 Peer ID 表示主动连接。
+- `local_tun_ipv4`：两端不同，例如 `10.66.0.1` / `10.66.0.2`。
+- 不配置本地或对端 UDP 地址/端口。
+
+```powershell
+EasyTunnel tunnel.conf
+```
+
+## 边界与安全
+
+- 适用于 endpoint-independent mapping / port-restricted cone NAT。Symmetric NAT 可能需要 UDP relay 回退。
+- `auth_token` 只提供会合服务器准入，不加密隧道数据，也不是强身份认证。
+- 非预期公网端点发来的 UDP 数据不会写入 TUN。
+- keepalive 超时会将隧道切换到 Error；当前不会自动重连或切换中继。

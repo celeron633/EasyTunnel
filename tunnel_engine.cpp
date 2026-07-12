@@ -6,6 +6,7 @@
 
 #include "hexdump.h"
 #include "log.h"
+#include "nat_traversal.h"
 
 #ifdef _WIN32
 #ifndef UNICODE
@@ -37,6 +38,9 @@ TunnelEngine::~TunnelEngine() {
 bool TunnelEngine::Start(const Config& cfg) {
 	if (running_.load()) {
 		return false;
+	}
+	if (workerThread_.joinable()) {
+		workerThread_.join();
 	}
 
 	// Reset stats
@@ -81,31 +85,32 @@ void TunnelEngine::WorkerThread(Config cfg) {
 
 	Log(LogLevel::Info, "EasyTunnel engine starting...");
 	Log(LogLevel::Info,
-		"Local address: " + (cfg.local_addr.empty() ? "auto" : cfg.local_addr)
-		+ ", peer address: " + cfg.peer_addr
-		+ ", UDP port: " + std::to_string(cfg.udp_port));
+		"Rendezvous: " + cfg.rendezvous_addr + ":"
+		+ std::to_string(cfg.rendezvous_port));
 
 	socket_t sock = kInvalidSocket;
+	UdpEndpoint server{};
 	std::unique_ptr<TunAdapter> tunAdapter(TunAdapter::Create());
 
 	do {
+		UdpEndpoint peer{};
+		std::string socketError;
+		if (!OpenNatUdpSocket(cfg, kSocketRecvTimeoutMs, &sock, &server, &socketError)) {
+			SetState(TunnelState::Error, socketError);
+			break;
+		}
+		SetState(TunnelState::Connecting,
+			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
+			                           : "Connecting to " + cfg.target_peer_id);
+		if (!DiscoverAndPunch(sock, cfg, server, running_, &peer, &socketError)) {
+			SetState(TunnelState::Error, socketError);
+			break;
+		}
+
 		if (!tunAdapter->Open(cfg)) {
 			SetState(TunnelState::Error, "Failed to open TUN adapter");
 			break;
 		}
-
-		UdpEndpoint peer{};
-		std::string boundAddr;
-		std::string peerAddr;
-		std::string socketError;
-		if (!OpenUdpSocket(cfg, kSocketRecvTimeoutMs, &sock, &peer,
-				&boundAddr, &peerAddr, &socketError)) {
-			SetState(TunnelState::Error, socketError);
-			break;
-		}
-		Log(LogLevel::Info,
-			"UDP socket bound to " + AddressFamilyName(peer.family)
-			+ " local=" + boundAddr + ", peer=" + peerAddr);
 
 		SetState(TunnelState::Connected, "Data plane is up");
 		Log(LogLevel::Info, "Data plane is up.");
@@ -153,6 +158,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		// Network -> TUN thread
 		std::thread netToTun([&]() {
 			std::vector<uint8_t> buf(kMaxPacketSize);
+			auto lastPeerSeen = std::chrono::steady_clock::now();
+			auto nextKeepalive = lastPeerSeen + std::chrono::seconds(cfg.keepalive_interval);
 			while (running_.load()) {
 				sockaddr_storage src{};
 				socket_len_t srcLen = static_cast<socket_len_t>(sizeof(src));
@@ -166,26 +173,45 @@ void TunnelEngine::WorkerThread(Config cfg) {
 				if (recvLen < 0) {
 					const int err = GetSocketError();
 					if (!running_.load()) break;
-					if (IsRecvTimeout(err)) continue;
-					Log(LogLevel::Error, "recvfrom failed. err=" + std::to_string(err));
-					continue;
+					if (!IsRecvTimeout(err)) {
+						Log(LogLevel::Error, "recvfrom failed. err=" + std::to_string(err));
+					}
+				} else {
+					UdpEndpoint source{};
+					source.addr = src;
+					source.addr_len = srcLen;
+					source.family = src.ss_family;
+					if (HandlePeerControl(sock, cfg, peer, source, buf.data(),
+							static_cast<size_t>(recvLen), &lastPeerSeen)) {
+						// control packet consumed
+					} else if (!SameUdpEndpoint(source, peer)) {
+						Log(LogLevel::Warn, "Drop UDP packet from unexpected source "
+							+ FormatUdpEndpoint(source));
+					} else if (!IsIpv4Packet(buf.data(), static_cast<size_t>(recvLen))) {
+						Log(LogLevel::Debug, "RX non-IPv4 drop, bytes=" + std::to_string(recvLen));
+					} else if (tunAdapter->WritePacket(buf.data(), static_cast<size_t>(recvLen))) {
+						lastPeerSeen = std::chrono::steady_clock::now();
+						stats_.rxPackets.fetch_add(1);
+						stats_.rxBytes.fetch_add(static_cast<uint64_t>(recvLen));
+						Log(LogLevel::Debug, "RX IPv4 ["
+							+ Ipv4ProtocolToString(buf.data(), static_cast<size_t>(recvLen))
+							+ "] bytes=" + std::to_string(recvLen));
+					}
 				}
 
-				if (!IsIpv4Packet(buf.data(), static_cast<size_t>(recvLen))) {
-					Log(LogLevel::Debug,
-						"RX non-IPv4 drop, bytes=" + std::to_string(recvLen));
+				const auto now = std::chrono::steady_clock::now();
+				if (now >= nextKeepalive) {
+					SendPeerKeepalive(sock, cfg, peer);
+					nextKeepalive = now + std::chrono::seconds(cfg.keepalive_interval);
+				}
+				if (now - lastPeerSeen > std::chrono::seconds(cfg.peer_timeout)) {
+					SetState(TunnelState::Error, "Peer keepalive timed out; NAT mapping may be lost");
+					running_.store(false);
+					break;
+				}
+				if (recvLen < 0) {
 					continue;
 				}
-
-				if (!tunAdapter->WritePacket(buf.data(), static_cast<size_t>(recvLen))) {
-					continue;
-				}
-
-				stats_.rxPackets.fetch_add(1);
-				stats_.rxBytes.fetch_add(static_cast<uint64_t>(recvLen));
-				Log(LogLevel::Debug,
-					"RX IPv4 [" + Ipv4ProtocolToString(buf.data(), static_cast<size_t>(recvLen))
-					+ "] bytes=" + std::to_string(recvLen));
 			}
 		});
 
@@ -200,6 +226,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 
 	} while (false);
 
+	running_.store(false);
+	if (sock != kInvalidSocket) UnregisterRendezvous(sock, cfg, server);
 	CloseSocket(sock);
 	if (tunAdapter) {
 		tunAdapter->Close();

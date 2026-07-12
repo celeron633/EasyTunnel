@@ -38,7 +38,7 @@ public:
 		}
 
 		const std::wstring name = Utf8ToWide(cfg.adapter_name);
-		const std::wstring type = Utf8ToWide(cfg.tunnel_type);
+		const std::wstring type = L"EasyTunnel";
 
 		adapter_ = WtOpenAdapter(name.c_str());
 		if (adapter_ == nullptr) {

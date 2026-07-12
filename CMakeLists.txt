@@ -7,7 +7,7 @@ endif()
 
 include(FetchContent)
 
-option(BUILD_GUI "Build the ImGui-based GUI application" ON)
+option(BUILD_GUI "Build the ImGui NAT traversal client" ON)
 
 FetchContent_Declare(
     spdlog
@@ -32,8 +32,8 @@ set(COMMON_SOURCES
     log.cpp
     util.cpp
     tunnel_engine.cpp
-    ipv6_utils.cpp
-    connection_history.cpp
+    nat_protocol.cpp
+    nat_traversal.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,8 @@ endif()
 # Console application (original)
 # ---------------------------------------------------------------------------
 add_executable(EasyTunnel main.cpp ${COMMON_SOURCES})
+add_executable(EasyTunnel_rendezvous
+    rendezvous_server.cpp rendezvous_config.cpp nat_protocol.cpp util.cpp log.cpp config.cpp)
 
 if(MSVC)
     target_compile_options(EasyTunnel PRIVATE /W4)
@@ -62,13 +64,21 @@ else()
     target_compile_options(EasyTunnel PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
+if(MSVC)
+    target_compile_options(EasyTunnel_rendezvous PRIVATE /W4)
+else()
+    target_compile_options(EasyTunnel_rendezvous PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
 # ---------------------------------------------------------------------------
 # Platform-specific link libraries
 # ---------------------------------------------------------------------------
 if(WIN32)
     target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi Threads::Threads)
+    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only ws2_32 Threads::Threads)
 else()
     target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only Threads::Threads)
+    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only Threads::Threads)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -158,18 +168,11 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
     )
 endif()
 
-# ===========================================================================
-# GUI Application (ImGui + GLFW + OpenGL3)
-# ===========================================================================
 if(BUILD_GUI)
-    # -----------------------------------------------------------------------
-    # Fetch GLFW
-    # -----------------------------------------------------------------------
     set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-
     FetchContent_Declare(
         glfw
         GIT_REPOSITORY https://github.com/glfw/glfw.git
@@ -177,9 +180,6 @@ if(BUILD_GUI)
     )
     FetchContent_MakeAvailable(glfw)
 
-    # -----------------------------------------------------------------------
-    # Fetch ImGui
-    # -----------------------------------------------------------------------
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -187,75 +187,47 @@ if(BUILD_GUI)
     )
     FetchContent_MakeAvailable(imgui)
 
-    # Build ImGui as a library
     set(IMGUI_DIR ${imgui_SOURCE_DIR})
     add_library(imgui_lib STATIC
         ${IMGUI_DIR}/imgui.cpp
-        ${IMGUI_DIR}/imgui_demo.cpp
         ${IMGUI_DIR}/imgui_draw.cpp
         ${IMGUI_DIR}/imgui_tables.cpp
         ${IMGUI_DIR}/imgui_widgets.cpp
         ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
         ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
     )
-    target_include_directories(imgui_lib PUBLIC
-        ${IMGUI_DIR}
-        ${IMGUI_DIR}/backends
-    )
-    target_link_libraries(imgui_lib PUBLIC glfw)
-
-    # Find OpenGL
+    target_include_directories(imgui_lib PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
     find_package(OpenGL REQUIRED)
-    target_link_libraries(imgui_lib PUBLIC OpenGL::GL)
+    target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
 
-    # -----------------------------------------------------------------------
-    # GUI target
-    # -----------------------------------------------------------------------
-    set(GUI_SOURCES
-        gui/gui_main.cpp
-        gui/gui_app.cpp
-    )
-
-    add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES})
-
+    add_executable(EasyTunnel_gui gui/gui_main.cpp gui/gui_app.cpp ${COMMON_SOURCES})
     target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(EasyTunnel_gui PRIVATE
+        spdlog::spdlog_header_only imgui_lib Threads::Threads)
 
     if(MSVC)
         target_compile_options(EasyTunnel_gui PRIVATE /W4)
-        target_link_options(EasyTunnel_gui PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
-        # Use WinMain entry point to hide console on Windows
-        target_link_options(EasyTunnel_gui PRIVATE "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
+        target_link_options(EasyTunnel_gui PRIVATE
+            "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
+            "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
     else()
         target_compile_options(EasyTunnel_gui PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 
-    target_link_libraries(EasyTunnel_gui PRIVATE
-        spdlog::spdlog_header_only
-        imgui_lib
-        Threads::Threads
-    )
-
     if(WIN32)
         target_link_libraries(EasyTunnel_gui PRIVATE ws2_32 iphlpapi)
-        if(DEFINED WINTUN_INCLUDE_DIR)
-            target_include_directories(EasyTunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
-        endif()
-        if(EXISTS "${WINTUN_DLL_PATH}")
-            add_custom_command(TARGET EasyTunnel_gui POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${WINTUN_DLL_PATH}"
-                        "$<TARGET_FILE_DIR:EasyTunnel_gui>/wintun.dll"
-                COMMENT "Copy wintun.dll to GUI output directory"
-            )
-        endif()
+        target_include_directories(EasyTunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
+        add_custom_command(TARGET EasyTunnel_gui POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${WINTUN_DLL_PATH}"
+                    "$<TARGET_FILE_DIR:EasyTunnel_gui>/wintun.dll"
+            COMMENT "Copy wintun.dll to GUI output directory")
     endif()
 
     if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
         add_custom_command(TARGET EasyTunnel_gui POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
-                    "$<TARGET_FILE_DIR:EasyTunnel_gui>/tunnel.conf.example"
-            COMMENT "Copy tunnel.conf.example to GUI output directory"
-        )
+                    "$<TARGET_FILE_DIR:EasyTunnel_gui>/tunnel.conf.example")
     endif()
-endif()  # BUILD_GUI
+endif()

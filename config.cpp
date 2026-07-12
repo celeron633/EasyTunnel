@@ -29,10 +29,10 @@ bool ParseUInt16(const std::string& text, uint16_t* out) {
         return false;
     }
     try {
-        const size_t idx = 0;
-        (void)idx;
-        const unsigned long v = std::stoul(text);
-        if (v > std::numeric_limits<uint16_t>::max()) {
+        size_t idx = 0;
+        const unsigned long v = std::stoul(text, &idx);
+        if (idx != text.size()) return false;
+        if (v > (std::numeric_limits<uint16_t>::max)()) {
             return false;
         }
         *out = static_cast<uint16_t>(v);
@@ -47,8 +47,10 @@ bool ParseUInt8(const std::string& text, uint8_t* out) {
         return false;
     }
     try {
-        const unsigned long v = std::stoul(text);
-        if (v > std::numeric_limits<uint8_t>::max()) {
+        size_t idx = 0;
+        const unsigned long v = std::stoul(text, &idx);
+        if (idx != text.size()) return false;
+        if (v > (std::numeric_limits<uint8_t>::max)()) {
             return false;
         }
         *out = static_cast<uint8_t>(v);
@@ -94,25 +96,37 @@ bool LoadConfig(const std::string& file, Config* out) {
         return it->second;
     };
 
-    out->local_addr = get("local_addr");
-    if (out->local_addr.empty()) {
-        out->local_addr = get("local_ipv6");
+    out->rendezvous_addr = get("rendezvous_addr");
+    if (!get("rendezvous_port").empty()
+        && (!ParseUInt16(get("rendezvous_port"), &out->rendezvous_port)
+            || out->rendezvous_port == 0)) {
+        Log(LogLevel::Error, "Invalid rendezvous_port");
+        return false;
     }
-    out->peer_addr = get("peer_addr");
-    if (out->peer_addr.empty()) {
-        out->peer_addr = get("peer_ipv6");
+    out->room_id = get("room_id");
+    out->peer_id = get("peer_id");
+    out->target_peer_id = get("target_peer_id");
+    out->auth_token = get("auth_token");
+    if (!get("keepalive_interval").empty()
+        && (!ParseUInt16(get("keepalive_interval"), &out->keepalive_interval)
+            || out->keepalive_interval == 0)) {
+        Log(LogLevel::Error, "Invalid keepalive_interval");
+        return false;
     }
-    if (!get("udp_port").empty()) {
-        if (!ParseUInt16(get("udp_port"), &out->udp_port) || out->udp_port == 0) {
-            Log(LogLevel::Error, "Invalid udp_port: " + get("udp_port") + ", must be 1..65535");
-            return false;
-        }
+    if (!get("peer_timeout").empty()
+        && (!ParseUInt16(get("peer_timeout"), &out->peer_timeout)
+            || out->peer_timeout <= out->keepalive_interval)) {
+        Log(LogLevel::Error, "peer_timeout must be greater than keepalive_interval");
+        return false;
+    }
+    if (!get("punch_timeout").empty()
+        && (!ParseUInt16(get("punch_timeout"), &out->punch_timeout)
+            || out->punch_timeout == 0)) {
+        Log(LogLevel::Error, "Invalid punch_timeout");
+        return false;
     }
     if (!get("adapter_name").empty()) {
         out->adapter_name = get("adapter_name");
-    }
-    if (!get("tunnel_type").empty()) {
-        out->tunnel_type = get("tunnel_type");
     }
     out->local_tun_ipv4 = get("local_tun_ipv4");
     if (!get("tun_prefix").empty()) {
@@ -137,8 +151,12 @@ bool LoadConfig(const std::string& file, Config* out) {
         }
     }
 
-    if (out->peer_addr.empty() || out->local_tun_ipv4.empty()) {
-        Log(LogLevel::Error, "Missing required config keys: peer_addr (or peer_ipv6) / local_tun_ipv4");
+    if (out->local_tun_ipv4.empty()) {
+        Log(LogLevel::Error, "Missing required config key: local_tun_ipv4");
+        return false;
+    }
+    if (out->rendezvous_addr.empty() || out->room_id.empty() || out->peer_id.empty()) {
+        Log(LogLevel::Error, "Missing rendezvous_addr, room_id or peer_id");
         return false;
     }
     if (out->tun_prefix > 32) {
@@ -149,8 +167,8 @@ bool LoadConfig(const std::string& file, Config* out) {
         Log(LogLevel::Error, "Invalid tun_mtu, must be 576..9000");
         return false;
     }
-    if (out->tun_mtu > 1452) {
-        Log(LogLevel::Warn, "tun_mtu is greater than 1452; may cause UDP outer fragmentation on 1500-byte IPv6 paths");
+    if (out->tun_mtu > 1472) {
+        Log(LogLevel::Warn, "tun_mtu is greater than 1472; may cause UDP/IPv4 fragmentation");
     }
     return true;
 }

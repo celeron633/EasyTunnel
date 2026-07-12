@@ -52,9 +52,6 @@ void RegisterSignalHandlers();
 // Cross-platform socket helpers
 // ---------------------------------------------------------------------------
 void SetSocketRecvTimeoutMs(socket_t sock, int timeoutMs);
-bool OpenUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
-                   UdpEndpoint* peer, std::string* localAddr,
-                   std::string* peerAddr, std::string* error);
 void ShutdownSocket(socket_t sock);
 void CloseSocket(socket_t& sock);
 int GetSocketError();
@@ -71,6 +68,10 @@ bool ConfigureTunMtu(const Config& cfg);
 bool ParseIpv4(const std::string& ip, in_addr* out);
 bool ParseIpv6(const std::string& ip, in6_addr* out);
 bool ParseUdpEndpoint(const std::string& ip, uint16_t port, UdpEndpoint* out);
+bool ResolveUdpEndpoint(const std::string& host, uint16_t port, int family,
+                        UdpEndpoint* out, std::string* error);
+std::string FormatUdpEndpoint(const UdpEndpoint& endpoint);
+bool SameUdpEndpoint(const UdpEndpoint& a, const UdpEndpoint& b);
 bool ValidateIpAddress(const std::string& ip);
 std::string AddressFamilyName(int family);
 std::string IpProtoToName(uint8_t proto);

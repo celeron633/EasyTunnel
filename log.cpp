@@ -3,7 +3,9 @@
 #include <cctype>
 #include <memory>
 #include <mutex>
+#include <vector>
 
+#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -12,6 +14,9 @@ namespace {
 std::once_flag g_loggerInitOnce;
 std::shared_ptr<spdlog::logger> g_logger;
 LogLevel g_minLogLevel = LogLevel::Info;
+std::string g_logFilePath;
+std::mutex g_callbackMutex;
+LogCallback g_logCallback;
 
 spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
     switch (level) {
@@ -30,7 +35,21 @@ spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
 
 std::shared_ptr<spdlog::logger> GetLogger() {
     std::call_once(g_loggerInitOnce, []() {
-        g_logger = spdlog::stdout_color_mt("EasyTunnel");
+        auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        if (g_logFilePath.empty()) {
+            g_logger = std::make_shared<spdlog::logger>("EasyTunnel", consoleSink);
+        } else {
+            try {
+                auto fileSink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
+                    g_logFilePath, true);
+                std::vector<spdlog::sink_ptr> sinks{consoleSink, fileSink};
+                g_logger = std::make_shared<spdlog::logger>(
+                    "EasyTunnel", sinks.begin(), sinks.end());
+            } catch (...) {
+                g_logFilePath.clear();
+                g_logger = std::make_shared<spdlog::logger>("EasyTunnel", consoleSink);
+            }
+        }
         g_logger->set_pattern("%Y-%m-%d %H:%M:%S.%e %v");
         g_logger->set_level(ToSpdlogLevel(g_minLogLevel));
         g_logger->flush_on(spdlog::level::debug);
@@ -109,4 +128,19 @@ void Log(LogLevel level, const std::string& msg) {
     auto logger = GetLogger();
     const std::string text = "[" + std::string(LevelToString(level)) + "] " + msg;
     logger->log(ToSpdlogLevel(level), text);
+    std::lock_guard<std::mutex> lock(g_callbackMutex);
+    if (g_logCallback) g_logCallback(level, text);
+}
+
+void SetLogCallback(LogCallback callback) {
+    std::lock_guard<std::mutex> lock(g_callbackMutex);
+    g_logCallback = std::move(callback);
+}
+
+void SetLogFilePath(const std::string& path) {
+    g_logFilePath = path;
+}
+
+std::string GetLogFilePath() {
+    return g_logFilePath;
 }
