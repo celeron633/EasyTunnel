@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -36,6 +38,7 @@ private:
     bool LoadGuiConfig();
     bool SaveGuiConfig();
     void RenderConfigSaveStatus();
+    void UpdateLiveStats();
 
     GLFWwindow* window_ = nullptr;
     TunnelEngine engine_;
@@ -67,4 +70,20 @@ private:
     std::string configFilePath_;
     std::string configSaveMessage_;
     bool configSaveSucceeded_ = true;
+
+    int txTotalUnit_ = 0;
+    int rxTotalUnit_ = 0;
+    int txSpeedUnit_ = 0;
+    int rxSpeedUnit_ = 0;
+    int statusUnit_ = 0;
+    bool speedSampleInitialized_ = false;
+    uint64_t previousTxBytes_ = 0;
+    uint64_t previousRxBytes_ = 0;
+    double txBytesPerSecond_ = 0.0;
+    double rxBytesPerSecond_ = 0.0;
+    std::chrono::steady_clock::time_point lastSpeedSample_{};
+    uint64_t observedTxPackets_ = 0;
+    uint64_t observedRxPackets_ = 0;
+    std::chrono::steady_clock::time_point lastTxActivity_{};
+    std::chrono::steady_clock::time_point lastRxActivity_{};
 };

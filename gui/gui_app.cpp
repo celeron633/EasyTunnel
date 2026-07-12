@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 
 #include "imgui.h"
@@ -128,6 +129,45 @@ template <size_t N>
 void CopyToBuffer(const std::string& value, char (&buffer)[N]) {
     std::snprintf(buffer, N, "%s", value.c_str());
 }
+
+const char* ByteUnitName(int unit) {
+    switch (unit) {
+        case 1: return "KB";
+        case 2: return "MB";
+        default: return "Bytes";
+    }
+}
+
+double ConvertBytes(double bytes, int unit) {
+    if (unit == 1) return bytes / 1024.0;
+    if (unit == 2) return bytes / (1024.0 * 1024.0);
+    return bytes;
+}
+
+std::string FormatByteValue(double bytes, int unit) {
+    std::ostringstream output;
+    if (unit == 0) {
+        output << static_cast<unsigned long long>(bytes);
+    } else {
+        output << std::fixed << std::setprecision(2) << ConvertBytes(bytes, unit);
+    }
+    return output.str();
+}
+
+bool RenderByteValueButton(const char* id, double bytes, int unit, bool perSecond) {
+    const std::string label = FormatByteValue(bytes, unit) + "##" + id;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5.0f, 1.0f));
+    const bool clicked = ImGui::Button(label.c_str());
+    ImGui::PopStyleVar();
+    ImGui::SameLine(0.0f, 4.0f);
+    if (perSecond) {
+        const std::string unitLabel = std::string(ByteUnitName(unit)) + "/s";
+        ImGui::TextUnformatted(unitLabel.c_str());
+    } else {
+        ImGui::TextUnformatted(ByteUnitName(unit));
+    }
+    return clicked;
+}
 }  // namespace
 
 GuiApp::~GuiApp() {
@@ -200,6 +240,7 @@ void GuiApp::Shutdown() {
 }
 
 void GuiApp::RenderFrame() {
+    UpdateLiveStats();
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, viewport->WorkSize.y - 30));
@@ -233,9 +274,9 @@ void GuiApp::RenderConnectionTab() {
     ImGui::Spacing();
     if (active) ImGui::BeginDisabled();
     if (BeginForm("##RendezvousForm")) {
-        FormField("Rendezvous Server");
+        FormField("Rendezvous Server Addr");
         configChanged |= ImGui::InputText("##ServerAddress", serverAddress_, sizeof(serverAddress_));
-        FormField("Server UDP Port");
+        FormField("Rendezvous Server Port");
         configChanged |= ImGui::InputInt("##ServerPort", &serverPort_);
         serverPort_ = std::clamp(serverPort_, 1, 65535);
         FormField("Room ID");
@@ -298,10 +339,30 @@ void GuiApp::RenderConnectionTab() {
     const auto& stats = engine_.GetStats();
     ImGui::Columns(2, "stats", true);
     ImGui::Text("TX Packets: %llu", static_cast<unsigned long long>(stats.txPackets.load()));
-    ImGui::Text("TX Bytes: %llu", static_cast<unsigned long long>(stats.txBytes.load()));
+    ImGui::TextUnformatted("TX Bytes:");
+    ImGui::SameLine();
+    if (RenderByteValueButton("TxTotal", static_cast<double>(stats.txBytes.load()),
+                              txTotalUnit_, false)) {
+        txTotalUnit_ = (txTotalUnit_ + 1) % 3;
+    }
+    ImGui::TextUnformatted("TX Speed:");
+    ImGui::SameLine();
+    if (RenderByteValueButton("TxSpeed", txBytesPerSecond_, txSpeedUnit_, true)) {
+        txSpeedUnit_ = (txSpeedUnit_ + 1) % 3;
+    }
     ImGui::NextColumn();
     ImGui::Text("RX Packets: %llu", static_cast<unsigned long long>(stats.rxPackets.load()));
-    ImGui::Text("RX Bytes: %llu", static_cast<unsigned long long>(stats.rxBytes.load()));
+    ImGui::TextUnformatted("RX Bytes:");
+    ImGui::SameLine();
+    if (RenderByteValueButton("RxTotal", static_cast<double>(stats.rxBytes.load()),
+                              rxTotalUnit_, false)) {
+        rxTotalUnit_ = (rxTotalUnit_ + 1) % 3;
+    }
+    ImGui::TextUnformatted("RX Speed:");
+    ImGui::SameLine();
+    if (RenderByteValueButton("RxSpeed", rxBytesPerSecond_, rxSpeedUnit_, true)) {
+        rxSpeedUnit_ = (rxSpeedUnit_ + 1) % 3;
+    }
     ImGui::Columns(1);
 }
 
@@ -372,6 +433,36 @@ void GuiApp::RenderLogTab() {
     ImGui::EndChild();
 }
 
+void GuiApp::UpdateLiveStats() {
+    const auto& stats = engine_.GetStats();
+    const auto now = std::chrono::steady_clock::now();
+    const uint64_t txPackets = stats.txPackets.load();
+    const uint64_t rxPackets = stats.rxPackets.load();
+    if (txPackets > observedTxPackets_) lastTxActivity_ = now;
+    if (rxPackets > observedRxPackets_) lastRxActivity_ = now;
+    observedTxPackets_ = txPackets;
+    observedRxPackets_ = rxPackets;
+
+    const uint64_t txBytes = stats.txBytes.load();
+    const uint64_t rxBytes = stats.rxBytes.load();
+    if (!speedSampleInitialized_) {
+        previousTxBytes_ = txBytes;
+        previousRxBytes_ = rxBytes;
+        lastSpeedSample_ = now;
+        speedSampleInitialized_ = true;
+        return;
+    }
+    const double elapsed = std::chrono::duration<double>(now - lastSpeedSample_).count();
+    if (elapsed < 1.0) return;
+    const uint64_t txDelta = txBytes >= previousTxBytes_ ? txBytes - previousTxBytes_ : 0;
+    const uint64_t rxDelta = rxBytes >= previousRxBytes_ ? rxBytes - previousRxBytes_ : 0;
+    txBytesPerSecond_ = static_cast<double>(txDelta) / elapsed;
+    rxBytesPerSecond_ = static_cast<double>(rxDelta) / elapsed;
+    previousTxBytes_ = txBytes;
+    previousRxBytes_ = rxBytes;
+    lastSpeedSample_ = now;
+}
+
 void GuiApp::RenderStatusBar() {
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x,
@@ -382,10 +473,33 @@ void GuiApp::RenderStatusBar() {
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus;
     ImGui::Begin("##StatusBar", nullptr, flags);
     const auto& stats = engine_.GetStats();
-    ImGui::Text("TX: %llu | RX: %llu",
-        static_cast<unsigned long long>(stats.txPackets.load()),
-        static_cast<unsigned long long>(stats.rxPackets.load()));
-    ImGui::SameLine(ImGui::GetWindowWidth() - 360.0f);
+    const auto now = std::chrono::steady_clock::now();
+    const bool txActive = now - lastTxActivity_ < std::chrono::milliseconds(350);
+    const bool rxActive = now - lastRxActivity_ < std::chrono::milliseconds(350);
+    const ImVec4 txColor = txActive ? ImVec4(1.0f, 0.12f, 0.12f, 1.0f)
+                                     : ImVec4(0.28f, 0.04f, 0.04f, 1.0f);
+    const ImVec4 rxColor = rxActive ? ImVec4(0.12f, 1.0f, 0.18f, 1.0f)
+                                     : ImVec4(0.04f, 0.28f, 0.06f, 1.0f);
+    const ImGuiColorEditFlags ledFlags = ImGuiColorEditFlags_NoTooltip
+        | ImGuiColorEditFlags_NoDragDrop | ImGuiColorEditFlags_NoBorder;
+    ImGui::ColorButton("##TxLed", txColor, ledFlags, ImVec2(10.0f, 10.0f));
+    ImGui::SameLine(0.0f, 4.0f);
+    ImGui::TextUnformatted("TX:");
+    ImGui::SameLine(0.0f, 4.0f);
+    bool changeStatusUnit = RenderByteValueButton("StatusTx",
+        static_cast<double>(stats.txBytes.load()), statusUnit_, false);
+    ImGui::SameLine(0.0f, 10.0f);
+    ImGui::ColorButton("##RxLed", rxColor, ledFlags, ImVec2(10.0f, 10.0f));
+    ImGui::SameLine(0.0f, 4.0f);
+    ImGui::TextUnformatted("RX:");
+    ImGui::SameLine(0.0f, 4.0f);
+    changeStatusUnit |= RenderByteValueButton("StatusRx",
+        static_cast<double>(stats.rxBytes.load()), statusUnit_, false);
+    if (changeStatusUnit) statusUnit_ = (statusUnit_ + 1) % 3;
+
+    const float statusX = ImGui::GetWindowWidth() - 330.0f;
+    if (ImGui::GetCursorPosX() < statusX) ImGui::SameLine(statusX);
+    else ImGui::SameLine();
     std::lock_guard<std::mutex> lock(statusMutex_);
     ImGui::Text("Status: %s", statusMessage_.c_str());
     ImGui::End();
