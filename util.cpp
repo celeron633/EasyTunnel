@@ -12,6 +12,7 @@
 #ifndef _WIN32
 #include <cerrno>
 #include <csignal>
+#include <netdb.h>
 #include <sys/time.h>
 #include <unistd.h>
 #endif
