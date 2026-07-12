@@ -180,17 +180,21 @@ int TuiApp::Run() {
                 }) | flex,
             }),
             separator(),
-            vbox({
-                hbox({
-                    text(txActive ? "●" : "·")
-                        | color(txActive ? Color::RedLight : Color::Red),
-                    text(" TX "), statusTx->Render(), text("   "),
-                    text(rxActive ? "●" : "·")
-                        | color(rxActive ? Color::GreenLight : Color::Green),
-                    text(" RX "), statusRx->Render(), filler(),
-                }),
-                hbox({text("Status: ") | bold, text(status + " ") | flex}),
+            hbox({
+                // ASCII-only activity indicator. Avoid East-Asian *ambiguous*
+                // width glyphs (e.g. "●"/"·"): a CJK Windows console draws them
+                // 2 cells wide while FTXUI measures 1, which desyncs the line and
+                // makes the whole panel flicker on every redraw. '*'/'.' are
+                // fixed width-1 in both, so the layout stays stable.
+                text(txActive ? "* " : ". ")
+                    | color(txActive ? Color::GreenLight : Color::GrayDark),
+                text("TX "), statusTx->Render(), text("   "),
+                text(rxActive ? "* " : ". ")
+                    | color(rxActive ? Color::GreenLight : Color::GrayDark),
+                text("RX "), statusRx->Render(),
             }),
+            separator(),
+            hbox({text("Status: ") | bold, text(status) | flex}),
         }) | border | flex;
     });
 
