@@ -24,10 +24,11 @@ jobs:
       - name: Configure (CMake + MSVC)
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
-      - name: Build Release (console + GUI)
+      - name: Build Release (console + GUI + TUI)
         run: |
           cmake --build build --config Release --target EasyTunnel
           cmake --build build --config Release --target EasyTunnel_gui
+          cmake --build build --config Release --target EasyTunnel_tui
 
       - name: Package EasyTunnel release
         shell: pwsh
@@ -38,6 +39,7 @@ jobs:
 
           Copy-Item "build/Release/EasyTunnel.exe" "dist/EasyTunnel/EasyTunnel.exe" -Force
           Copy-Item "build/Release/EasyTunnel_gui.exe" "dist/EasyTunnel/EasyTunnel_gui.exe" -Force
+          Copy-Item "build/Release/EasyTunnel_tui.exe" "dist/EasyTunnel/EasyTunnel_tui.exe" -Force
 
           if (Test-Path "build/Release/wintun.dll") {
             Copy-Item "build/Release/wintun.dll" "dist/EasyTunnel/wintun.dll" -Force
