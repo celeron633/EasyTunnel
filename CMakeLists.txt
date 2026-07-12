@@ -54,6 +54,10 @@ if(WIN32)
         tun_adapter_windows.cpp
         wintun_loader.cpp
     )
+
+    # Windows application icon (embedded via a compiled resource script).
+    enable_language(RC)
+    set(APP_ICON_RESOURCE "${CMAKE_SOURCE_DIR}/res/EasyTunnel.rc")
 else()
     list(APPEND COMMON_SOURCES
         tun_adapter_linux.cpp
@@ -63,12 +67,12 @@ endif()
 # ---------------------------------------------------------------------------
 # Console application (original)
 # ---------------------------------------------------------------------------
-add_executable(EasyTunnel main.cpp ${COMMON_SOURCES})
+add_executable(EasyTunnel main.cpp ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
 add_executable(EasyTunnel_rendezvous
     rendezvous_server.cpp rendezvous_config.cpp nat_protocol.cpp util.cpp log.cpp config.cpp)
 if(BUILD_TUI)
     add_executable(EasyTunnel_tui
-        tui/tui_main.cpp tui/tui_app.cpp tui/tui_config.cpp ${COMMON_SOURCES})
+        tui/tui_main.cpp tui/tui_app.cpp tui/tui_config.cpp ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_tui PRIVATE ${CMAKE_SOURCE_DIR})
 endif()
 
@@ -252,7 +256,7 @@ if(BUILD_GUI)
     find_package(OpenGL REQUIRED)
     target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
 
-    add_executable(EasyTunnel_gui gui/gui_main.cpp gui/gui_app.cpp ${COMMON_SOURCES})
+    add_executable(EasyTunnel_gui gui/gui_main.cpp gui/gui_app.cpp ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(EasyTunnel_gui PRIVATE
         spdlog::spdlog_header_only imgui_lib Threads::Threads)

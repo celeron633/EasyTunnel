@@ -1,0 +1,3 @@
+// Windows application icon resource.
+// The lowest-id ICON resource is used by Explorer as the executable's icon.
+1 ICON "EasyTunnel.ico"
