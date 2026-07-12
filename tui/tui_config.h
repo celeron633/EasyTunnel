@@ -1,0 +1,26 @@
+#pragma once
+
+#include <string>
+
+struct TuiConfig {
+    std::string rendezvousAddress = "127.0.0.1";
+    int rendezvousPort = 3478;
+    std::string roomId = "default-room";
+    std::string peerId = "node-a";
+    std::string authToken;
+    std::string adapterName = "EasyTunnel";
+    std::string localTunIpv4 = "10.66.0.1";
+    int tunPrefix = 24;
+    int tunMtu = 1452;
+    bool autoConfigIpv4 = true;
+    int keepaliveInterval = 15;
+    int peerTimeout = 45;
+    int punchTimeout = 30;
+    int logLevel = 1;
+    bool autoWaitForPeer = false;
+};
+
+bool LoadTuiConfig(const std::string& path, TuiConfig* config,
+                   bool* existed, std::string* error);
+bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
+                   std::string* error);

@@ -8,6 +8,7 @@ endif()
 include(FetchContent)
 
 option(BUILD_GUI "Build the ImGui NAT traversal client" ON)
+option(BUILD_TUI "Build the FTXUI terminal client" ON)
 
 FetchContent_Declare(
     spdlog
@@ -16,6 +17,15 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(spdlog)
+
+if(BUILD_TUI)
+    FetchContent_Declare(
+        ftxui
+        GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI.git
+        GIT_TAG v6.1.9
+    )
+    FetchContent_MakeAvailable(ftxui)
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -56,12 +66,27 @@ endif()
 add_executable(EasyTunnel main.cpp ${COMMON_SOURCES})
 add_executable(EasyTunnel_rendezvous
     rendezvous_server.cpp rendezvous_config.cpp nat_protocol.cpp util.cpp log.cpp config.cpp)
+if(BUILD_TUI)
+    add_executable(EasyTunnel_tui
+        tui/tui_main.cpp tui/tui_app.cpp tui/tui_config.cpp ${COMMON_SOURCES})
+    target_include_directories(EasyTunnel_tui PRIVATE ${CMAKE_SOURCE_DIR})
+endif()
 
 if(MSVC)
     target_compile_options(EasyTunnel PRIVATE /W4)
     target_link_options(EasyTunnel PRIVATE "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
 else()
     target_compile_options(EasyTunnel PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+if(BUILD_TUI)
+    if(MSVC)
+        target_compile_options(EasyTunnel_tui PRIVATE /W4)
+        target_link_options(EasyTunnel_tui PRIVATE
+            "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
+    else()
+        target_compile_options(EasyTunnel_tui PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
 endif()
 
 if(MSVC)
@@ -79,6 +104,16 @@ if(WIN32)
 else()
     target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only Threads::Threads)
     target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only Threads::Threads)
+endif()
+
+if(BUILD_TUI)
+    target_link_libraries(EasyTunnel_tui PRIVATE
+        spdlog::spdlog_header_only
+        ftxui::component ftxui::dom ftxui::screen
+        Threads::Threads)
+    if(WIN32)
+        target_link_libraries(EasyTunnel_tui PRIVATE ws2_32 iphlpapi)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -146,6 +181,9 @@ if(WIN32)
     endif()
 
     target_include_directories(EasyTunnel PRIVATE "${WINTUN_INCLUDE_DIR}")
+    if(BUILD_TUI)
+        target_include_directories(EasyTunnel_tui PRIVATE "${WINTUN_INCLUDE_DIR}")
+    endif()
 
     if(EXISTS "${WINTUN_DLL_PATH}")
         add_custom_command(TARGET EasyTunnel POST_BUILD
@@ -154,6 +192,13 @@ if(WIN32)
                     "$<TARGET_FILE_DIR:EasyTunnel>/wintun.dll"
             COMMENT "Copy wintun.dll to output directory"
         )
+        if(BUILD_TUI)
+            add_custom_command(TARGET EasyTunnel_tui POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${WINTUN_DLL_PATH}"
+                        "$<TARGET_FILE_DIR:EasyTunnel_tui>/wintun.dll"
+                COMMENT "Copy wintun.dll to TUI output directory")
+        endif()
     else()
         message(WARNING "wintun.dll not found at ${WINTUN_DLL_PATH}; copy it manually before running")
     endif()
@@ -166,6 +211,13 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
                 "$<TARGET_FILE_DIR:EasyTunnel>/tunnel.conf.example"
         COMMENT "Copy tunnel.conf.example to output directory"
     )
+endif()
+
+if(BUILD_TUI AND EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
+    add_custom_command(TARGET EasyTunnel_tui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
+                "$<TARGET_FILE_DIR:EasyTunnel_tui>/tunnel.conf.example")
 endif()
 
 if(BUILD_GUI)

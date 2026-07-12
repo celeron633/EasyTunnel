@@ -15,6 +15,7 @@ std::once_flag g_loggerInitOnce;
 std::shared_ptr<spdlog::logger> g_logger;
 LogLevel g_minLogLevel = LogLevel::Info;
 std::string g_logFilePath;
+bool g_consoleLoggingEnabled = true;
 std::mutex g_callbackMutex;
 LogCallback g_logCallback;
 
@@ -35,21 +36,23 @@ spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
 
 std::shared_ptr<spdlog::logger> GetLogger() {
     std::call_once(g_loggerInitOnce, []() {
-        auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        if (g_logFilePath.empty()) {
-            g_logger = std::make_shared<spdlog::logger>("EasyTunnel", consoleSink);
-        } else {
+        std::vector<spdlog::sink_ptr> sinks;
+        if (g_consoleLoggingEnabled) {
+            sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+        }
+        if (!g_logFilePath.empty()) {
             try {
-                auto fileSink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(
-                    g_logFilePath, true);
-                std::vector<spdlog::sink_ptr> sinks{consoleSink, fileSink};
-                g_logger = std::make_shared<spdlog::logger>(
-                    "EasyTunnel", sinks.begin(), sinks.end());
+                sinks.push_back(std::make_shared<spdlog::sinks::basic_file_sink_mt>(
+                    g_logFilePath, true));
             } catch (...) {
                 g_logFilePath.clear();
-                g_logger = std::make_shared<spdlog::logger>("EasyTunnel", consoleSink);
             }
         }
+        if (sinks.empty()) {
+            sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+        }
+        g_logger = std::make_shared<spdlog::logger>(
+            "EasyTunnel", sinks.begin(), sinks.end());
         g_logger->set_pattern("%Y-%m-%d %H:%M:%S.%e %v");
         g_logger->set_level(ToSpdlogLevel(g_minLogLevel));
         g_logger->flush_on(spdlog::level::debug);
@@ -139,6 +142,10 @@ void SetLogCallback(LogCallback callback) {
 
 void SetLogFilePath(const std::string& path) {
     g_logFilePath = path;
+}
+
+void SetConsoleLoggingEnabled(bool enabled) {
+    g_consoleLoggingEnabled = enabled;
 }
 
 std::string GetLogFilePath() {

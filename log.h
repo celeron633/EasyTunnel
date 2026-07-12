@@ -19,4 +19,5 @@ void Log(LogLevel level, const std::string& msg);
 using LogCallback = std::function<void(LogLevel, const std::string&)>;
 void SetLogCallback(LogCallback callback);
 void SetLogFilePath(const std::string& path);
+void SetConsoleLoggingEnabled(bool enabled);
 std::string GetLogFilePath();
