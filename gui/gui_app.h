@@ -4,19 +4,24 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "../tunnel_engine.h"
 
 struct GLFWwindow;
+#ifdef _WIN32
+class ExitConfirmationDialog;
+class WindowsTray;
+#endif
 
 class GuiApp {
 public:
     static constexpr const char* kLogLevels[] = {"Debug", "Info", "Warn", "Error"};
     static constexpr int kLogLevelCount = 4;
 
-    GuiApp() = default;
+    GuiApp();
     ~GuiApp();
 
     bool Init();
@@ -44,6 +49,10 @@ private:
     void ProcessAutoWait();
 
     GLFWwindow* window_ = nullptr;
+#ifdef _WIN32
+    std::unique_ptr<WindowsTray> windowsTray_;
+    std::unique_ptr<ExitConfirmationDialog> exitConfirmationDialog_;
+#endif
     TunnelEngine engine_;
 
     char serverAddress_[256] = "127.0.0.1";

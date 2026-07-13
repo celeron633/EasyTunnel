@@ -13,6 +13,11 @@
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
 
+#ifdef _WIN32
+#include "exit_confirmation_dialog.h"
+#include "windows_tray.h"
+#endif
+
 #include "../log.h"
 #include "../nat_protocol.h"
 #include "../nat_traversal.h"
@@ -170,6 +175,8 @@ bool RenderByteValueButton(const char* id, double bytes, int unit, bool perSecon
 }
 }  // namespace
 
+GuiApp::GuiApp() = default;
+
 GuiApp::~GuiApp() {
     SetLogCallback({});
     Shutdown();
@@ -202,6 +209,16 @@ bool GuiApp::Init() {
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 130");
+#ifdef _WIN32
+    exitConfirmationDialog_ = std::make_unique<ExitConfirmationDialog>();
+    windowsTray_ = std::make_unique<WindowsTray>();
+    if (!windowsTray_->Init(
+            window_,
+            [this]() { Disconnect(); },
+            [this]() { exitConfirmationDialog_->Open(); })) {
+        return false;
+    }
+#endif
     engine_.SetStateCallback([this](TunnelState state, const std::string& message) {
         OnStateChanged(state, message);
     });
@@ -239,6 +256,13 @@ void GuiApp::Shutdown() {
     autoWaitEnabledRuntime_.store(false);
     if (!window_) return;
     engine_.Stop();
+#ifdef _WIN32
+    if (windowsTray_) {
+        windowsTray_->Shutdown();
+        windowsTray_.reset();
+    }
+    exitConfirmationDialog_.reset();
+#endif
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -273,6 +297,11 @@ void GuiApp::RenderFrame() {
     }
     ImGui::End();
     RenderStatusBar();
+#ifdef _WIN32
+    if (exitConfirmationDialog_ && exitConfirmationDialog_->Render()) {
+        glfwSetWindowShouldClose(window_, GLFW_TRUE);
+    }
+#endif
 }
 
 void GuiApp::RenderConnectionTab() {

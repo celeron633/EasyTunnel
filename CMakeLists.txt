@@ -261,13 +261,19 @@ if(BUILD_GUI)
     find_package(OpenGL REQUIRED)
     target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
 
-    add_executable(EasyTunnel_gui gui/gui_main.cpp gui/gui_app.cpp ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
+    set(GUI_SOURCES gui/gui_main.cpp gui/gui_app.cpp)
+    if(WIN32)
+        list(APPEND GUI_SOURCES
+            gui/windows_tray.cpp
+            gui/exit_confirmation_dialog.cpp)
+    endif()
+    add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(EasyTunnel_gui PRIVATE
         spdlog::spdlog_header_only imgui_lib Threads::Threads)
 
     if(MSVC)
-        target_compile_options(EasyTunnel_gui PRIVATE /W4)
+        target_compile_options(EasyTunnel_gui PRIVATE /W4 /utf-8)
         target_link_options(EasyTunnel_gui PRIVATE
             "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
             "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
@@ -276,7 +282,7 @@ if(BUILD_GUI)
     endif()
 
     if(WIN32)
-        target_link_libraries(EasyTunnel_gui PRIVATE ws2_32 iphlpapi)
+        target_link_libraries(EasyTunnel_gui PRIVATE ws2_32 iphlpapi shell32)
         target_include_directories(EasyTunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
         add_custom_command(TARGET EasyTunnel_gui POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
