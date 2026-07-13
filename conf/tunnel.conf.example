@@ -15,6 +15,10 @@ auth_token=change-this-secret
 # Send direct peer traffic often enough to retain port-restricted/CGN mappings.
 keepalive_interval=15
 peer_timeout=45
+# Send one 1024-byte peer-only padding packet per second. Enable on both peers
+# for approximately 1 KiB/s in each direction. Padding never enters the TUN,
+# but is included in the client traffic statistics.
+dummy_traffic_enabled=false
 punch_timeout=30
 # n4-style fallback: bind a consecutive UDP socket pool and predict the peer's
 # increasing public port. Set source_port_count=0 to disable the fallback.

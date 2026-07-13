@@ -61,6 +61,7 @@ private:
     bool autoConfigIpv4_ = true;
     int keepaliveInterval_ = 15;
     int peerTimeout_ = 45;
+    bool dummyTrafficEnabled_ = false;
     int punchTimeout_ = 30;
     int nat4SourcePortStart_ = 30000;
     int nat4SourcePortCount_ = 25;

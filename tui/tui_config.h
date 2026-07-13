@@ -15,6 +15,7 @@ struct TuiConfig {
     bool autoConfigIpv4 = true;
     int keepaliveInterval = 15;
     int peerTimeout = 45;
+    bool dummyTrafficEnabled = false;
     int punchTimeout = 30;
     int nat4SourcePortStart = 30000;
     int nat4SourcePortCount = 25;

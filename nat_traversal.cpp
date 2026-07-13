@@ -155,7 +155,9 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
 bool HandlePeerControl(socket_t sock, const Config& cfg,
                        const UdpEndpoint& peer, const UdpEndpoint& source,
                        const uint8_t* data, size_t len,
-                       std::chrono::steady_clock::time_point* lastPeerSeen) {
+                       std::chrono::steady_clock::time_point* lastPeerSeen,
+                       bool* consumedDummyTraffic) {
+    if (consumedDummyTraffic != nullptr) *consumedDummyTraffic = false;
     std::string type;
     std::vector<std::string> fields;
     if (!ParseControlMessage(data, len, &type, &fields)) return false;
@@ -165,14 +167,24 @@ bool HandlePeerControl(socket_t sock, const Config& cfg,
                                             {cfg.room_id, cfg.peer_id}));
     }
     if (type == "PUNCH" || type == "PUNCH_ACK" || type == "KEEPALIVE"
-        || type == "KEEPALIVE_ACK") {
+        || type == "KEEPALIVE_ACK" || type == "PADDING") {
         *lastPeerSeen = std::chrono::steady_clock::now();
+    }
+    if (type == "PADDING" && consumedDummyTraffic != nullptr) {
+        *consumedDummyTraffic = true;
     }
     return true;
 }
 
 bool SendPeerKeepalive(socket_t sock, const Config& cfg, const UdpEndpoint& peer) {
     return Send(sock, peer, MakeControlMessage("KEEPALIVE", {cfg.room_id, cfg.peer_id}));
+}
+
+bool SendPeerDummyTraffic(socket_t sock, const Config& cfg, const UdpEndpoint& peer) {
+    std::string packet = MakeControlMessage("PADDING", {cfg.room_id, cfg.peer_id, ""});
+    if (packet.size() > kPeerDummyTrafficPacketSize) return false;
+    packet.resize(kPeerDummyTrafficPacketSize, '0');
+    return Send(sock, peer, packet);
 }
 
 void UnregisterRendezvous(socket_t sock, const Config& cfg, const UdpEndpoint& server) {

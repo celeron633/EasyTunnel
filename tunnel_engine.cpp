@@ -160,6 +160,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 			std::vector<uint8_t> buf(kMaxPacketSize);
 			auto lastPeerSeen = std::chrono::steady_clock::now();
 			auto nextKeepalive = lastPeerSeen + std::chrono::seconds(cfg.keepalive_interval);
+			auto nextDummyTraffic = lastPeerSeen;
 			while (running_.load()) {
 				sockaddr_storage src{};
 				socket_len_t srcLen = static_cast<socket_len_t>(sizeof(src));
@@ -178,12 +179,18 @@ void TunnelEngine::WorkerThread(Config cfg) {
 					}
 				} else {
 					UdpEndpoint source{};
+					bool consumedDummyTraffic = false;
 					source.addr = src;
 					source.addr_len = srcLen;
 					source.family = src.ss_family;
 					if (HandlePeerControl(sock, cfg, peer, source, buf.data(),
-							static_cast<size_t>(recvLen), &lastPeerSeen)) {
+							static_cast<size_t>(recvLen), &lastPeerSeen,
+							&consumedDummyTraffic)) {
 						// control packet consumed
+						if (consumedDummyTraffic) {
+							stats_.rxPackets.fetch_add(1);
+							stats_.rxBytes.fetch_add(static_cast<uint64_t>(recvLen));
+						}
 					} else if (!SameUdpEndpoint(source, peer)) {
 						Log(LogLevel::Warn, "Drop UDP packet from unexpected source "
 							+ FormatUdpEndpoint(source));
@@ -203,6 +210,13 @@ void TunnelEngine::WorkerThread(Config cfg) {
 				if (now >= nextKeepalive) {
 					SendPeerKeepalive(sock, cfg, peer);
 					nextKeepalive = now + std::chrono::seconds(cfg.keepalive_interval);
+				}
+				if (cfg.dummy_traffic_enabled && now >= nextDummyTraffic) {
+					if (SendPeerDummyTraffic(sock, cfg, peer)) {
+						stats_.txPackets.fetch_add(1);
+						stats_.txBytes.fetch_add(kPeerDummyTrafficPacketSize);
+					}
+					nextDummyTraffic = now + std::chrono::seconds(1);
 				}
 				if (now - lastPeerSeen > std::chrono::seconds(cfg.peer_timeout)) {
 					SetState(TunnelState::Error, "Peer keepalive timed out; NAT mapping may be lost");

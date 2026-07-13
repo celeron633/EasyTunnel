@@ -108,6 +108,7 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     BoolValue(json, "auto_config_ipv4", &config->autoConfigIpv4);
     IntValue(json, "keepalive_interval", &config->keepaliveInterval);
     IntValue(json, "peer_timeout", &config->peerTimeout);
+    BoolValue(json, "dummy_traffic_enabled", &config->dummyTrafficEnabled);
     IntValue(json, "punch_timeout", &config->punchTimeout);
     IntValue(json, "nat4_source_port_start", &config->nat4SourcePortStart);
     IntValue(json, "nat4_source_port_count", &config->nat4SourcePortCount);
@@ -156,6 +157,7 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "  \"auto_config_ipv4\": " << (config.autoConfigIpv4 ? "true" : "false") << ",\n"
         << "  \"keepalive_interval\": " << config.keepaliveInterval << ",\n"
         << "  \"peer_timeout\": " << config.peerTimeout << ",\n"
+        << "  \"dummy_traffic_enabled\": " << (config.dummyTrafficEnabled ? "true" : "false") << ",\n"
         << "  \"punch_timeout\": " << config.punchTimeout << ",\n"
         << "  \"nat4_source_port_start\": " << config.nat4SourcePortStart << ",\n"
         << "  \"nat4_source_port_count\": " << config.nat4SourcePortCount << ",\n"

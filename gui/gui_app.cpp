@@ -441,6 +441,8 @@ void GuiApp::RenderSettingsTab() {
     ImGui::Spacing();
     ImGui::SeparatorText("Misc");
     if (BeginForm("##MiscSettings")) {
+        FormField("1 KiB/s dummy traffic");
+        configChanged |= ImGui::Checkbox("##DummyTraffic", &dummyTrafficEnabled_);
         FormField("Auto wait for peer");
         const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer", &autoWaitForPeer_);
         configChanged |= autoWaitChanged;
@@ -597,6 +599,7 @@ bool GuiApp::StartConnection(const std::string& targetPeerId) {
     cfg.auto_config_ipv4 = autoConfigIpv4_;
     cfg.keepalive_interval = static_cast<uint16_t>(keepaliveInterval_);
     cfg.peer_timeout = static_cast<uint16_t>(peerTimeout_);
+    cfg.dummy_traffic_enabled = dummyTrafficEnabled_;
     cfg.punch_timeout = static_cast<uint16_t>(punchTimeout_);
     cfg.nat4_source_port_start = static_cast<uint16_t>(nat4SourcePortStart_);
     cfg.nat4_source_port_count = static_cast<uint16_t>(nat4SourcePortCount_);
@@ -696,6 +699,7 @@ bool GuiApp::LoadGuiConfig() {
     JsonBool(json, "auto_config_ipv4", &autoConfigIpv4_);
     JsonInt(json, "keepalive_interval", &keepaliveInterval_);
     JsonInt(json, "peer_timeout", &peerTimeout_);
+    JsonBool(json, "dummy_traffic_enabled", &dummyTrafficEnabled_);
     JsonInt(json, "punch_timeout", &punchTimeout_);
     JsonInt(json, "nat4_source_port_start", &nat4SourcePortStart_);
     JsonInt(json, "nat4_source_port_count", &nat4SourcePortCount_);
@@ -747,6 +751,7 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"auto_config_ipv4\": " << (autoConfigIpv4_ ? "true" : "false") << ",\n"
         << "  \"keepalive_interval\": " << keepaliveInterval_ << ",\n"
         << "  \"peer_timeout\": " << peerTimeout_ << ",\n"
+        << "  \"dummy_traffic_enabled\": " << (dummyTrafficEnabled_ ? "true" : "false") << ",\n"
         << "  \"punch_timeout\": " << punchTimeout_ << ",\n"
         << "  \"nat4_source_port_start\": " << nat4SourcePortStart_ << ",\n"
         << "  \"nat4_source_port_count\": " << nat4SourcePortCount_ << ",\n"

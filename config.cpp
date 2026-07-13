@@ -119,6 +119,9 @@ bool LoadConfig(const std::string& file, Config* out) {
         Log(LogLevel::Error, "peer_timeout must be greater than keepalive_interval");
         return false;
     }
+    if (!get("dummy_traffic_enabled").empty()) {
+        out->dummy_traffic_enabled = ParseBool(get("dummy_traffic_enabled"));
+    }
     if (!get("punch_timeout").empty()
         && (!ParseUInt16(get("punch_timeout"), &out->punch_timeout)
             || out->punch_timeout == 0)) {

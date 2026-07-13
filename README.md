@@ -164,6 +164,7 @@ auth_token=change-this-secret
 
 keepalive_interval=15
 peer_timeout=45
+dummy_traffic_enabled=false
 punch_timeout=30
 nat4_source_port_start=30000
 nat4_source_port_count=25

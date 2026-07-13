@@ -116,6 +116,7 @@ int TuiApp::Run() {
     auto nat4PeerPortOffset = Input(&nat4PeerPortOffsetText_, "20");
     auto nat4RoundTimeout = Input(&nat4RoundTimeoutText_, "10");
     auto autoConfig = Checkbox("Auto configure IPv4", &config_.autoConfigIpv4);
+    auto dummyTraffic = Checkbox("1 KiB/s dummy traffic", &config_.dummyTrafficEnabled);
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
     auto logLevel = Radiobox(&logLevels_, &config_.logLevel);
     auto clientList = Radiobox(&clients_, &selectedClient_);
@@ -205,7 +206,7 @@ int TuiApp::Run() {
     auto settingsControls = Container::Vertical({
         adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive, peerTimeout,
         punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
-        nat4PeerPortOffset, nat4RoundTimeout, logLevel, autoWait,
+        nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic, autoWait,
     });
     auto settings = Renderer(settingsControls, [&, this] {
         auto row = [](const std::string& label, Component component) {
@@ -231,6 +232,7 @@ int TuiApp::Run() {
             row("Log Level", logLevel),
             separator(),
             text("Misc") | bold,
+            dummyTraffic->Render(),
             autoWait->Render(),
             separator(),
             text(configMessage_) | color(configSaveOk_ ? Color::Green : Color::Red),
@@ -323,6 +325,7 @@ Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
         std::clamp(ParseInt(keepaliveText_, 15), 1, 300));
     output.peer_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(peerTimeoutText_, 45), output.keepalive_interval + 1, 3600));
+    output.dummy_traffic_enabled = config_.dummyTrafficEnabled;
     output.punch_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(punchTimeoutText_, 30), 1, 600));
     output.nat4_source_port_start = static_cast<uint16_t>(
@@ -502,7 +505,8 @@ std::string TuiApp::ConfigSignature() const {
               << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
               << nat4SourcePortStartText_ << '\n' << nat4SourcePortCountText_ << '\n'
               << nat4PeerPortOffsetText_ << '\n' << nat4RoundTimeoutText_ << '\n'
-              << config_.logLevel << '\n' << config_.autoWaitForPeer;
+              << config_.logLevel << '\n' << config_.dummyTrafficEnabled << '\n'
+              << config_.autoWaitForPeer;
     return signature.str();
 }
 

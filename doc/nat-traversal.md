@@ -247,6 +247,7 @@ KEEPALIVE       ──► winning UDP socket ──► confirmed peer endpoint
 
 - `keepalive_interval=15`：每 15 秒发送一次 `KEEPALIVE`；
 - `peer_timeout=45`：45 秒内没有合法 Peer 数据或控制包则连接进入 Error；
+- `dummy_traffic_enabled=false`：启用后每秒向 Peer 发送一个 1024 字节的 `PADDING` 包；两端都启用时每个方向约 1 KiB/s，接收后直接消费、不进入 TUN，但计入客户端收发统计；
 - `punch_timeout=30`：收到 Peer 后，默认模式和 NAT4 模式共享的打洞总期限。
 
 数据面只接受最终确认端点发来的 IPv4 数据。握手之后不会继续接受同 IP 的任意端口变化。
@@ -262,6 +263,7 @@ KEEPALIVE       ──► winning UDP socket ──► confirmed peer endpoint
 | `nat4_round_timeout` | 10 | 1～60 秒 | 单轮 socket 池等待时间 |
 | `keepalive_interval` | 15 | 正整数 | 连接后的保活间隔 |
 | `peer_timeout` | 45 | 大于保活间隔 | 连接后的 Peer 失活超时 |
+| `dummy_traffic_enabled` | false | `true/false` | 每秒发送 1024 字节的 Peer 填充流量 |
 
 `nat4_source_port_start + nat4_source_port_count - 1` 不能超过 65535。Windows 使用 `select` 管理池，因此 socket 数量限制为 60，为控制 socket 集合保留余量。
 
