@@ -418,6 +418,9 @@ void GuiApp::RenderSettingsTab() {
         FormField("Punch Timeout Seconds");
         configChanged |= ImGui::InputInt("##PunchTimeout", &punchTimeout_);
         punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
+        FormField("NAT4 Max Port Offset");
+        configChanged |= ImGui::InputInt("##Nat4MaxPortOffset", &nat4MaxPortOffset_);
+        nat4MaxPortOffset_ = std::clamp(nat4MaxPortOffset_, 0, 256);
         FormField("Log Level");
         configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
         EndForm();
@@ -582,6 +585,7 @@ bool GuiApp::StartConnection(const std::string& targetPeerId) {
     cfg.keepalive_interval = static_cast<uint16_t>(keepaliveInterval_);
     cfg.peer_timeout = static_cast<uint16_t>(peerTimeout_);
     cfg.punch_timeout = static_cast<uint16_t>(punchTimeout_);
+    cfg.nat4_max_port_offset = static_cast<uint16_t>(nat4MaxPortOffset_);
     TryParseLogLevel(kLogLevels[logLevelIdx_], &cfg.log_level);
     const bool started = engine_.Start(cfg);
     if (started) waitingForPeer_.store(targetPeerId.empty());
@@ -677,6 +681,7 @@ bool GuiApp::LoadGuiConfig() {
     JsonInt(json, "keepalive_interval", &keepaliveInterval_);
     JsonInt(json, "peer_timeout", &peerTimeout_);
     JsonInt(json, "punch_timeout", &punchTimeout_);
+    JsonInt(json, "nat4_max_port_offset", &nat4MaxPortOffset_);
     JsonInt(json, "log_level", &logLevelIdx_);
     JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
 
@@ -686,6 +691,7 @@ bool GuiApp::LoadGuiConfig() {
     keepaliveInterval_ = std::clamp(keepaliveInterval_, 1, 300);
     peerTimeout_ = std::clamp(peerTimeout_, keepaliveInterval_ + 1, 3600);
     punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
+    nat4MaxPortOffset_ = std::clamp(nat4MaxPortOffset_, 0, 256);
     logLevelIdx_ = std::clamp(logLevelIdx_, 0, kLogLevelCount - 1);
     configSaveSucceeded_ = true;
     configSaveMessage_ = "Configuration loaded from " + configFilePath_;
@@ -716,6 +722,7 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"keepalive_interval\": " << keepaliveInterval_ << ",\n"
         << "  \"peer_timeout\": " << peerTimeout_ << ",\n"
         << "  \"punch_timeout\": " << punchTimeout_ << ",\n"
+        << "  \"nat4_max_port_offset\": " << nat4MaxPortOffset_ << ",\n"
         << "  \"log_level\": " << logLevelIdx_ << ",\n"
         << "  \"auto_wait_for_peer\": " << (autoWaitForPeer_ ? "true" : "false") << "\n"
         << "}\n";

@@ -109,6 +109,7 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     IntValue(json, "keepalive_interval", &config->keepaliveInterval);
     IntValue(json, "peer_timeout", &config->peerTimeout);
     IntValue(json, "punch_timeout", &config->punchTimeout);
+    IntValue(json, "nat4_max_port_offset", &config->nat4MaxPortOffset);
     IntValue(json, "log_level", &config->logLevel);
     BoolValue(json, "auto_wait_for_peer", &config->autoWaitForPeer);
 
@@ -119,6 +120,7 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     config->peerTimeout = std::clamp(config->peerTimeout,
                                      config->keepaliveInterval + 1, 3600);
     config->punchTimeout = std::clamp(config->punchTimeout, 1, 600);
+    config->nat4MaxPortOffset = std::clamp(config->nat4MaxPortOffset, 0, 256);
     config->logLevel = std::clamp(config->logLevel, 0, 3);
     return true;
 }
@@ -145,6 +147,7 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "  \"keepalive_interval\": " << config.keepaliveInterval << ",\n"
         << "  \"peer_timeout\": " << config.peerTimeout << ",\n"
         << "  \"punch_timeout\": " << config.punchTimeout << ",\n"
+        << "  \"nat4_max_port_offset\": " << config.nat4MaxPortOffset << ",\n"
         << "  \"log_level\": " << config.logLevel << ",\n"
         << "  \"auto_wait_for_peer\": " << (config.autoWaitForPeer ? "true" : "false") << "\n"
         << "}\n";

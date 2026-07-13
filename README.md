@@ -161,6 +161,7 @@ auth_token=change-this-secret
 keepalive_interval=15
 peer_timeout=45
 punch_timeout=30
+nat4_max_port_offset=20
 
 adapter_name=EasyTunnel-A
 local_tun_ipv4=10.66.0.1
@@ -226,9 +227,12 @@ B: Adapter Name = EasyTunnel-B, Local TUN IPv4 = 10.66.0.2
 
 典型 port-restricted cone NAT 同时具备 endpoint-independent mapping 时，双方持续发送 PUNCH 后通常可以建立直连。
 
+对于一端 NAT3、另一端为“外部端口小幅递增”的 NAT4，客户端会在精确端口之外，自动尝试会合服务器观测端口之后的连续端口。`nat4_max_port_offset` 控制最大正向偏移，默认 `20`，GUI/TUI 中对应 **NAT4 Max Port Offset**；设为 `0` 可关闭。打洞确认后会自动切换到实际回包端口。两端都应升级到包含此功能的版本。
+
 以下情况可能失败：
 
-- symmetric NAT / endpoint-dependent mapping
+- 外部端口随机分配、递减，或递增量超过配置范围的 symmetric NAT
+- 双方都是 symmetric NAT / endpoint-dependent mapping
 - 企业或运营商网络禁止 P2P UDP
 - 不支持 hairpin 的同公网出口场景
 - NAT/CGN 主动改变或回收映射

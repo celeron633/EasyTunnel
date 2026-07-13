@@ -125,6 +125,12 @@ bool LoadConfig(const std::string& file, Config* out) {
         Log(LogLevel::Error, "Invalid punch_timeout");
         return false;
     }
+    if (!get("nat4_max_port_offset").empty()
+        && (!ParseUInt16(get("nat4_max_port_offset"), &out->nat4_max_port_offset)
+            || out->nat4_max_port_offset > 256)) {
+        Log(LogLevel::Error, "nat4_max_port_offset must be between 0 and 256");
+        return false;
+    }
     if (!get("adapter_name").empty()) {
         out->adapter_name = get("adapter_name");
     }

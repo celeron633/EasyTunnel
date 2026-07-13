@@ -16,6 +16,9 @@ auth_token=change-this-secret
 keepalive_interval=15
 peer_timeout=45
 punch_timeout=30
+# Try the rendezvous port and the next 20 ports for increasing-port symmetric NAT.
+# Set to 0 to retain exact-port-only punching; maximum 256.
+nat4_max_port_offset=20
 
 adapter_name=EasyTunnel
 local_tun_ipv4=10.66.0.1
