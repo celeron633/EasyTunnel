@@ -50,6 +50,7 @@ ftxui::screen
 - Adapter Name、Local TUN IPv4、Prefix、MTU
 - Auto configure IPv4
 - Keepalive、Peer Timeout、Punch Timeout
+- NAT4 Source Port Start/Count、Peer Port Offset、Round Timeout
 - 日志级别
 - Auto wait for peer
 - JSON 配置保存结果
@@ -100,6 +101,8 @@ EasyTunnel_tui.json
 - Auto wait for peer
 
 `auth_token` 为明文，请限制配置文件权限。
+
+默认精确端口打洞和 NAT4 多 socket 回退的完整状态机见 [nat-traversal.md](nat-traversal.md)。
 
 ## 自动等待
 
