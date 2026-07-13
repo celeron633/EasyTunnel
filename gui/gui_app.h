@@ -62,7 +62,10 @@ private:
     int keepaliveInterval_ = 15;
     int peerTimeout_ = 45;
     int punchTimeout_ = 30;
-    int nat4MaxPortOffset_ = 20;
+    int nat4SourcePortStart_ = 30000;
+    int nat4SourcePortCount_ = 25;
+    int nat4PeerPortOffset_ = 20;
+    int nat4RoundTimeout_ = 10;
     int logLevelIdx_ = 1;
     bool autoWaitForPeer_ = false;
 

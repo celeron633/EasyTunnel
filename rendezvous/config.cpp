@@ -1,4 +1,4 @@
-#include "rendezvous_config.h"
+#include "config.h"
 
 #include <filesystem>
 #include <fstream>
@@ -114,7 +114,8 @@ bool LoadOrCreateRendezvousConfig(const std::string& path, RendezvousConfig* con
     if (ReadUInt16(json, "max_clients_per_room", &number)) {
         config->maxClientsPerRoom = number;
     }
-    if (ReadString(json, "log_level", &text) && !TryParseLogLevel(text, &config->logLevel)) {
+    if (ReadString(json, "log_level", &text)
+        && !TryParseLogLevel(text, &config->logLevel)) {
         *error = "Invalid log_level in " + path + ": " + text;
         return false;
     }

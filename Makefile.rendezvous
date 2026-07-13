@@ -11,7 +11,8 @@ CXXFLAGS += -std=c++17 -Wall -Wextra -Wpedantic -pthread
 LDFLAGS ?=
 LDLIBS ?= -pthread
 
-SOURCES := rendezvous_server.cpp rendezvous_config.cpp nat_protocol.cpp util.cpp easy_log.cpp
+SOURCES := rendezvous/main.cpp rendezvous/server.cpp rendezvous/registry.cpp \
+           rendezvous/config.cpp nat_protocol.cpp util.cpp easy_log.cpp
 OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 DEPFILES := $(OBJECTS:.o=.d)
 

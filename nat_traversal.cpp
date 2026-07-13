@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "log.h"
+#include "nat4_traversal.h"
 #include "nat_protocol.h"
 
 namespace {
@@ -31,29 +32,6 @@ bool SameIpv4Address(const UdpEndpoint& a, const UdpEndpoint& b) {
     return aa->sin_addr.s_addr == ba->sin_addr.s_addr;
 }
 
-bool EndpointWithPortOffset(const UdpEndpoint& base, uint16_t offset,
-                            UdpEndpoint* endpoint) {
-    if (base.family != AF_INET) return false;
-    const auto* address = reinterpret_cast<const sockaddr_in*>(&base.addr);
-    const uint32_t port = static_cast<uint32_t>(ntohs(address->sin_port)) + offset;
-    if (port == 0 || port > 65535) return false;
-    *endpoint = base;
-    reinterpret_cast<sockaddr_in*>(&endpoint->addr)->sin_port = htons(
-        static_cast<uint16_t>(port));
-    return true;
-}
-
-void SendPunchCandidates(socket_t sock, const Config& cfg,
-                         const UdpEndpoint& rendezvousPeer) {
-    const std::string punch = MakeControlMessage("PUNCH", {cfg.room_id, cfg.peer_id});
-    for (uint32_t offset = 0; offset <= cfg.nat4_max_port_offset; ++offset) {
-        UdpEndpoint candidate{};
-        if (EndpointWithPortOffset(rendezvousPeer, static_cast<uint16_t>(offset),
-                                   &candidate)) {
-            Send(sock, candidate, punch);
-        }
-    }
-}
 }  // namespace
 
 bool OpenNatUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
@@ -70,7 +48,7 @@ bool OpenNatUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
     return true;
 }
 
-bool DiscoverAndPunch(socket_t sock, const Config& cfg,
+bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server, const std::atomic<bool>& running,
                       UdpEndpoint* peer, std::string* error) {
     if (!IsSafeControlField(cfg.room_id) || !IsSafeControlField(cfg.peer_id)
@@ -83,26 +61,39 @@ bool DiscoverAndPunch(socket_t sock, const Config& cfg,
         {cfg.room_id, cfg.peer_id, cfg.auth_token});
     const std::string connect = MakeControlMessage("CONNECT",
         {cfg.room_id, cfg.peer_id, cfg.target_peer_id, cfg.auth_token});
-    const auto deadline = std::chrono::steady_clock::now()
+    const auto selectionDeadline = std::chrono::steady_clock::now()
         + (cfg.target_peer_id.empty() ? std::chrono::hours(24 * 365)
                                       : std::chrono::seconds(cfg.punch_timeout));
+    auto punchDeadline = (std::chrono::steady_clock::time_point::max)();
+    auto legacyDeadline = (std::chrono::steady_clock::time_point::max)();
     auto nextProbe = std::chrono::steady_clock::time_point{};
     bool havePeer = false;
     std::string expectedPeerId;
     std::vector<uint8_t> buffer(2048);
-    while (running.load() && std::chrono::steady_clock::now() < deadline) {
+    while (running.load()) {
         const auto now = std::chrono::steady_clock::now();
+        if ((!havePeer && now >= selectionDeadline)
+            || (havePeer && now >= punchDeadline)) break;
+        if (havePeer && cfg.nat4_source_port_count > 0 && now >= legacyDeadline) {
+            Log(LogLevel::Info, "Exact-port punch did not complete; switching to NAT4 socket pool");
+            UnregisterRendezvous(*sock, cfg, server);
+            CloseSocket(*sock);
+            *sock = kInvalidSocket;
+            return DiscoverAndPunchNat4(sock, cfg, server, running,
+                                        expectedPeerId, punchDeadline, peer, error);
+        }
         if (now >= nextProbe) {
-            Send(sock, server, reg);
-            if (!cfg.target_peer_id.empty()) Send(sock, server, connect);
+            Send(*sock, server, reg);
+            if (!cfg.target_peer_id.empty()) Send(*sock, server, connect);
             if (havePeer) {
-                SendPunchCandidates(sock, cfg, *peer);
+                Send(*sock, *peer, MakeControlMessage(
+                    "PUNCH", {cfg.room_id, cfg.peer_id}));
             }
             nextProbe = now + std::chrono::milliseconds(500);
         }
         sockaddr_storage sourceAddress{};
         socket_len_t sourceLen = static_cast<socket_len_t>(sizeof(sourceAddress));
-        const int n = recvfrom(sock, reinterpret_cast<char*>(buffer.data()),
+        const int n = recvfrom(*sock, reinterpret_cast<char*>(buffer.data()),
             static_cast<int>(buffer.size()), 0,
             reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
         if (n < 0) {
@@ -127,14 +118,17 @@ bool DiscoverAndPunch(socket_t sock, const Config& cfg,
             if (port == 0 || port > 65535
                 || !ParseUdpEndpoint(fields[0], static_cast<uint16_t>(port), &candidate)) continue;
             *peer = candidate;
-            havePeer = true;
             expectedPeerId = fields[2];
-            Log(LogLevel::Info, "Rendezvous supplied peer " + FormatUdpEndpoint(*peer));
-            if (cfg.nat4_max_port_offset > 0) {
-                Log(LogLevel::Info, "NAT4 port prediction enabled: scanning +0..+"
-                    + std::to_string(cfg.nat4_max_port_offset));
+            if (!havePeer) {
+                havePeer = true;
+                punchDeadline = now + std::chrono::seconds(cfg.punch_timeout);
+                legacyDeadline = cfg.nat4_source_port_count > 0
+                    ? now + std::chrono::seconds(2) : punchDeadline;
+                Log(LogLevel::Info, "Rendezvous supplied peer "
+                    + FormatUdpEndpoint(*peer));
             }
-            SendPunchCandidates(sock, cfg, *peer);
+            Send(*sock, *peer, MakeControlMessage(
+                "PUNCH", {cfg.room_id, cfg.peer_id}));
             continue;
         }
         if (havePeer && SameIpv4Address(source, *peer) && fields.size() >= 2
@@ -146,7 +140,9 @@ bool DiscoverAndPunch(socket_t sock, const Config& cfg,
                 *peer = source;
             }
             if (type == "PUNCH") {
-                Send(sock, *peer, MakeControlMessage("PUNCH_ACK", {cfg.room_id, cfg.peer_id}));
+                const std::string ack = MakeControlMessage(
+                    "PUNCH_ACK", {cfg.room_id, cfg.peer_id});
+                for (int repeat = 0; repeat < 5; ++repeat) Send(*sock, *peer, ack);
             }
             Log(LogLevel::Info, "NAT hole punching confirmed with " + FormatUdpEndpoint(*peer));
             return true;

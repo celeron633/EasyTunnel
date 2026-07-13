@@ -15,7 +15,10 @@ struct Config {
     uint16_t keepalive_interval = 15;
     uint16_t peer_timeout = 45;
     uint16_t punch_timeout = 30;
-    uint16_t nat4_max_port_offset = 20;
+    uint16_t nat4_source_port_start = 30000;
+    uint16_t nat4_source_port_count = 25;
+    uint16_t nat4_peer_port_offset = 20;
+    uint16_t nat4_round_timeout = 10;
     std::string adapter_name = "EasyTunnel";
     std::string local_tun_ipv4;
     uint8_t tun_prefix = 24;

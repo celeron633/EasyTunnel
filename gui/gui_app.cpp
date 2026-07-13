@@ -418,9 +418,22 @@ void GuiApp::RenderSettingsTab() {
         FormField("Punch Timeout Seconds");
         configChanged |= ImGui::InputInt("##PunchTimeout", &punchTimeout_);
         punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
-        FormField("NAT4 Max Port Offset");
-        configChanged |= ImGui::InputInt("##Nat4MaxPortOffset", &nat4MaxPortOffset_);
-        nat4MaxPortOffset_ = std::clamp(nat4MaxPortOffset_, 0, 256);
+        FormField("NAT4 Source Port Start");
+        configChanged |= ImGui::InputInt("##Nat4SourcePortStart", &nat4SourcePortStart_);
+        nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
+        FormField("NAT4 Source Port Count");
+        configChanged |= ImGui::InputInt("##Nat4SourcePortCount", &nat4SourcePortCount_);
+        nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 0, 60);
+        if (nat4SourcePortCount_ > 0) {
+            nat4SourcePortStart_ = (std::min)(
+                nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
+        }
+        FormField("NAT4 Peer Port Offset");
+        configChanged |= ImGui::InputInt("##Nat4PeerPortOffset", &nat4PeerPortOffset_);
+        nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
+        FormField("NAT4 Round Timeout Seconds");
+        configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &nat4RoundTimeout_);
+        nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
         FormField("Log Level");
         configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
         EndForm();
@@ -585,7 +598,10 @@ bool GuiApp::StartConnection(const std::string& targetPeerId) {
     cfg.keepalive_interval = static_cast<uint16_t>(keepaliveInterval_);
     cfg.peer_timeout = static_cast<uint16_t>(peerTimeout_);
     cfg.punch_timeout = static_cast<uint16_t>(punchTimeout_);
-    cfg.nat4_max_port_offset = static_cast<uint16_t>(nat4MaxPortOffset_);
+    cfg.nat4_source_port_start = static_cast<uint16_t>(nat4SourcePortStart_);
+    cfg.nat4_source_port_count = static_cast<uint16_t>(nat4SourcePortCount_);
+    cfg.nat4_peer_port_offset = static_cast<uint16_t>(nat4PeerPortOffset_);
+    cfg.nat4_round_timeout = static_cast<uint16_t>(nat4RoundTimeout_);
     TryParseLogLevel(kLogLevels[logLevelIdx_], &cfg.log_level);
     const bool started = engine_.Start(cfg);
     if (started) waitingForPeer_.store(targetPeerId.empty());
@@ -681,7 +697,10 @@ bool GuiApp::LoadGuiConfig() {
     JsonInt(json, "keepalive_interval", &keepaliveInterval_);
     JsonInt(json, "peer_timeout", &peerTimeout_);
     JsonInt(json, "punch_timeout", &punchTimeout_);
-    JsonInt(json, "nat4_max_port_offset", &nat4MaxPortOffset_);
+    JsonInt(json, "nat4_source_port_start", &nat4SourcePortStart_);
+    JsonInt(json, "nat4_source_port_count", &nat4SourcePortCount_);
+    JsonInt(json, "nat4_peer_port_offset", &nat4PeerPortOffset_);
+    JsonInt(json, "nat4_round_timeout", &nat4RoundTimeout_);
     JsonInt(json, "log_level", &logLevelIdx_);
     JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
 
@@ -691,7 +710,14 @@ bool GuiApp::LoadGuiConfig() {
     keepaliveInterval_ = std::clamp(keepaliveInterval_, 1, 300);
     peerTimeout_ = std::clamp(peerTimeout_, keepaliveInterval_ + 1, 3600);
     punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
-    nat4MaxPortOffset_ = std::clamp(nat4MaxPortOffset_, 0, 256);
+    nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
+    nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 0, 60);
+    if (nat4SourcePortCount_ > 0) {
+        nat4SourcePortStart_ = (std::min)(
+            nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
+    }
+    nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
+    nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
     logLevelIdx_ = std::clamp(logLevelIdx_, 0, kLogLevelCount - 1);
     configSaveSucceeded_ = true;
     configSaveMessage_ = "Configuration loaded from " + configFilePath_;
@@ -722,7 +748,10 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"keepalive_interval\": " << keepaliveInterval_ << ",\n"
         << "  \"peer_timeout\": " << peerTimeout_ << ",\n"
         << "  \"punch_timeout\": " << punchTimeout_ << ",\n"
-        << "  \"nat4_max_port_offset\": " << nat4MaxPortOffset_ << ",\n"
+        << "  \"nat4_source_port_start\": " << nat4SourcePortStart_ << ",\n"
+        << "  \"nat4_source_port_count\": " << nat4SourcePortCount_ << ",\n"
+        << "  \"nat4_peer_port_offset\": " << nat4PeerPortOffset_ << ",\n"
+        << "  \"nat4_round_timeout\": " << nat4RoundTimeout_ << ",\n"
         << "  \"log_level\": " << logLevelIdx_ << ",\n"
         << "  \"auto_wait_for_peer\": " << (autoWaitForPeer_ ? "true" : "false") << "\n"
         << "}\n";

@@ -125,10 +125,34 @@ bool LoadConfig(const std::string& file, Config* out) {
         Log(LogLevel::Error, "Invalid punch_timeout");
         return false;
     }
-    if (!get("nat4_max_port_offset").empty()
-        && (!ParseUInt16(get("nat4_max_port_offset"), &out->nat4_max_port_offset)
-            || out->nat4_max_port_offset > 256)) {
-        Log(LogLevel::Error, "nat4_max_port_offset must be between 0 and 256");
+    if (!get("nat4_source_port_start").empty()
+        && (!ParseUInt16(get("nat4_source_port_start"), &out->nat4_source_port_start)
+            || out->nat4_source_port_start == 0)) {
+        Log(LogLevel::Error, "Invalid nat4_source_port_start");
+        return false;
+    }
+    if (!get("nat4_source_port_count").empty()
+        && (!ParseUInt16(get("nat4_source_port_count"), &out->nat4_source_port_count)
+            || out->nat4_source_port_count > 60)) {
+        Log(LogLevel::Error, "nat4_source_port_count must be between 0 and 60");
+        return false;
+    }
+    if (!get("nat4_peer_port_offset").empty()
+        && (!ParseUInt16(get("nat4_peer_port_offset"), &out->nat4_peer_port_offset)
+            || out->nat4_peer_port_offset > 256)) {
+        Log(LogLevel::Error, "nat4_peer_port_offset must be between 0 and 256");
+        return false;
+    }
+    if (!get("nat4_round_timeout").empty()
+        && (!ParseUInt16(get("nat4_round_timeout"), &out->nat4_round_timeout)
+            || out->nat4_round_timeout == 0 || out->nat4_round_timeout > 60)) {
+        Log(LogLevel::Error, "nat4_round_timeout must be between 1 and 60");
+        return false;
+    }
+    if (out->nat4_source_port_count > 0
+        && static_cast<uint32_t>(out->nat4_source_port_start)
+            + out->nat4_source_port_count - 1 > 65535) {
+        Log(LogLevel::Error, "NAT4 source port range exceeds 65535");
         return false;
     }
     if (!get("adapter_name").empty()) {

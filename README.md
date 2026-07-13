@@ -71,6 +71,8 @@ cmake --build build --target EasyTunnel_rendezvous
 
 会合服务器使用 POSIX UDP socket，不创建 TUN，默认端口大于 `1024` 时不需要 root。
 
+会合服务器源码位于 `rendezvous/`：`main.cpp` 负责启动，`server.cpp` 负责 UDP 接收循环，`registry.cpp` 负责房间、配对和 NAT4 round 状态，`config.cpp` 负责配置读写。
+
 ## 快速开始
 
 ### 1. 启动会合服务器
@@ -161,7 +163,10 @@ auth_token=change-this-secret
 keepalive_interval=15
 peer_timeout=45
 punch_timeout=30
-nat4_max_port_offset=20
+nat4_source_port_start=30000
+nat4_source_port_count=25
+nat4_peer_port_offset=20
+nat4_round_timeout=10
 
 adapter_name=EasyTunnel-A
 local_tun_ipv4=10.66.0.1
@@ -227,7 +232,16 @@ B: Adapter Name = EasyTunnel-B, Local TUN IPv4 = 10.66.0.2
 
 典型 port-restricted cone NAT 同时具备 endpoint-independent mapping 时，双方持续发送 PUNCH 后通常可以建立直连。
 
-对于一端 NAT3、另一端为“外部端口小幅递增”的 NAT4，客户端会在精确端口之外，自动尝试会合服务器观测端口之后的连续端口。`nat4_max_port_offset` 控制最大正向偏移，默认 `20`，GUI/TUI 中对应 **NAT4 Max Port Offset**；设为 `0` 可关闭。打洞确认后会自动切换到实际回包端口。两端都应升级到包含此功能的版本。
+普通精确端口打洞会先运行 2 秒；未成功时自动进入 n4 风格的 NAT4 socket 池模式。双方默认分别绑定连续的本地 UDP 端口 `30000～30024`，全部向会合服务器观测到的对端端口 `+20` 发送 PUNCH。一轮默认等待 10 秒；失败后源端口段整体增加 25，再开始下一轮。收到对端 PUNCH 的 socket 会接管后续隧道数据面。
+
+NAT4 模式需要同步升级会合服务器。每端创建好本轮 socket 池后发送带 round ID 的 `NAT4_JOIN`；服务器只有在同一对 Peer 都进入相同 round 后，才向双方发送 `NAT4_PEER` 和本轮观测到的公网端点。客户端收到该消息后才开始发送 PUNCH，避免一端使用新端口段、另一端仍处于旧端口段。
+
+- `nat4_source_port_start`：第一轮连续源端口的起点，默认 `30000`。
+- `nat4_source_port_count`：每轮 socket 数量，默认 `25`、最大 `60`；设为 `0` 可关闭 NAT4 回退。
+- `nat4_peer_port_offset`：对端公网端口预测增量，默认 `20`。
+- `nat4_round_timeout`：每轮端口池等待时间，默认 `10` 秒。
+
+整个普通打洞和 NAT4 多轮尝试仍受 `punch_timeout` 限制；等待模式会在收到 PEER 后才开始计算该超时。客户端和会合服务器都应升级到包含此功能的版本。
 
 以下情况可能失败：
 

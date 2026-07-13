@@ -16,7 +16,10 @@ struct TuiConfig {
     int keepaliveInterval = 15;
     int peerTimeout = 45;
     int punchTimeout = 30;
-    int nat4MaxPortOffset = 20;
+    int nat4SourcePortStart = 30000;
+    int nat4SourcePortCount = 25;
+    int nat4PeerPortOffset = 20;
+    int nat4RoundTimeout = 10;
     int logLevel = 1;
     bool autoWaitForPeer = false;
 };

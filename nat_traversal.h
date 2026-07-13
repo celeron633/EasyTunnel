@@ -11,7 +11,7 @@
 bool OpenNatUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
                       UdpEndpoint* server, std::string* error);
 
-bool DiscoverAndPunch(socket_t sock, const Config& cfg,
+bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server, const std::atomic<bool>& running,
                       UdpEndpoint* peer, std::string* error);
 

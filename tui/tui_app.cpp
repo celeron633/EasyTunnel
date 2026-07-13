@@ -111,7 +111,10 @@ int TuiApp::Run() {
     auto keepalive = Input(&keepaliveText_, "15");
     auto peerTimeout = Input(&peerTimeoutText_, "45");
     auto punchTimeout = Input(&punchTimeoutText_, "30");
-    auto nat4MaxPortOffset = Input(&nat4MaxPortOffsetText_, "20");
+    auto nat4SourcePortStart = Input(&nat4SourcePortStartText_, "30000");
+    auto nat4SourcePortCount = Input(&nat4SourcePortCountText_, "25");
+    auto nat4PeerPortOffset = Input(&nat4PeerPortOffsetText_, "20");
+    auto nat4RoundTimeout = Input(&nat4RoundTimeoutText_, "10");
     auto autoConfig = Checkbox("Auto configure IPv4", &config_.autoConfigIpv4);
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
     auto logLevel = Radiobox(&logLevels_, &config_.logLevel);
@@ -201,7 +204,8 @@ int TuiApp::Run() {
 
     auto settingsControls = Container::Vertical({
         adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive, peerTimeout,
-        punchTimeout, nat4MaxPortOffset, logLevel, autoWait,
+        punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
+        nat4PeerPortOffset, nat4RoundTimeout, logLevel, autoWait,
     });
     auto settings = Renderer(settingsControls, [&, this] {
         auto row = [](const std::string& label, Component component) {
@@ -220,7 +224,10 @@ int TuiApp::Run() {
             row("Keepalive Seconds", keepalive),
             row("Peer Timeout Seconds", peerTimeout),
             row("Punch Timeout Seconds", punchTimeout),
-            row("NAT4 Max Port Offset", nat4MaxPortOffset),
+            row("NAT4 Source Port Start", nat4SourcePortStart),
+            row("NAT4 Source Port Count", nat4SourcePortCount),
+            row("NAT4 Peer Port Offset", nat4PeerPortOffset),
+            row("NAT4 Round Timeout", nat4RoundTimeout),
             row("Log Level", logLevel),
             separator(),
             text("Misc") | bold,
@@ -318,8 +325,19 @@ Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
         std::clamp(ParseInt(peerTimeoutText_, 45), output.keepalive_interval + 1, 3600));
     output.punch_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(punchTimeoutText_, 30), 1, 600));
-    output.nat4_max_port_offset = static_cast<uint16_t>(
-        std::clamp(ParseInt(nat4MaxPortOffsetText_, 20), 0, 256));
+    output.nat4_source_port_start = static_cast<uint16_t>(
+        std::clamp(ParseInt(nat4SourcePortStartText_, 30000), 1, 65535));
+    output.nat4_source_port_count = static_cast<uint16_t>(
+        std::clamp(ParseInt(nat4SourcePortCountText_, 25), 0, 60));
+    if (output.nat4_source_port_count > 0) {
+        output.nat4_source_port_start = static_cast<uint16_t>((std::min)(
+            static_cast<int>(output.nat4_source_port_start),
+            65536 - static_cast<int>(output.nat4_source_port_count)));
+    }
+    output.nat4_peer_port_offset = static_cast<uint16_t>(
+        std::clamp(ParseInt(nat4PeerPortOffsetText_, 20), 0, 256));
+    output.nat4_round_timeout = static_cast<uint16_t>(
+        std::clamp(ParseInt(nat4RoundTimeoutText_, 10), 1, 60));
     TryParseLogLevel(logLevels_[std::clamp(config_.logLevel, 0, 3)], &output.log_level);
     return output;
 }
@@ -446,7 +464,10 @@ void TuiApp::SyncTextFromConfig() {
     keepaliveText_ = std::to_string(config_.keepaliveInterval);
     peerTimeoutText_ = std::to_string(config_.peerTimeout);
     punchTimeoutText_ = std::to_string(config_.punchTimeout);
-    nat4MaxPortOffsetText_ = std::to_string(config_.nat4MaxPortOffset);
+    nat4SourcePortStartText_ = std::to_string(config_.nat4SourcePortStart);
+    nat4SourcePortCountText_ = std::to_string(config_.nat4SourcePortCount);
+    nat4PeerPortOffsetText_ = std::to_string(config_.nat4PeerPortOffset);
+    nat4RoundTimeoutText_ = std::to_string(config_.nat4RoundTimeout);
 }
 
 void TuiApp::SyncConfigFromText() {
@@ -458,8 +479,18 @@ void TuiApp::SyncConfigFromText() {
     config_.peerTimeout = std::clamp(ParseInt(peerTimeoutText_, config_.peerTimeout),
                                      config_.keepaliveInterval + 1, 3600);
     config_.punchTimeout = std::clamp(ParseInt(punchTimeoutText_, config_.punchTimeout), 1, 600);
-    config_.nat4MaxPortOffset = std::clamp(
-        ParseInt(nat4MaxPortOffsetText_, config_.nat4MaxPortOffset), 0, 256);
+    config_.nat4SourcePortStart = std::clamp(
+        ParseInt(nat4SourcePortStartText_, config_.nat4SourcePortStart), 1, 65535);
+    config_.nat4SourcePortCount = std::clamp(
+        ParseInt(nat4SourcePortCountText_, config_.nat4SourcePortCount), 0, 60);
+    if (config_.nat4SourcePortCount > 0) {
+        config_.nat4SourcePortStart = (std::min)(
+            config_.nat4SourcePortStart, 65536 - config_.nat4SourcePortCount);
+    }
+    config_.nat4PeerPortOffset = std::clamp(
+        ParseInt(nat4PeerPortOffsetText_, config_.nat4PeerPortOffset), 0, 256);
+    config_.nat4RoundTimeout = std::clamp(
+        ParseInt(nat4RoundTimeoutText_, config_.nat4RoundTimeout), 1, 60);
 }
 
 std::string TuiApp::ConfigSignature() const {
@@ -469,7 +500,8 @@ std::string TuiApp::ConfigSignature() const {
               << config_.adapterName << '\n' << config_.localTunIpv4 << '\n'
               << tunPrefixText_ << '\n' << tunMtuText_ << '\n' << config_.autoConfigIpv4 << '\n'
               << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
-              << nat4MaxPortOffsetText_ << '\n'
+              << nat4SourcePortStartText_ << '\n' << nat4SourcePortCountText_ << '\n'
+              << nat4PeerPortOffsetText_ << '\n' << nat4RoundTimeoutText_ << '\n'
               << config_.logLevel << '\n' << config_.autoWaitForPeer;
     return signature.str();
 }

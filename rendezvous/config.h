@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "log.h"
+#include "../log.h"
 
 struct RendezvousConfig {
     std::string bindAddress = "0.0.0.0";
@@ -15,6 +15,5 @@ struct RendezvousConfig {
     std::string logFile = "EasyTunnel_rendezvous.log";
 };
 
-// Creates a default JSON file when it does not exist, then returns defaults.
 bool LoadOrCreateRendezvousConfig(const std::string& path, RendezvousConfig* config,
                                   bool* created, std::string* error);

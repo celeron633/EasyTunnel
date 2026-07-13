@@ -109,7 +109,10 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     IntValue(json, "keepalive_interval", &config->keepaliveInterval);
     IntValue(json, "peer_timeout", &config->peerTimeout);
     IntValue(json, "punch_timeout", &config->punchTimeout);
-    IntValue(json, "nat4_max_port_offset", &config->nat4MaxPortOffset);
+    IntValue(json, "nat4_source_port_start", &config->nat4SourcePortStart);
+    IntValue(json, "nat4_source_port_count", &config->nat4SourcePortCount);
+    IntValue(json, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
+    IntValue(json, "nat4_round_timeout", &config->nat4RoundTimeout);
     IntValue(json, "log_level", &config->logLevel);
     BoolValue(json, "auto_wait_for_peer", &config->autoWaitForPeer);
 
@@ -120,7 +123,14 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     config->peerTimeout = std::clamp(config->peerTimeout,
                                      config->keepaliveInterval + 1, 3600);
     config->punchTimeout = std::clamp(config->punchTimeout, 1, 600);
-    config->nat4MaxPortOffset = std::clamp(config->nat4MaxPortOffset, 0, 256);
+    config->nat4SourcePortStart = std::clamp(config->nat4SourcePortStart, 1, 65535);
+    config->nat4SourcePortCount = std::clamp(config->nat4SourcePortCount, 0, 60);
+    if (config->nat4SourcePortCount > 0) {
+        config->nat4SourcePortStart = (std::min)(
+            config->nat4SourcePortStart, 65536 - config->nat4SourcePortCount);
+    }
+    config->nat4PeerPortOffset = std::clamp(config->nat4PeerPortOffset, 0, 256);
+    config->nat4RoundTimeout = std::clamp(config->nat4RoundTimeout, 1, 60);
     config->logLevel = std::clamp(config->logLevel, 0, 3);
     return true;
 }
@@ -147,7 +157,10 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "  \"keepalive_interval\": " << config.keepaliveInterval << ",\n"
         << "  \"peer_timeout\": " << config.peerTimeout << ",\n"
         << "  \"punch_timeout\": " << config.punchTimeout << ",\n"
-        << "  \"nat4_max_port_offset\": " << config.nat4MaxPortOffset << ",\n"
+        << "  \"nat4_source_port_start\": " << config.nat4SourcePortStart << ",\n"
+        << "  \"nat4_source_port_count\": " << config.nat4SourcePortCount << ",\n"
+        << "  \"nat4_peer_port_offset\": " << config.nat4PeerPortOffset << ",\n"
+        << "  \"nat4_round_timeout\": " << config.nat4RoundTimeout << ",\n"
         << "  \"log_level\": " << config.logLevel << ",\n"
         << "  \"auto_wait_for_peer\": " << (config.autoWaitForPeer ? "true" : "false") << "\n"
         << "}\n";

@@ -54,7 +54,10 @@ private:
     std::string keepaliveText_;
     std::string peerTimeoutText_;
     std::string punchTimeoutText_;
-    std::string nat4MaxPortOffsetText_;
+    std::string nat4SourcePortStartText_;
+    std::string nat4SourcePortCountText_;
+    std::string nat4PeerPortOffsetText_;
+    std::string nat4RoundTimeoutText_;
 
     std::vector<std::string> clients_;
     int selectedClient_ = 0;

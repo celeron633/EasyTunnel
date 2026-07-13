@@ -44,6 +44,7 @@ set(COMMON_SOURCES
     tunnel_engine.cpp
     nat_protocol.cpp
     nat_traversal.cpp
+    nat4_traversal.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -69,7 +70,11 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(EasyTunnel main.cpp ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
 add_executable(EasyTunnel_rendezvous
-    rendezvous_server.cpp rendezvous_config.cpp nat_protocol.cpp util.cpp log.cpp config.cpp)
+    rendezvous/main.cpp
+    rendezvous/server.cpp
+    rendezvous/registry.cpp
+    rendezvous/config.cpp
+    nat_protocol.cpp util.cpp log.cpp config.cpp)
 if(BUILD_TUI)
     add_executable(EasyTunnel_tui
         tui/tui_main.cpp tui/tui_app.cpp tui/tui_config.cpp ${COMMON_SOURCES} ${APP_ICON_RESOURCE})

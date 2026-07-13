@@ -102,7 +102,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		SetState(TunnelState::Connecting,
 			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
 			                           : "Connecting to " + cfg.target_peer_id);
-		if (!DiscoverAndPunch(sock, cfg, server, running_, &peer, &socketError)) {
+		if (!DiscoverAndPunch(&sock, cfg, server, running_, &peer, &socketError)) {
 			SetState(TunnelState::Error, socketError);
 			break;
 		}
