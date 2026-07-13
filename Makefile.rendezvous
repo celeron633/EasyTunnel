@@ -1,0 +1,32 @@
+# Offline Linux build for the EasyTunnel rendezvous server.
+# Usage: make -f Makefile.rendezvous
+
+CXX ?= g++
+TARGET ?= EasyTunnel_rendezvous
+BUILD_DIR ?= build-rendezvous
+
+CPPFLAGS ?=
+CXXFLAGS ?= -O2 -DNDEBUG
+CXXFLAGS += -std=c++17 -Wall -Wextra -Wpedantic -pthread
+LDFLAGS ?=
+LDLIBS ?= -pthread
+
+SOURCES := rendezvous_server.cpp rendezvous_config.cpp nat_protocol.cpp util.cpp easy_log.cpp
+OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
+DEPFILES := $(OBJECTS:.o=.d)
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+clean:
+	rm -rf $(BUILD_DIR) $(TARGET)
+
+-include $(DEPFILES)
