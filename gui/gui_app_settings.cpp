@@ -170,8 +170,6 @@ void GuiApp::RenderSettingsTab() {
         FormField("NAT4 Round Timeout Seconds");
         configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &nat4RoundTimeout_);
         nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
-        FormField("Log Level");
-        configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
         EndForm();
     }
     ImGui::Spacing();
@@ -179,6 +177,8 @@ void GuiApp::RenderSettingsTab() {
     if (BeginForm("##MiscSettings")) {
         FormField("1 KiB/s dummy traffic");
         configChanged |= ImGui::Checkbox("##DummyTraffic", &dummyTrafficEnabled_);
+        FormField("Log Level");
+        configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
         FormField("Auto wait for peer");
         const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer", &autoWaitForPeer_);
         configChanged |= autoWaitChanged;

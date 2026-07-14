@@ -41,7 +41,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto controls = Container::Vertical({
         adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive, peerTimeout,
         punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
-        nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic, autoWait,
+        nat4PeerPortOffset, nat4RoundTimeout, dummyTraffic, logLevel, autoWait,
     });
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
@@ -67,10 +67,10 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             row("NAT4 Source Port Count", nat4SourcePortCount),
             row("NAT4 Peer Port Offset", nat4PeerPortOffset),
             row("NAT4 Round Timeout", nat4RoundTimeout),
-            row("Log Level", logLevel),
             separator(),
             text("Misc") | bold,
             dummyTraffic->Render(),
+            row("Log Level", logLevel),
             autoWait->Render(),
             separator(),
             text(configMessage_) | color(configSaveOk_ ? Color::Green : Color::Red),
