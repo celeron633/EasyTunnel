@@ -22,6 +22,9 @@ public:
     int Run();
 
 private:
+    ftxui::Component BuildConnectionTab();
+    ftxui::Component BuildSettingsTab();
+    ftxui::Component BuildLogTab();
     bool StartConnection(const std::string& targetPeerId);
     void ConnectSelectedClient();
     void Disconnect();
@@ -35,6 +38,8 @@ private:
     void UpdateStats();
     void UpdateDisplayLabels();
     void SaveIfChanged();
+    void CopyAllLogs();
+    void CopySelectedText();
     std::string ConfigSignature() const;
     void SyncTextFromConfig();
     void SyncConfigFromText();
@@ -70,6 +75,8 @@ private:
     std::atomic<TunnelState> state_{TunnelState::Disconnected};
     std::mutex logMutex_;
     std::vector<std::string> logLines_;
+    std::string logCopyMessage_;
+    bool logCopyOk_ = true;
 
     int txTotalUnit_ = 0;
     int rxTotalUnit_ = 0;

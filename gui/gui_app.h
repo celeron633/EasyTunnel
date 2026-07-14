@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <memory>
@@ -85,6 +86,7 @@ private:
     std::mutex logMutex_;
     std::vector<std::string> logLines_;
     bool logAutoScroll_ = true;
+    std::size_t renderedLogLineCount_ = 0;
     std::string configFilePath_;
     std::string configSaveMessage_;
     bool configSaveSucceeded_ = true;

@@ -10,7 +10,10 @@ TUI 源码位于：
 tui/
 ├── tui_main.cpp      # 平台初始化、日志路径、TUI 入口
 ├── tui_app.h         # 状态、线程和交互接口
-├── tui_app.cpp       # FTXUI 页面、连接流程、统计和自动等待
+├── tui_app.cpp       # 生命周期、主循环和 Tab 编排
+├── tui_app_connection.cpp # Connection 页、连接流程和统计
+├── tui_app_settings.cpp   # Settings 页和配置同步
+├── tui_app_log.cpp        # Log 页和剪贴板操作
 ├── tui_config.h      # TUI JSON 配置模型
 └── tui_config.cpp    # JSON 加载、校验和保存
 ```

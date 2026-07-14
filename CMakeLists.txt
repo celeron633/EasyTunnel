@@ -77,7 +77,14 @@ add_executable(EasyTunnel_rendezvous
     nat_protocol.cpp util.cpp log.cpp config.cpp)
 if(BUILD_TUI)
     add_executable(EasyTunnel_tui
-        tui/tui_main.cpp tui/tui_app.cpp tui/tui_config.cpp ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
+        tui/tui_main.cpp
+        tui/tui_app.cpp
+        tui/tui_app_connection.cpp
+        tui/tui_app_settings.cpp
+        tui/tui_app_log.cpp
+        tui/tui_config.cpp
+        ${COMMON_SOURCES}
+        ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_tui PRIVATE ${CMAKE_SOURCE_DIR})
 endif()
 
@@ -261,7 +268,12 @@ if(BUILD_GUI)
     find_package(OpenGL REQUIRED)
     target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
 
-    set(GUI_SOURCES gui/gui_main.cpp gui/gui_app.cpp)
+    set(GUI_SOURCES
+        gui/gui_main.cpp
+        gui/gui_app.cpp
+        gui/gui_app_connection.cpp
+        gui/gui_app_settings.cpp
+        gui/gui_app_log.cpp)
     if(WIN32)
         list(APPEND GUI_SOURCES
             gui/windows_tray.cpp
