@@ -152,32 +152,39 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
     return false;
 }
 
-bool HandlePeerControl(socket_t sock, const Config& cfg,
-                       const UdpEndpoint& peer, const UdpEndpoint& source,
-                       const uint8_t* data, size_t len,
-                       std::chrono::steady_clock::time_point* lastPeerSeen,
-                       bool* consumedDummyTraffic) {
-    if (consumedDummyTraffic != nullptr) *consumedDummyTraffic = false;
+PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
+                                    const UdpEndpoint& peer, const UdpEndpoint& source,
+                                    const uint8_t* data, size_t len) {
+    PeerControlResult result;
     std::string type;
     std::vector<std::string> fields;
-    if (!ParseControlMessage(data, len, &type, &fields)) return false;
-    if (!SameUdpEndpoint(source, peer) || fields.empty() || fields[0] != cfg.room_id) return true;
+    if (!ParseControlMessage(data, len, &type, &fields)) return result;
+    result.handled = true;
+    if (!SameUdpEndpoint(source, peer) || fields.empty() || fields[0] != cfg.room_id) return result;
     if (type == "PUNCH" || type == "KEEPALIVE") {
-        Send(sock, peer, MakeControlMessage(type == "PUNCH" ? "PUNCH_ACK" : "KEEPALIVE_ACK",
-                                            {cfg.room_id, cfg.peer_id}));
+        std::vector<std::string> ackFields{cfg.room_id, cfg.peer_id};
+        if (type == "KEEPALIVE" && fields.size() >= 3) ackFields.push_back(fields[2]);
+        Send(sock, peer, MakeControlMessage(
+            type == "PUNCH" ? "PUNCH_ACK" : "KEEPALIVE_ACK", ackFields));
+    }
+    if (type == "KEEPALIVE_ACK") {
+        result.receivedKeepaliveAck = true;
+        // Empty IDs are accepted by the engine for compatibility with older peers.
+        result.keepaliveAckId = fields.size() >= 3 ? fields[2] : "";
     }
     if (type == "PUNCH" || type == "PUNCH_ACK" || type == "KEEPALIVE"
         || type == "KEEPALIVE_ACK" || type == "PADDING") {
-        *lastPeerSeen = std::chrono::steady_clock::now();
+        result.peerSeen = true;
     }
-    if (type == "PADDING" && consumedDummyTraffic != nullptr) {
-        *consumedDummyTraffic = true;
-    }
-    return true;
+    result.consumedDummyTraffic = type == "PADDING";
+    return result;
 }
 
-bool SendPeerKeepalive(socket_t sock, const Config& cfg, const UdpEndpoint& peer) {
-    return Send(sock, peer, MakeControlMessage("KEEPALIVE", {cfg.room_id, cfg.peer_id}));
+bool SendPeerKeepalive(socket_t sock, const Config& cfg, const UdpEndpoint& peer,
+                       const std::string& requestId) {
+    std::vector<std::string> fields{cfg.room_id, cfg.peer_id};
+    if (!requestId.empty()) fields.push_back(requestId);
+    return Send(sock, peer, MakeControlMessage("KEEPALIVE", fields));
 }
 
 bool SendPeerDummyTraffic(socket_t sock, const Config& cfg, const UdpEndpoint& peer) {

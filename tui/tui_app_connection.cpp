@@ -96,6 +96,7 @@ ftxui::Component TuiApp::BuildConnectionTab() {
             < std::chrono::milliseconds(350);
         const bool rxActive = std::chrono::steady_clock::now() - lastRxActivity_
             < std::chrono::milliseconds(350);
+        const int64_t rttMilliseconds = stats.rttMilliseconds.load();
         auto row = [](const std::string& label, Component component) {
             return hbox({text(label) | size(WIDTH, EQUAL, 26), component->Render() | flex});
         };
@@ -123,6 +124,9 @@ ftxui::Component TuiApp::BuildConnectionTab() {
                     rxTotal->Render(), rxSpeed->Render(),
                 }) | flex,
             }),
+            text(rttMilliseconds < 0
+                ? "Latency: -- ms"
+                : "Latency: " + std::to_string(rttMilliseconds) + " ms"),
             separator(),
             hbox({
                 text(txActive ? "* " : ". ")

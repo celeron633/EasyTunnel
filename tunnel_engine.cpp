@@ -48,6 +48,7 @@ bool TunnelEngine::Start(const Config& cfg) {
 	stats_.rxPackets.store(0);
 	stats_.txBytes.store(0);
 	stats_.rxBytes.store(0);
+	stats_.rttMilliseconds.store(-1);
 
 	running_.store(true);
 	SetState(TunnelState::Connecting);
@@ -161,6 +162,9 @@ void TunnelEngine::WorkerThread(Config cfg) {
 			auto lastPeerSeen = std::chrono::steady_clock::now();
 			auto nextKeepalive = lastPeerSeen + std::chrono::seconds(cfg.keepalive_interval);
 			auto nextDummyTraffic = lastPeerSeen;
+			std::chrono::steady_clock::time_point keepaliveSentAt{};
+			std::string pendingKeepaliveId;
+			uint64_t keepaliveSequence = 0;
 			while (running_.load()) {
 				sockaddr_storage src{};
 				socket_len_t srcLen = static_cast<socket_len_t>(sizeof(src));
@@ -179,15 +183,24 @@ void TunnelEngine::WorkerThread(Config cfg) {
 					}
 				} else {
 					UdpEndpoint source{};
-					bool consumedDummyTraffic = false;
 					source.addr = src;
 					source.addr_len = srcLen;
 					source.family = src.ss_family;
-					if (HandlePeerControl(sock, cfg, peer, source, buf.data(),
-							static_cast<size_t>(recvLen), &lastPeerSeen,
-							&consumedDummyTraffic)) {
+					const PeerControlResult control = HandlePeerControl(
+						sock, cfg, peer, source, buf.data(), static_cast<size_t>(recvLen));
+					if (control.handled) {
 						// control packet consumed
-						if (consumedDummyTraffic) {
+						const auto receivedAt = std::chrono::steady_clock::now();
+						if (control.peerSeen) lastPeerSeen = receivedAt;
+						if (control.receivedKeepaliveAck && !pendingKeepaliveId.empty()
+							&& (control.keepaliveAckId.empty()
+								|| control.keepaliveAckId == pendingKeepaliveId)) {
+							const auto rtt = std::chrono::duration_cast<std::chrono::milliseconds>(
+								receivedAt - keepaliveSentAt).count();
+							stats_.rttMilliseconds.store(rtt);
+							pendingKeepaliveId.clear();
+						}
+						if (control.consumedDummyTraffic) {
 							stats_.rxPackets.fetch_add(1);
 							stats_.rxBytes.fetch_add(static_cast<uint64_t>(recvLen));
 						}
@@ -208,7 +221,11 @@ void TunnelEngine::WorkerThread(Config cfg) {
 
 				const auto now = std::chrono::steady_clock::now();
 				if (now >= nextKeepalive) {
-					SendPeerKeepalive(sock, cfg, peer);
+					const std::string requestId = std::to_string(++keepaliveSequence);
+					if (SendPeerKeepalive(sock, cfg, peer, requestId)) {
+						keepaliveSentAt = std::chrono::steady_clock::now();
+						pendingKeepaliveId = requestId;
+					}
 					nextKeepalive = now + std::chrono::seconds(cfg.keepalive_interval);
 				}
 				if (cfg.dummy_traffic_enabled && now >= nextDummyTraffic) {

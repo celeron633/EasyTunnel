@@ -31,6 +31,8 @@ struct TunnelStats {
 	std::atomic<uint64_t> rxPackets{0};
 	std::atomic<uint64_t> txBytes{0};
 	std::atomic<uint64_t> rxBytes{0};
+	// Latest heartbeat round-trip time. -1 means no sample is available yet.
+	std::atomic<int64_t> rttMilliseconds{-1};
 };
 
 class TunnelEngine {
