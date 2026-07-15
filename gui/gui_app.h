@@ -45,6 +45,7 @@ private:
     bool ValidateCommonFields(std::string* error) const;
     bool LoadGuiConfig();
     bool SaveGuiConfig();
+    void ShowConfigSaveMessage(std::string message, bool succeeded);
     void RenderConfigSaveStatus();
     void UpdateLiveStats();
     void ProcessAutoWait();
@@ -90,6 +91,7 @@ private:
     std::string configFilePath_;
     std::string configSaveMessage_;
     bool configSaveSucceeded_ = true;
+    std::chrono::steady_clock::time_point configSaveMessageExpiresAt_{};
 
     int txTotalUnit_ = 0;
     int rxTotalUnit_ = 0;

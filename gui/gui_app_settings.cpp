@@ -13,6 +13,7 @@
 
 namespace {
 constexpr float kFormLabelWidth = 155.0f;
+constexpr auto kConfigSaveMessageDuration = std::chrono::seconds(3);
 
 bool BeginForm(const char* id) {
     if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
@@ -204,17 +205,16 @@ void GuiApp::RenderSettingsTab() {
 bool GuiApp::LoadGuiConfig() {
     std::ifstream input(configFilePath_, std::ios::binary);
     if (!input.is_open()) {
-        configSaveSucceeded_ = true;
-        configSaveMessage_ = "Configuration will be saved to " + configFilePath_;
+        ShowConfigSaveMessage("Configuration will be saved to " + configFilePath_, true);
         return true;
     }
     std::ostringstream contents;
     contents << input.rdbuf();
     const std::string json = contents.str();
     if (json.find('{') == std::string::npos || json.find('}') == std::string::npos) {
-        configSaveSucceeded_ = false;
-        configSaveMessage_ = "Invalid configuration JSON: " + configFilePath_;
-        Log(LogLevel::Error, configSaveMessage_);
+        const std::string message = "Invalid configuration JSON: " + configFilePath_;
+        ShowConfigSaveMessage(message, false);
+        Log(LogLevel::Error, message);
         return false;
     }
     std::string text;
@@ -254,18 +254,18 @@ bool GuiApp::LoadGuiConfig() {
     nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
     nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
     logLevelIdx_ = std::clamp(logLevelIdx_, 0, kLogLevelCount - 1);
-    configSaveSucceeded_ = true;
-    configSaveMessage_ = "Configuration loaded from " + configFilePath_;
-    Log(LogLevel::Info, configSaveMessage_);
+    const std::string message = "Configuration loaded from " + configFilePath_;
+    ShowConfigSaveMessage(message, true);
+    Log(LogLevel::Info, message);
     return true;
 }
 
 bool GuiApp::SaveGuiConfig() {
     std::ofstream output(configFilePath_, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
-        configSaveSucceeded_ = false;
-        configSaveMessage_ = "Failed to save configuration: " + configFilePath_;
-        Log(LogLevel::Error, configSaveMessage_);
+        const std::string message = "Failed to save configuration: " + configFilePath_;
+        ShowConfigSaveMessage(message, false);
+        Log(LogLevel::Error, message);
         return false;
     }
     output
@@ -293,18 +293,28 @@ bool GuiApp::SaveGuiConfig() {
         << "}\n";
     output.flush();
     if (!output.good()) {
-        configSaveSucceeded_ = false;
-        configSaveMessage_ = "Failed to write configuration: " + configFilePath_;
-        Log(LogLevel::Error, configSaveMessage_);
+        const std::string message = "Failed to write configuration: " + configFilePath_;
+        ShowConfigSaveMessage(message, false);
+        Log(LogLevel::Error, message);
         return false;
     }
-    configSaveSucceeded_ = true;
-    configSaveMessage_ = "Configuration saved: " + configFilePath_;
+    ShowConfigSaveMessage("Configuration saved: " + configFilePath_, true);
     return true;
+}
+
+void GuiApp::ShowConfigSaveMessage(std::string message, bool succeeded) {
+    configSaveMessage_ = std::move(message);
+    configSaveSucceeded_ = succeeded;
+    configSaveMessageExpiresAt_ = std::chrono::steady_clock::now()
+        + kConfigSaveMessageDuration;
 }
 
 void GuiApp::RenderConfigSaveStatus() {
     if (configSaveMessage_.empty()) return;
+    if (std::chrono::steady_clock::now() >= configSaveMessageExpiresAt_) {
+        configSaveMessage_.clear();
+        return;
+    }
     const ImVec4 color = configSaveSucceeded_
         ? ImVec4(0.35f, 0.85f, 0.45f, 1.0f)
         : ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
