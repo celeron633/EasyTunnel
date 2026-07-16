@@ -19,6 +19,18 @@ namespace {
 void GlfwErrorCallback(int error, const char* description) {
     Log(LogLevel::Error, "GLFW Error " + std::to_string(error) + ": " + description);
 }
+
+#ifdef _WIN32
+const wchar_t* TrayStatusName(TunnelState state) {
+    switch (state) {
+        case TunnelState::Disconnected: return L"Disconnected";
+        case TunnelState::Connecting: return L"Connecting";
+        case TunnelState::Connected: return L"Connected";
+        case TunnelState::Error: return L"Error";
+    }
+    return L"Unknown";
+}
+#endif
 }  // namespace
 
 GuiApp::GuiApp() = default;
@@ -126,6 +138,16 @@ void GuiApp::Shutdown() {
 
 void GuiApp::RenderFrame() {
     UpdateLiveStats();
+#ifdef _WIN32
+    if (windowsTray_) {
+        const TunnelStats& stats = engine_.GetStats();
+        windowsTray_->UpdateTooltip(
+            TrayStatusName(currentState_.load()),
+            stats.txBytes.load(),
+            stats.rxBytes.load(),
+            stats.rttMilliseconds.load());
+    }
+#endif
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, viewport->WorkSize.y - 30));
