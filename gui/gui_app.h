@@ -13,6 +13,7 @@
 
 struct GLFWwindow;
 #ifdef _WIN32
+class DisconnectConfirmationDialog;
 class ExitConfirmationDialog;
 class WindowsTray;
 #endif
@@ -53,6 +54,7 @@ private:
     GLFWwindow* window_ = nullptr;
 #ifdef _WIN32
     std::unique_ptr<WindowsTray> windowsTray_;
+    std::unique_ptr<DisconnectConfirmationDialog> disconnectConfirmationDialog_;
     std::unique_ptr<ExitConfirmationDialog> exitConfirmationDialog_;
 #endif
     TunnelEngine engine_;

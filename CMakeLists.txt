@@ -277,6 +277,7 @@ if(BUILD_GUI)
     if(WIN32)
         list(APPEND GUI_SOURCES
             gui/windows_tray.cpp
+            gui/disconnect_confirmation_dialog.cpp
             gui/exit_confirmation_dialog.cpp)
     endif()
     add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES} ${APP_ICON_RESOURCE})

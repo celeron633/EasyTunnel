@@ -162,7 +162,10 @@ struct WindowsTray::Impl {
         DestroyMenu(menu);
 
         if (command == kShowWindowCommand) RestoreWindow();
-        if (command == kDisconnectCommand && disconnectCallback) disconnectCallback();
+        if (command == kDisconnectCommand && disconnectCallback) {
+            RestoreWindow();
+            disconnectCallback();
+        }
         if (command == kExitCommand && exitCallback) {
             RestoreWindow();
             exitCallback();
