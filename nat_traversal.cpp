@@ -8,6 +8,7 @@
 #include "log.h"
 #include "nat4_traversal.h"
 #include "nat_protocol.h"
+#include "rendezvous_client.h"
 
 namespace {
 bool Send(socket_t sock, const UdpEndpoint& endpoint, const uint8_t* data, size_t len) {
@@ -34,33 +35,11 @@ bool SameIpv4Address(const UdpEndpoint& a, const UdpEndpoint& b) {
 
 }  // namespace
 
-bool OpenNatUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
-                      UdpEndpoint* server, std::string* error) {
-    if (!ResolveUdpEndpoint(cfg.rendezvous_addr, cfg.rendezvous_port, AF_INET,
-                            server, error)) return false;
-    socket_t opened = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (opened == kInvalidSocket) {
-        *error = "Cannot create IPv4 UDP socket. err=" + std::to_string(GetSocketError());
-        return false;
-    }
-    SetSocketRecvTimeoutMs(opened, recvTimeoutMs);
-    *sock = opened;
-    return true;
-}
-
 bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server, const std::atomic<bool>& running,
                       UdpEndpoint* peer, std::string* error) {
-    if (!IsSafeControlField(cfg.room_id) || !IsSafeControlField(cfg.peer_id)
-        || (!cfg.target_peer_id.empty() && !IsSafeControlField(cfg.target_peer_id))
-        || (!cfg.auth_token.empty() && !IsSafeControlField(cfg.auth_token))) {
-        *error = "room_id/peer_id/target_peer_id/auth_token is invalid";
-        return false;
-    }
-    const std::string reg = MakeControlMessage("REG",
-        {cfg.room_id, cfg.peer_id, cfg.auth_token});
-    const std::string connect = MakeControlMessage("CONNECT",
-        {cfg.room_id, cfg.peer_id, cfg.target_peer_id, cfg.auth_token});
+    if (!ValidateRendezvousSession(cfg, error)) return false;
+    RendezvousClient rendezvous(cfg, server);
     const auto selectionDeadline = std::chrono::steady_clock::now()
         + (cfg.target_peer_id.empty() ? std::chrono::hours(24 * 365)
                                       : std::chrono::seconds(cfg.punch_timeout));
@@ -72,19 +51,19 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
     std::vector<uint8_t> buffer(2048);
     while (running.load()) {
         const auto now = std::chrono::steady_clock::now();
-        if ((!havePeer && now >= selectionDeadline)
+        if (rendezvous.ResponseTimedOut(now, error)) return false;
+        if ((!havePeer && rendezvous.HasResponded() && now >= selectionDeadline)
             || (havePeer && now >= punchDeadline)) break;
         if (havePeer && cfg.nat4_source_port_count > 0 && now >= legacyDeadline) {
             Log(LogLevel::Info, "Exact-port punch did not complete; switching to NAT4 socket pool");
-            UnregisterRendezvous(*sock, cfg, server);
+            rendezvous.Unregister(*sock);
             CloseSocket(*sock);
             *sock = kInvalidSocket;
-            return DiscoverAndPunchNat4(sock, cfg, server, running,
+            return DiscoverAndPunchNat4(sock, cfg, rendezvous, running,
                                         expectedPeerId, punchDeadline, peer, error);
         }
         if (now >= nextProbe) {
-            Send(*sock, server, reg);
-            if (!cfg.target_peer_id.empty()) Send(*sock, server, connect);
+            rendezvous.SendProbe(*sock);
             if (havePeer) {
                 Send(*sock, *peer, MakeControlMessage(
                     "PUNCH", {cfg.room_id, cfg.peer_id}));
@@ -97,28 +76,28 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
             static_cast<int>(buffer.size()), 0,
             reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
         if (n < 0) {
-            if (IsRecvTimeout(GetSocketError())) continue;
+            const int socketError = GetSocketError();
+            if (IsRecvTimeout(socketError)) continue;
+            if (rendezvous.HandleUnreachableError(socketError, error)) return false;
             *error = "UDP receive failed during NAT traversal";
             return false;
         }
         const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
-        std::string type;
-        std::vector<std::string> fields;
-        if (!ParseControlMessage(buffer.data(), n, &type, &fields)) continue;
-        if (SameUdpEndpoint(source, server) && type == "ERROR" && !fields.empty()
-            && fields[0] != "peer-not-found") {
-            *error = "Rendezvous error: " + fields[0];
+        const RendezvousEvent rendezvousEvent = rendezvous.HandlePacket(
+            source, buffer.data(), static_cast<size_t>(n));
+        if (rendezvousEvent.type == RendezvousEventType::Error) {
+            *error = rendezvousEvent.error;
             return false;
         }
-        if (SameUdpEndpoint(source, server) && type == "PEER" && fields.size() == 3) {
-            if (!cfg.target_peer_id.empty() && fields[2] != cfg.target_peer_id) continue;
-            unsigned long port = 0;
-            try { port = std::stoul(fields[1]); } catch (...) { continue; }
-            UdpEndpoint candidate{};
-            if (port == 0 || port > 65535
-                || !ParseUdpEndpoint(fields[0], static_cast<uint16_t>(port), &candidate)) continue;
-            *peer = candidate;
-            expectedPeerId = fields[2];
+        if (rendezvousEvent.type == RendezvousEventType::Registered
+            || rendezvousEvent.type == RendezvousEventType::PeerUnavailable) {
+            continue;
+        }
+        if (rendezvousEvent.type == RendezvousEventType::Peer) {
+            if (!cfg.target_peer_id.empty()
+                && rendezvousEvent.peerId != cfg.target_peer_id) continue;
+            *peer = rendezvousEvent.peer;
+            expectedPeerId = rendezvousEvent.peerId;
             if (!havePeer) {
                 havePeer = true;
                 punchDeadline = now + std::chrono::seconds(cfg.punch_timeout);
@@ -131,6 +110,11 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                 "PUNCH", {cfg.room_id, cfg.peer_id}));
             continue;
         }
+        if (rendezvousEvent.type != RendezvousEventType::None) continue;
+
+        std::string type;
+        std::vector<std::string> fields;
+        if (!ParseControlMessage(buffer.data(), n, &type, &fields)) continue;
         if (havePeer && SameIpv4Address(source, *peer) && fields.size() >= 2
             && fields[0] == cfg.room_id && fields[1] == expectedPeerId
             && (type == "PUNCH" || type == "PUNCH_ACK")) {
@@ -192,64 +176,4 @@ bool SendPeerDummyTraffic(socket_t sock, const Config& cfg, const UdpEndpoint& p
     if (packet.size() > kPeerDummyTrafficPacketSize) return false;
     packet.resize(kPeerDummyTrafficPacketSize, '0');
     return Send(sock, peer, packet);
-}
-
-void UnregisterRendezvous(socket_t sock, const Config& cfg, const UdpEndpoint& server) {
-    if (sock == kInvalidSocket) return;
-    Send(sock, server, MakeControlMessage("UNREG",
-        {cfg.room_id, cfg.peer_id, cfg.auth_token}));
-}
-
-bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort,
-                           const std::string& roomId, const std::string& authToken,
-                           std::vector<std::string>* clients, std::string* error) {
-    clients->clear();
-    if (!IsSafeControlField(roomId)
-        || (!authToken.empty() && !IsSafeControlField(authToken))) {
-        *error = "Invalid room ID or token";
-        return false;
-    }
-    UdpEndpoint server{};
-    if (!ResolveUdpEndpoint(serverAddress, serverPort, AF_INET, &server, error)) return false;
-    socket_t sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock == kInvalidSocket) {
-        *error = "Cannot create UDP socket";
-        return false;
-    }
-    SetSocketRecvTimeoutMs(sock, 1500);
-    const std::string request = MakeControlMessage("LIST", {roomId, authToken});
-    if (!Send(sock, server, request)) {
-        *error = "Cannot send client-list request";
-        CloseSocket(sock);
-        return false;
-    }
-    std::vector<uint8_t> buffer(4096);
-    sockaddr_storage sourceAddress{};
-    socket_len_t sourceLen = static_cast<socket_len_t>(sizeof(sourceAddress));
-    const int n = recvfrom(sock, reinterpret_cast<char*>(buffer.data()),
-        static_cast<int>(buffer.size()), 0,
-        reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
-    CloseSocket(sock);
-    if (n < 0) {
-        *error = "Rendezvous server did not respond";
-        return false;
-    }
-    const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
-    std::string type;
-    std::vector<std::string> fields;
-    if (!SameUdpEndpoint(source, server)
-        || !ParseControlMessage(buffer.data(), n, &type, &fields)) {
-        *error = "Invalid rendezvous response";
-        return false;
-    }
-    if (type == "ERROR") {
-        *error = fields.empty() ? "Rendezvous rejected request" : fields[0];
-        return false;
-    }
-    if (type != "CLIENTS") {
-        *error = "Unexpected rendezvous response";
-        return false;
-    }
-    *clients = std::move(fields);
-    return true;
 }

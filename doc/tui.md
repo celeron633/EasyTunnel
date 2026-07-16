@@ -2,7 +2,7 @@
 
 ## 目标
 
-`EasyTunnel_tui` 是 GUI 客户端的终端版本，面向 Windows Terminal、Linux 终端和远程 SSH 会话。它复用项目现有的 `TunnelEngine`、会合协议、TUN 适配器和日志模块，不维护第二套隧道数据面。
+`EasyTunnel_tui` 是 GUI 客户端的终端版本，面向 Windows Terminal、Linux 终端和远程 SSH 会话。它复用项目现有的 `TunnelEngine`、`RendezvousClient`、TUN 适配器和日志模块，不维护第二套会合逻辑或隧道数据面。
 
 TUI 源码位于：
 

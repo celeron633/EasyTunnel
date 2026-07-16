@@ -12,7 +12,7 @@
 
 #include "../log.h"
 #include "../nat_protocol.h"
-#include "../nat_traversal.h"
+#include "../rendezvous_client.h"
 #include "../util.h"
 
 namespace {

@@ -43,6 +43,7 @@ set(COMMON_SOURCES
     util.cpp
     tunnel_engine.cpp
     nat_protocol.cpp
+    rendezvous_client.cpp
     nat_traversal.cpp
     nat4_traversal.cpp
 )

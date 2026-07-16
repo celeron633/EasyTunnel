@@ -8,6 +8,7 @@
 
 #include "log.h"
 #include "nat_protocol.h"
+#include "rendezvous_client.h"
 
 namespace {
 constexpr int kPunchRepeat = 5;
@@ -84,20 +85,6 @@ bool CreatePool(uint16_t firstPort, uint16_t count, std::vector<socket_t>* pool,
     return true;
 }
 
-void SendNat4Join(socket_t sock, const Config& cfg,
-                  const UdpEndpoint& server,
-                  const std::string& expectedPeerId, uint32_t round) {
-    Send(sock, server, MakeControlMessage("NAT4_JOIN",
-        {cfg.room_id, cfg.peer_id, expectedPeerId,
-         std::to_string(round), cfg.auth_token}));
-}
-
-void SendUnregister(socket_t sock, const Config& cfg,
-                    const UdpEndpoint& server) {
-    Send(sock, server, MakeControlMessage("UNREG",
-        {cfg.room_id, cfg.peer_id, cfg.auth_token}));
-}
-
 void SendPoolPunch(const std::vector<socket_t>& pool,
                    const UdpEndpoint& target, const std::string& punch,
                    int repeatCount) {
@@ -128,7 +115,7 @@ int WaitReadable(const std::vector<socket_t>& pool, fd_set* readable) {
 }  // namespace
 
 bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
-                          const UdpEndpoint& server,
+                          RendezvousClient& rendezvous,
                           const std::atomic<bool>& running,
                           const std::string& expectedPeerId,
                           std::chrono::steady_clock::time_point deadline,
@@ -179,7 +166,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
         while (running.load() && std::chrono::steady_clock::now() < roundDeadline) {
             const auto now = std::chrono::steady_clock::now();
             if (now >= nextRegistration) {
-                SendNat4Join(registrationSocket, cfg, server, expectedPeerId, round);
+                rendezvous.SendNat4Join(registrationSocket, expectedPeerId, round);
                 nextRegistration = now + std::chrono::milliseconds(500);
             }
 
@@ -188,7 +175,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
             if (ready < 0) {
                 *error = "select failed during NAT4 traversal. err="
                     + std::to_string(GetSocketError());
-                SendUnregister(registrationSocket, cfg, server);
+                rendezvous.Unregister(registrationSocket);
                 ClosePool(&pool);
                 *sock = kInvalidSocket;
                 return false;
@@ -207,32 +194,22 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                 if (n < 0) continue;
 
                 const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
-                std::string type;
-                std::vector<std::string> fields;
-                if (!ParseControlMessage(buffer.data(), static_cast<size_t>(n),
-                                         &type, &fields)) continue;
-
-                if (candidate == registrationSocket && SameUdpEndpoint(source, server)) {
-                    if (type == "ERROR" && !fields.empty()
-                        && fields[0] != "peer-not-found") {
-                        *error = "Rendezvous error during NAT4 traversal: " + fields[0];
-                        SendUnregister(registrationSocket, cfg, server);
+                if (candidate == registrationSocket) {
+                    const RendezvousEvent event = rendezvous.HandlePacket(
+                        source, buffer.data(), static_cast<size_t>(n));
+                    if (event.type == RendezvousEventType::Error) {
+                        *error = event.error;
+                        rendezvous.Unregister(registrationSocket);
                         ClosePool(&pool);
                         *sock = kInvalidSocket;
                         return false;
                     }
-                    if (type == "NAT4_PEER" && fields.size() == 4
-                        && fields[2] == expectedPeerId
-                        && fields[3] == std::to_string(round)) {
-                        unsigned long port = 0;
-                        try { port = std::stoul(fields[1]); } catch (...) { continue; }
-                        UdpEndpoint supplied{};
-                        if (port == 0 || port > 65535
-                            || !ParseUdpEndpoint(fields[0], static_cast<uint16_t>(port),
-                                                 &supplied)) continue;
+                    if (event.type == RendezvousEventType::Nat4Peer
+                        && event.peerId == expectedPeerId
+                        && event.round == round) {
                         const bool endpointChanged = !havePeer
-                            || !SameUdpEndpoint(supplied, rendezvousPeer);
-                        rendezvousPeer = supplied;
+                            || !SameUdpEndpoint(event.peer, rendezvousPeer);
+                        rendezvousPeer = event.peer;
                         havePeer = true;
                         const auto peerInfoTime = std::chrono::steady_clock::now();
                         if (!punchSent || endpointChanged
@@ -242,7 +219,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                                                 cfg.nat4_peer_port_offset,
                                                 &predicted)) {
                                 *error = "Predicted NAT4 peer port exceeds 65535";
-                                SendUnregister(registrationSocket, cfg, server);
+                                rendezvous.Unregister(registrationSocket);
                                 ClosePool(&pool);
                                 *sock = kInvalidSocket;
                                 return false;
@@ -257,8 +234,13 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                             nextPoolPunch = peerInfoTime + std::chrono::seconds(2);
                         }
                     }
-                    continue;
+                    if (event.type != RendezvousEventType::None) continue;
                 }
+
+                std::string type;
+                std::vector<std::string> fields;
+                if (!ParseControlMessage(buffer.data(), static_cast<size_t>(n),
+                                         &type, &fields)) continue;
 
                 if (!havePeer || !SameIpv4Address(source, rendezvousPeer)
                     || fields.size() < 2 || fields[0] != cfg.room_id
@@ -277,7 +259,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                     std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 }
                 if (candidate != registrationSocket) {
-                    SendUnregister(registrationSocket, cfg, server);
+                    rendezvous.Unregister(registrationSocket);
                 }
                 ClosePool(&pool, candidate);
                 Log(LogLevel::Info, "NAT4 hole punching confirmed with "
@@ -286,7 +268,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
             }
         }
 
-        SendUnregister(registrationSocket, cfg, server);
+        rendezvous.Unregister(registrationSocket);
         ClosePool(&pool);
         *sock = kInvalidSocket;
         firstPort += cfg.nat4_source_port_count;

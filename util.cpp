@@ -152,6 +152,15 @@ bool IsRecvTimeout(int err) {
 #endif
 }
 
+bool IsUdpDestinationUnreachable(int err) {
+#ifdef _WIN32
+    return err == WSAECONNRESET || err == WSAECONNREFUSED
+        || err == WSAENETUNREACH || err == WSAEHOSTUNREACH;
+#else
+    return err == ECONNREFUSED || err == ENETUNREACH || err == EHOSTUNREACH;
+#endif
+}
+
 // ---------------------------------------------------------------------------
 // Packet / protocol helpers
 // ---------------------------------------------------------------------------

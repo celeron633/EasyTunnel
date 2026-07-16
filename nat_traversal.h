@@ -2,15 +2,10 @@
 
 #include <atomic>
 #include <string>
-#include <vector>
-
 #include "config.h"
 #include "util.h"
 
 constexpr size_t kPeerDummyTrafficPacketSize = 1024;
-
-bool OpenNatUdpSocket(const Config& cfg, int recvTimeoutMs, socket_t* sock,
-                      UdpEndpoint* server, std::string* error);
 
 bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server, const std::atomic<bool>& running,
@@ -37,8 +32,3 @@ PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
 bool SendPeerKeepalive(socket_t sock, const Config& cfg, const UdpEndpoint& peer,
                        const std::string& requestId = "");
 bool SendPeerDummyTraffic(socket_t sock, const Config& cfg, const UdpEndpoint& peer);
-void UnregisterRendezvous(socket_t sock, const Config& cfg, const UdpEndpoint& server);
-
-bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort,
-                           const std::string& roomId, const std::string& authToken,
-                           std::vector<std::string>* clients, std::string* error);

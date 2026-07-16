@@ -7,6 +7,7 @@
 #include "hexdump.h"
 #include "log.h"
 #include "nat_traversal.h"
+#include "rendezvous_client.h"
 
 #ifdef _WIN32
 #ifndef UNICODE
@@ -96,7 +97,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 	do {
 		UdpEndpoint peer{};
 		std::string socketError;
-		if (!OpenNatUdpSocket(cfg, kSocketRecvTimeoutMs, &sock, &server, &socketError)) {
+		if (!OpenRendezvousSocket(cfg, kSocketRecvTimeoutMs, &sock, &server, &socketError)) {
 			SetState(TunnelState::Error, socketError);
 			break;
 		}

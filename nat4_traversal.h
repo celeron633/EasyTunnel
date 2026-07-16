@@ -7,10 +7,12 @@
 #include "config.h"
 #include "util.h"
 
+class RendezvousClient;
+
 // Runs the n4-style fallback. It replaces *sock with the socket that receives
 // the peer's punch; all other sockets in the winning pool are closed.
 bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
-                          const UdpEndpoint& server,
+                          RendezvousClient& rendezvous,
                           const std::atomic<bool>& running,
                           const std::string& expectedPeerId,
                           std::chrono::steady_clock::time_point deadline,

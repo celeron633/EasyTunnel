@@ -3,12 +3,19 @@
 本文描述当前实现中的 IPv4/UDP 会合、默认精确端口打洞和 NAT4 多 socket 回退流程。相关代码主要位于：
 
 ```text
-nat_traversal.cpp          默认会合、精确端口打洞、保活
+rendezvous_client.cpp      客户端会合协议、响应解析、超时、列表与注销
+nat_traversal.cpp          精确端口打洞、Peer 控制包与保活
 nat4_traversal.cpp         NAT4 socket 池和多轮重试
 rendezvous/server.cpp      会合服务器 UDP 接收循环
 rendezvous/registry.cpp    房间、配对和 NAT4 round 屏障
 tunnel_engine.cpp          成功 socket 的数据面接管
 ```
+
+### 客户端模块边界
+
+`RendezvousClient` 只处理会合服务器方向的控制逻辑，包括发送 `REG`、`CONNECT`、`NAT4_JOIN`、`UNREG`，识别服务器来源，解析 `REGISTERED`、`PEER`、`ERROR` 和 NAT4 响应，以及判断首次响应超时。在线客户端的 `LIST` 查询和会合 UDP socket 的创建也由该模块负责。
+
+`nat_traversal.cpp` 和 `nat4_traversal.cpp` 保留 UDP 收包循环与 Peer 打洞状态机。同一个 socket 需要同时接收会合服务器控制包和 Peer 的 `PUNCH`，因此 NAT 模块按数据来源把服务器包交给 `RendezvousClient`，把 Peer 包留在打洞流程中处理。
 
 ## 术语和适用范围
 
@@ -57,7 +64,13 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 REG(room_id, peer_id, auth_token)
 ```
 
-会合服务器从 UDP 数据报的真实来源获得该客户端的公网 `IPv4:port`。等待端在尚未匹配 Peer 时没有实际的短期打洞超时；收到 `PEER` 后才开始计算 `punch_timeout`。
+会合服务器从 UDP 数据报的真实来源获得该客户端的公网 `IPv4:port`，注册成功后返回：
+
+```text
+REGISTERED
+```
+
+客户端必须在 5 秒内收到来自配置端点的合法会合响应，否则进入 Error，并显示 `Rendezvous server did not respond`。确认服务器响应后，等待端在尚未匹配 Peer 时没有实际的短期打洞超时；收到 `PEER` 后才开始计算 `punch_timeout`。
 
 ### 主动连接端
 

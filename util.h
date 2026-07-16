@@ -56,6 +56,7 @@ void ShutdownSocket(socket_t sock);
 void CloseSocket(socket_t& sock);
 int GetSocketError();
 bool IsRecvTimeout(int err);
+bool IsUdpDestinationUnreachable(int err);
 
 // ---------------------------------------------------------------------------
 // Packet / protocol helpers
