@@ -174,12 +174,17 @@ void GuiApp::RenderSettingsTab() {
         EndForm();
     }
     ImGui::Spacing();
+    ImGui::SeparatorText("Log");
+    if (BeginForm("##LogSettings")) {
+        FormField("Log Level");
+        configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
+        EndForm();
+    }
+    ImGui::Spacing();
     ImGui::SeparatorText("Misc");
     if (BeginForm("##MiscSettings")) {
         FormField("1 KiB/s dummy traffic");
         configChanged |= ImGui::Checkbox("##DummyTraffic", &dummyTrafficEnabled_);
-        FormField("Log Level");
-        configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
         FormField("Auto wait for peer");
         const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer", &autoWaitForPeer_);
         configChanged |= autoWaitChanged;
