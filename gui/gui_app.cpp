@@ -7,6 +7,8 @@
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
 
+#include "ui_heartbeat.h"
+
 #ifdef _WIN32
 #include "disconnect_confirmation_dialog.h"
 #include "exit_confirmation_dialog.h"
@@ -20,17 +22,14 @@ void GlfwErrorCallback(int error, const char* description) {
     Log(LogLevel::Error, "GLFW Error " + std::to_string(error) + ": " + description);
 }
 
-#ifdef _WIN32
-const wchar_t* TrayStatusName(TunnelState state) {
-    switch (state) {
-        case TunnelState::Disconnected: return L"Disconnected";
-        case TunnelState::Connecting: return L"Connecting";
-        case TunnelState::Connected: return L"Connected";
-        case TunnelState::Error: return L"Error";
-    }
-    return L"Unknown";
+std::string OpenGLInfo() {
+    const auto* vendor = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+    const auto* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    const auto* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    return std::string("vendor=") + (vendor ? vendor : "unknown")
+        + "; renderer=" + (renderer ? renderer : "unknown")
+        + "; version=" + (version ? version : "unknown");
 }
-#endif
 }  // namespace
 
 GuiApp::GuiApp() = default;
@@ -67,6 +66,8 @@ bool GuiApp::Init() {
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 130");
+    uiHeartbeat_ = std::make_unique<UiHeartbeat>();
+    uiHeartbeat_->Start(OpenGLInfo());
 #ifdef _WIN32
     disconnectConfirmationDialog_ = std::make_unique<DisconnectConfirmationDialog>();
     exitConfirmationDialog_ = std::make_unique<ExitConfirmationDialog>();
@@ -93,21 +94,37 @@ bool GuiApp::Init() {
 
 void GuiApp::Run() {
     while (!glfwWindowShouldClose(window_)) {
+        uiHeartbeat_->SetPhase(UiPhase::PollEvents);
         glfwPollEvents();
+        uiHeartbeat_->SetPhase(UiPhase::ProcessAutoWait);
         ProcessAutoWait();
+        uiHeartbeat_->SetPhase(UiPhase::OpenGLNewFrame);
         ImGui_ImplOpenGL3_NewFrame();
+        uiHeartbeat_->SetPhase(UiPhase::GlfwNewFrame);
         ImGui_ImplGlfw_NewFrame();
+        uiHeartbeat_->SetPhase(UiPhase::ImGuiNewFrame);
         ImGui::NewFrame();
+        uiHeartbeat_->SetPhase(UiPhase::RenderFrame);
         RenderFrame();
+        uiHeartbeat_->SetPhase(UiPhase::ImGuiRender);
         ImGui::Render();
         int width = 0;
         int height = 0;
+        uiHeartbeat_->SetPhase(UiPhase::GetFramebufferSize);
         glfwGetFramebufferSize(window_, &width, &height);
+        uiHeartbeat_->SetPhase(UiPhase::OpenGLClear);
         glViewport(0, 0, width, height);
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+        uiHeartbeat_->SetPhase(UiPhase::RenderDrawData);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        const unsigned int glError = glGetError();
+        uiHeartbeat_->UpdateWindowState(
+            glfwGetWindowAttrib(window_, GLFW_VISIBLE) == GLFW_TRUE,
+            width, height, glError);
+        uiHeartbeat_->SetPhase(UiPhase::SwapBuffers);
         glfwSwapBuffers(window_);
+        uiHeartbeat_->CompleteFrame();
     }
     shuttingDown_.store(true);
     autoWaitPending_.store(false);
@@ -119,6 +136,7 @@ void GuiApp::Shutdown() {
     autoWaitPending_.store(false);
     autoWaitEnabledRuntime_.store(false);
     if (!window_) return;
+    if (uiHeartbeat_) uiHeartbeat_->SetPhase(UiPhase::ShutdownEngine);
     engine_.Stop();
 #ifdef _WIN32
     if (windowsTray_) {
@@ -128,26 +146,21 @@ void GuiApp::Shutdown() {
     disconnectConfirmationDialog_.reset();
     exitConfirmationDialog_.reset();
 #endif
+    if (uiHeartbeat_) uiHeartbeat_->SetPhase(UiPhase::ShutdownUi);
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
     glfwDestroyWindow(window_);
     glfwTerminate();
     window_ = nullptr;
+    if (uiHeartbeat_) {
+        uiHeartbeat_->Stop();
+        uiHeartbeat_.reset();
+    }
 }
 
 void GuiApp::RenderFrame() {
     UpdateLiveStats();
-#ifdef _WIN32
-    if (windowsTray_) {
-        const TunnelStats& stats = engine_.GetStats();
-        windowsTray_->UpdateTooltip(
-            TrayStatusName(currentState_.load()),
-            stats.txBytes.load(),
-            stats.rxBytes.load(),
-            stats.rttMilliseconds.load());
-    }
-#endif
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, viewport->WorkSize.y - 30));

@@ -14,11 +14,7 @@
 #include <GLFW/glfw3native.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cwchar>
-#include <iomanip>
-#include <sstream>
-#include <string>
 #include <utility>
 
 #include "../log.h"
@@ -51,25 +47,6 @@ const TrayMenuItem* MenuItemFromData(ULONG_PTR itemData) {
     return nullptr;
 }
 
-std::wstring FormatTraffic(uint64_t bytes) {
-    constexpr const wchar_t* kUnits[] = {L"B", L"KB", L"MB", L"GB", L"TB"};
-    constexpr std::size_t kUnitCount = sizeof(kUnits) / sizeof(kUnits[0]);
-    double value = static_cast<double>(bytes);
-    std::size_t unit = 0;
-    while (value >= 1024.0 && unit + 1 < kUnitCount) {
-        value /= 1024.0;
-        ++unit;
-    }
-
-    std::wostringstream output;
-    if (unit == 0) {
-        output << bytes;
-    } else {
-        output << std::fixed << std::setprecision(value < 10.0 ? 2 : 1) << value;
-    }
-    output << L' ' << kUnits[unit];
-    return output.str();
-}
 }  // namespace
 
 struct WindowsTray::Impl {
@@ -82,9 +59,6 @@ struct WindowsTray::Impl {
     HICON icon = nullptr;
     bool ownsIcon = false;
     UINT taskbarCreatedMessage = 0;
-    std::wstring tooltipStatus;
-    std::wstring tooltipText = kWindowTitle;
-    std::chrono::steady_clock::time_point lastTooltipUpdate{};
     std::function<void()> disconnectCallback;
     std::function<void()> exitCallback;
 
@@ -123,7 +97,7 @@ struct WindowsTray::Impl {
         iconData.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         iconData.uCallbackMessage = kTrayCallbackMessage;
         iconData.hIcon = icon;
-        CopyTooltipText(tooltipText);
+        CopyTooltipText(kWindowTitle);
 
         if (!AddIcon()) {
             Log(LogLevel::Error, "Failed to add the Windows tray icon");
@@ -140,40 +114,10 @@ struct WindowsTray::Impl {
         return true;
     }
 
-    void CopyTooltipText(const std::wstring& text) {
+    void CopyTooltipText(const wchar_t* text) {
         constexpr std::size_t capacity = sizeof(iconData.szTip) / sizeof(iconData.szTip[0]);
-        std::wcsncpy(iconData.szTip, text.c_str(), capacity - 1);
+        std::wcsncpy(iconData.szTip, text, capacity - 1);
         iconData.szTip[capacity - 1] = L'\0';
-    }
-
-    void UpdateTooltip(const wchar_t* status,
-                       uint64_t sentBytes,
-                       uint64_t receivedBytes,
-                       int64_t latencyMilliseconds) {
-        if (!window) return;
-
-        const std::wstring nextStatus = status ? status : L"Unknown";
-        const auto now = std::chrono::steady_clock::now();
-        const bool statusChanged = nextStatus != tooltipStatus;
-        if (!statusChanged && now - lastTooltipUpdate < std::chrono::seconds(1)) return;
-        lastTooltipUpdate = now;
-
-        std::wostringstream tooltip;
-        tooltip << kWindowTitle << L"\nStatus: " << nextStatus
-                << L"\nSent: " << FormatTraffic(sentBytes)
-                << L" | Received: " << FormatTraffic(receivedBytes)
-                << L"\nLatency: ";
-        if (latencyMilliseconds < 0) tooltip << L"--";
-        else tooltip << latencyMilliseconds;
-        tooltip << L" ms";
-
-        const std::wstring nextText = tooltip.str();
-        tooltipStatus = nextStatus;
-        if (nextText == tooltipText) return;
-
-        tooltipText = nextText;
-        CopyTooltipText(tooltipText);
-        Shell_NotifyIconW(NIM_MODIFY, &iconData);
     }
 
     void Shutdown() {
@@ -190,9 +134,6 @@ struct WindowsTray::Impl {
         previousWindowProc = nullptr;
         window = nullptr;
         glfwWindow = nullptr;
-        tooltipStatus.clear();
-        tooltipText = kWindowTitle;
-        lastTooltipUpdate = {};
         disconnectCallback = {};
         exitCallback = {};
     }
@@ -348,15 +289,6 @@ bool WindowsTray::Init(GLFWwindow* window,
                        std::function<void()> disconnectCallback,
                        std::function<void()> exitCallback) {
     return impl_->Init(window, std::move(disconnectCallback), std::move(exitCallback));
-}
-
-void WindowsTray::UpdateTooltip(const wchar_t* status,
-                                uint64_t sentBytes,
-                                uint64_t receivedBytes,
-                                int64_t latencyMilliseconds) {
-    if (impl_) {
-        impl_->UpdateTooltip(status, sentBytes, receivedBytes, latencyMilliseconds);
-    }
 }
 
 void WindowsTray::Shutdown() {

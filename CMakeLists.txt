@@ -274,7 +274,8 @@ if(BUILD_GUI)
         gui/gui_app.cpp
         gui/gui_app_connection.cpp
         gui/gui_app_settings.cpp
-        gui/gui_app_log.cpp)
+        gui/gui_app_log.cpp
+        gui/ui_heartbeat.cpp)
     if(WIN32)
         list(APPEND GUI_SOURCES
             gui/windows_tray.cpp

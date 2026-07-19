@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <functional>
 #include <memory>
 
@@ -19,10 +18,6 @@ public:
     bool Init(GLFWwindow* window,
               std::function<void()> disconnectCallback,
               std::function<void()> exitCallback);
-    void UpdateTooltip(const wchar_t* status,
-                       uint64_t sentBytes,
-                       uint64_t receivedBytes,
-                       int64_t latencyMilliseconds);
     void Shutdown();
 
 private:

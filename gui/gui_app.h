@@ -17,6 +17,7 @@ class DisconnectConfirmationDialog;
 class ExitConfirmationDialog;
 class WindowsTray;
 #endif
+class UiHeartbeat;
 
 class GuiApp {
 public:
@@ -52,6 +53,7 @@ private:
     void ProcessAutoWait();
 
     GLFWwindow* window_ = nullptr;
+    std::unique_ptr<UiHeartbeat> uiHeartbeat_;
 #ifdef _WIN32
     std::unique_ptr<WindowsTray> windowsTray_;
     std::unique_ptr<DisconnectConfirmationDialog> disconnectConfirmationDialog_;
