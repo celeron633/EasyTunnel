@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
@@ -40,9 +41,20 @@ void RenderTimeAxis(const char* id, const std::vector<StatisticsSample>& samples
 template <typename Value>
 void RenderHistogram(const char* id, const char* title,
                      const std::vector<StatisticsSample>& samples, Value value) {
-    std::vector<float> values;
-    values.reserve(samples.size());
-    for (const auto& sample : samples) values.push_back((std::max)(0.0f, value(sample)));
+    constexpr float kMaximumBarWidth = 8.0f;
+    const float plotWidth = (std::max)(1.0f, ImGui::GetContentRegionAvail().x);
+    const float slotWidth = plotWidth / static_cast<float>(StatisticsHistory::kMaxSamples);
+    const int partsPerSlot = (std::max)(2, static_cast<int>(std::ceil(
+        slotWidth / kMaximumBarWidth)));
+    std::vector<float> values(StatisticsHistory::kMaxSamples
+        * static_cast<std::size_t>(partsPerSlot), 0.0f);
+    const std::size_t firstSlot = StatisticsHistory::kMaxSamples - samples.size();
+    for (std::size_t index = 0; index < samples.size(); ++index) {
+        const std::size_t slot = firstSlot + index;
+        values[slot * static_cast<std::size_t>(partsPerSlot)
+            + static_cast<std::size_t>(partsPerSlot / 2)] =
+            (std::max)(0.0f, value(samples[index]));
+    }
     ImGui::PlotHistogram(id, values.data(), static_cast<int>(values.size()), 0,
                          title, 0.0f, FLT_MAX, ImVec2(-FLT_MIN, 58.0f));
     RenderTimeAxis(id, samples);
@@ -63,10 +75,16 @@ void GuiApp::RenderStatisticsCharts() {
         ImGui::TextDisabled("Collecting the first sample...");
         return;
     }
-    RenderHistogram("##TxHistory", "TX speed (KiB/s)", samples,
-        [](const StatisticsSample& sample) { return sample.txKibPerSecond; });
-    RenderHistogram("##RxHistory", "RX speed (KiB/s)", samples,
-        [](const StatisticsSample& sample) { return sample.rxKibPerSecond; });
+    if (ImGui::BeginTable("##SpeedHistory", 2,
+                          ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
+        ImGui::TableNextColumn();
+        RenderHistogram("##TxHistory", "TX speed (KiB/s)", samples,
+            [](const StatisticsSample& sample) { return sample.txKibPerSecond; });
+        ImGui::TableNextColumn();
+        RenderHistogram("##RxHistory", "RX speed (KiB/s)", samples,
+            [](const StatisticsSample& sample) { return sample.rxKibPerSecond; });
+        ImGui::EndTable();
+    }
     RenderHistogram("##LatencyHistory", "Latency (ms)", samples,
         [](const StatisticsSample& sample) { return sample.latencyMilliseconds; });
 }

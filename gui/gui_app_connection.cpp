@@ -117,26 +117,26 @@ void GuiApp::RenderConnectionTab() {
     ImGui::TextUnformatted("TX Bytes:");
     ImGui::SameLine();
     if (RenderByteValueButton("TxTotal", static_cast<double>(stats.txBytes.load()),
-                              txTotalUnit_, false)) {
-        txTotalUnit_ = (txTotalUnit_ + 1) % 3;
+                              statisticsTotalUnit_, false)) {
+        statisticsTotalUnit_ = (statisticsTotalUnit_ + 1) % 3;
     }
     ImGui::TextUnformatted("TX Speed:");
     ImGui::SameLine();
-    if (RenderByteValueButton("TxSpeed", txBytesPerSecond_, txSpeedUnit_, true)) {
-        txSpeedUnit_ = (txSpeedUnit_ + 1) % 3;
+    if (RenderByteValueButton("TxSpeed", txBytesPerSecond_, statisticsSpeedUnit_, true)) {
+        statisticsSpeedUnit_ = (statisticsSpeedUnit_ + 1) % 3;
     }
     ImGui::NextColumn();
     ImGui::Text("RX Packets: %llu", static_cast<unsigned long long>(stats.rxPackets.load()));
     ImGui::TextUnformatted("RX Bytes:");
     ImGui::SameLine();
     if (RenderByteValueButton("RxTotal", static_cast<double>(stats.rxBytes.load()),
-                              rxTotalUnit_, false)) {
-        rxTotalUnit_ = (rxTotalUnit_ + 1) % 3;
+                              statisticsTotalUnit_, false)) {
+        statisticsTotalUnit_ = (statisticsTotalUnit_ + 1) % 3;
     }
     ImGui::TextUnformatted("RX Speed:");
     ImGui::SameLine();
-    if (RenderByteValueButton("RxSpeed", rxBytesPerSecond_, rxSpeedUnit_, true)) {
-        rxSpeedUnit_ = (rxSpeedUnit_ + 1) % 3;
+    if (RenderByteValueButton("RxSpeed", rxBytesPerSecond_, statisticsSpeedUnit_, true)) {
+        statisticsSpeedUnit_ = (statisticsSpeedUnit_ + 1) % 3;
     }
     ImGui::Columns(1);
     const int64_t rttMilliseconds = stats.rttMilliseconds.load();

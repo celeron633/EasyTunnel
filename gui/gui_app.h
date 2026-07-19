@@ -97,10 +97,8 @@ private:
     bool configSaveSucceeded_ = true;
     std::chrono::steady_clock::time_point configSaveMessageExpiresAt_{};
 
-    int txTotalUnit_ = 0;
-    int rxTotalUnit_ = 0;
-    int txSpeedUnit_ = 0;
-    int rxSpeedUnit_ = 0;
+    int statisticsTotalUnit_ = 0;
+    int statisticsSpeedUnit_ = 0;
     int statusUnit_ = 0;
     bool speedSampleInitialized_ = false;
     uint64_t previousTxBytes_ = 0;
