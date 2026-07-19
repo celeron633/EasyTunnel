@@ -3,6 +3,7 @@
 
 CXX ?= g++
 TARGET ?= EasyTunnel_rendezvous
+TUI_TARGET ?= EasyTunnel_rendezvous_tui
 BUILD_DIR ?= build-rendezvous
 
 CPPFLAGS ?=
@@ -11,23 +12,45 @@ CXXFLAGS += -std=c++17 -Wall -Wextra -Wpedantic -pthread
 LDFLAGS ?=
 LDLIBS ?= -pthread
 
-SOURCES := rendezvous/main.cpp rendezvous/server.cpp rendezvous/registry.cpp \
-           rendezvous/config.cpp nat_protocol.cpp util.cpp easy_log.cpp
+CORE_SOURCES := rendezvous/server.cpp rendezvous/registry.cpp rendezvous/config.cpp \
+                nat_protocol.cpp util.cpp easy_log.cpp
+SOURCES := rendezvous/main.cpp $(CORE_SOURCES)
 OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
-DEPFILES := $(OBJECTS:.o=.d)
+TUI_SOURCES := rendezvous/tui_main.cpp rendezvous/tui_app.cpp \
+               rendezvous/tui_dashboard.cpp rendezvous/tui_config_tab.cpp \
+               rendezvous/tui_log_tab.cpp $(CORE_SOURCES)
+TUI_OBJECTS := $(TUI_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
+DEPFILES := $(sort $(OBJECTS:.o=.d) $(TUI_OBJECTS:.o=.d))
 
-.PHONY: all clean
+FTXUI_CFLAGS := $(shell pkg-config --cflags ftxui 2>/dev/null)
+FTXUI_LIBS := $(shell pkg-config --libs ftxui 2>/dev/null)
+
+.PHONY: all clean rendezvous rendezvous_tui
 
 all: $(TARGET)
 
+rendezvous: $(TARGET)
+
+rendezvous_tui:
+	@pkg-config --exists ftxui || { \
+		echo "FTXUI was not found. Install its development package (ftxui.pc) first."; \
+		exit 1; \
+	}
+	$(MAKE) -f $(firstword $(MAKEFILE_LIST)) $(TUI_TARGET)
+
 $(TARGET): $(OBJECTS)
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(TUI_TARGET): $(TUI_OBJECTS)
+	$(CXX) $(LDFLAGS) $^ $(FTXUI_LIBS) $(LDLIBS) -o $@
+
+$(TUI_OBJECTS): CPPFLAGS += $(FTXUI_CFLAGS)
 
 $(BUILD_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET)
+	rm -rf $(BUILD_DIR) $(TARGET) $(TUI_TARGET)
 
 -include $(DEPFILES)

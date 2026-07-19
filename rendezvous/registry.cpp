@@ -1,5 +1,6 @@
 #include "registry.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
@@ -46,6 +47,13 @@ size_t RemoveExpired(Room* room, std::chrono::steady_clock::time_point now,
             ++removed;
         } else {
             ++it;
+        }
+    }
+    for (auto& entry : *room) {
+        if (!entry.second.pairedWith.empty()
+            && room->find(entry.second.pairedWith) == room->end()) {
+            entry.second.pairedWith.clear();
+            entry.second.nat4Joined = false;
         }
     }
     return removed;
@@ -206,6 +214,12 @@ struct RendezvousRegistry::Impl {
             const auto existing = room.find(nodeId);
             if (existing != room.end() && SameUdpEndpoint(existing->second.endpoint, source)) {
                 room.erase(existing);
+                for (auto& entry : room) {
+                    if (entry.second.pairedWith == nodeId) {
+                        entry.second.pairedWith.clear();
+                        entry.second.nat4Joined = false;
+                    }
+                }
                 Log(LogLevel::Info, "Unregistered peer=" + nodeId + " room=" + roomId
                     + " endpoint=" + FormatUdpEndpoint(source));
             }
@@ -252,4 +266,48 @@ void RendezvousRegistry::Handle(const UdpEndpoint& source, const std::string& ty
     } else {
         impl_->HandleSession(source, type, fields, now);
     }
+}
+
+std::vector<RendezvousRoomSnapshot> RendezvousRegistry::Snapshot(
+    std::chrono::steady_clock::time_point now) {
+    std::vector<RendezvousRoomSnapshot> snapshot;
+    for (auto room = impl_->rooms.begin(); room != impl_->rooms.end();) {
+        const size_t expired = RemoveExpired(
+            &room->second, now, impl_->config.clientTimeoutSeconds);
+        if (expired > 0) {
+            Log(LogLevel::Info, "Expired " + std::to_string(expired)
+                + " client(s) from room=" + room->first);
+        }
+        if (room->second.empty()) {
+            room = impl_->rooms.erase(room);
+            continue;
+        }
+
+        RendezvousRoomSnapshot roomSnapshot;
+        roomSnapshot.roomId = room->first;
+        roomSnapshot.clients.reserve(room->second.size());
+        for (const auto& entry : room->second) {
+            const Client& client = entry.second;
+            const auto idle = std::chrono::duration_cast<std::chrono::seconds>(
+                now - client.seen).count();
+            roomSnapshot.clients.push_back({
+                client.node,
+                FormatUdpEndpoint(client.endpoint),
+                client.pairedWith,
+                static_cast<uint64_t>((std::max)(int64_t{0}, idle)),
+                client.nat4Round,
+                client.nat4Joined,
+            });
+        }
+        std::sort(roomSnapshot.clients.begin(), roomSnapshot.clients.end(),
+                  [](const auto& left, const auto& right) {
+                      return left.nodeId < right.nodeId;
+                  });
+        snapshot.push_back(std::move(roomSnapshot));
+        ++room;
+    }
+    std::sort(snapshot.begin(), snapshot.end(), [](const auto& left, const auto& right) {
+        return left.roomId < right.roomId;
+    });
+    return snapshot;
 }

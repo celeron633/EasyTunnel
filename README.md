@@ -59,6 +59,7 @@ Windows 构建会自动下载 Wintun SDK、GLFW、ImGui 和 FTXUI。生成：
 - `EasyTunnel_gui.exe`：GUI 客户端
 - `EasyTunnel_tui.exe`：TUI 客户端
 - `EasyTunnel_rendezvous.exe`：会合服务器
+- `EasyTunnel_rendezvous_tui.exe`：带监控和配置界面的会合服务器
 
 客户端需要管理员权限，服务端不需要 Wintun 或 TUN 权限。
 
@@ -69,6 +70,21 @@ Windows 构建会自动下载 Wintun SDK、GLFW、ImGui 和 FTXUI。生成：
 ```bash
 cmake -S . -B build -DBUILD_GUI=OFF -DBUILD_TUI=OFF
 cmake --build build --target EasyTunnel_rendezvous
+```
+
+构建服务端 TUI 时启用 FTXUI：
+
+```bash
+cmake -S . -B build -DBUILD_GUI=OFF -DBUILD_TUI=ON
+cmake --build build --target EasyTunnel_rendezvous_tui
+```
+
+不使用 CMake 时，普通 Makefile 仍默认只构建原 console 服务端；如果系统已安装
+FTXUI（`pkg-config ftxui` 可用），可显式构建 TUI：
+
+```bash
+make -f Makefile.rendezvous
+make -f Makefile.rendezvous rendezvous_tui
 ```
 
 会合服务器使用 POSIX UDP socket，不创建 TUN，默认端口大于 `1024` 时不需要 root。
@@ -101,6 +117,17 @@ Linux：
 ```text
 EasyTunnel_rendezvous [config.json]
 ```
+
+也可以用相同配置文件启动独立的 TUI 服务端：
+
+```text
+EasyTunnel_rendezvous_tui [config.json]
+```
+
+TUI 包含 Dashboard、Config、Logs 三个页签。Dashboard 实时列出全部活跃房间及
+其中的客户端、端点、空闲时间、配对/NAT4 状态和报文计数；Config 可以保存配置
+或保存后重启监听服务；Logs 显示带级别颜色的实时服务日志。原
+`EasyTunnel_rendezvous` console 程序及其构建目标保持不变。
 
 请在云安全组和系统防火墙中放行配置的 IPv4 UDP 端口。
 

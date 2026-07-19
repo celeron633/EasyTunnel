@@ -8,7 +8,7 @@ endif()
 include(FetchContent)
 
 option(BUILD_GUI "Build the ImGui NAT traversal client" ON)
-option(BUILD_TUI "Build the FTXUI terminal client" ON)
+option(BUILD_TUI "Build the FTXUI terminal client and rendezvous server" ON)
 
 FetchContent_Declare(
     spdlog
@@ -89,6 +89,18 @@ if(BUILD_TUI)
         ${COMMON_SOURCES}
         ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_tui PRIVATE ${CMAKE_SOURCE_DIR})
+
+    add_executable(EasyTunnel_rendezvous_tui
+        rendezvous/tui_main.cpp
+        rendezvous/tui_app.cpp
+        rendezvous/tui_dashboard.cpp
+        rendezvous/tui_config_tab.cpp
+        rendezvous/tui_log_tab.cpp
+        rendezvous/server.cpp
+        rendezvous/registry.cpp
+        rendezvous/config.cpp
+        nat_protocol.cpp util.cpp log.cpp config.cpp)
+    target_include_directories(EasyTunnel_rendezvous_tui PRIVATE ${CMAKE_SOURCE_DIR})
 endif()
 
 if(MSVC)
@@ -101,10 +113,12 @@ endif()
 if(BUILD_TUI)
     if(MSVC)
         target_compile_options(EasyTunnel_tui PRIVATE /W4)
+        target_compile_options(EasyTunnel_rendezvous_tui PRIVATE /W4 /utf-8)
         target_link_options(EasyTunnel_tui PRIVATE
             "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
     else()
         target_compile_options(EasyTunnel_tui PRIVATE -Wall -Wextra -Wpedantic)
+        target_compile_options(EasyTunnel_rendezvous_tui PRIVATE -Wall -Wextra -Wpedantic)
     endif()
 endif()
 
@@ -130,8 +144,13 @@ if(BUILD_TUI)
         spdlog::spdlog_header_only
         ftxui::component ftxui::dom ftxui::screen
         Threads::Threads)
+    target_link_libraries(EasyTunnel_rendezvous_tui PRIVATE
+        spdlog::spdlog_header_only
+        ftxui::component ftxui::dom ftxui::screen
+        Threads::Threads)
     if(WIN32)
         target_link_libraries(EasyTunnel_tui PRIVATE ws2_32 iphlpapi)
+        target_link_libraries(EasyTunnel_rendezvous_tui PRIVATE ws2_32)
     endif()
 endif()
 

@@ -1,11 +1,13 @@
 #include "log.h"
 
+#include <atomic>
 #include <cctype>
 #include <memory>
 #include <mutex>
 #include <vector>
 
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/null_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -13,7 +15,7 @@ namespace {
 
 std::once_flag g_loggerInitOnce;
 std::shared_ptr<spdlog::logger> g_logger;
-LogLevel g_minLogLevel = LogLevel::Info;
+std::atomic<LogLevel> g_minLogLevel{LogLevel::Info};
 std::string g_logFilePath;
 bool g_consoleLoggingEnabled = true;
 std::mutex g_callbackMutex;
@@ -49,12 +51,12 @@ std::shared_ptr<spdlog::logger> GetLogger() {
             }
         }
         if (sinks.empty()) {
-            sinks.push_back(std::make_shared<spdlog::sinks::stdout_color_sink_mt>());
+            sinks.push_back(std::make_shared<spdlog::sinks::null_sink_mt>());
         }
         g_logger = std::make_shared<spdlog::logger>(
             "EasyTunnel", sinks.begin(), sinks.end());
         g_logger->set_pattern("%Y-%m-%d %H:%M:%S.%e %v");
-        g_logger->set_level(ToSpdlogLevel(g_minLogLevel));
+        g_logger->set_level(ToSpdlogLevel(g_minLogLevel.load()));
         g_logger->flush_on(spdlog::level::debug);
     });
     return g_logger;
@@ -69,7 +71,7 @@ std::string ToLowerAscii(const std::string& s) {
 }
 
 bool ShouldLog(LogLevel level) {
-    return static_cast<int>(level) >= static_cast<int>(g_minLogLevel);
+    return static_cast<int>(level) >= static_cast<int>(g_minLogLevel.load());
 }
 
 }  // namespace
@@ -115,12 +117,12 @@ bool TryParseLogLevel(const std::string& text, LogLevel* out) {
 }
 
 void SetLogLevel(LogLevel level) {
-    g_minLogLevel = level;
+    g_minLogLevel.store(level);
     GetLogger()->set_level(ToSpdlogLevel(level));
 }
 
 LogLevel GetLogLevel() {
-    return g_minLogLevel;
+    return g_minLogLevel.load();
 }
 
 void Log(LogLevel level, const std::string& msg) {

@@ -17,3 +17,6 @@ struct RendezvousConfig {
 
 bool LoadOrCreateRendezvousConfig(const std::string& path, RendezvousConfig* config,
                                   bool* created, std::string* error);
+bool SaveRendezvousConfig(const std::string& path, const RendezvousConfig& config,
+                          std::string* error);
+bool ValidateRendezvousConfig(const RendezvousConfig& config, std::string* error);

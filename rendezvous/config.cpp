@@ -5,6 +5,32 @@
 #include <sstream>
 
 namespace {
+std::string EscapeJson(const std::string& value) {
+    std::string output;
+    output.reserve(value.size());
+    for (const char c : value) {
+        switch (c) {
+            case '\\': output += "\\\\"; break;
+            case '"': output += "\\\""; break;
+            case '\n': output += "\\n"; break;
+            case '\r': output += "\\r"; break;
+            case '\t': output += "\\t"; break;
+            default: output += c; break;
+        }
+    }
+    return output;
+}
+
+const char* ConfigLogLevel(LogLevel level) {
+    switch (level) {
+        case LogLevel::Debug: return "Debug";
+        case LogLevel::Info: return "Info";
+        case LogLevel::Warn: return "Warn";
+        case LogLevel::Error: return "Error";
+        default: return "Info";
+    }
+}
+
 size_t ValueStart(const std::string& json, const std::string& key) {
     const size_t keyPos = json.find("\"" + key + "\"");
     if (keyPos == std::string::npos) return std::string::npos;
@@ -57,7 +83,8 @@ bool ReadUInt16(const std::string& json, const std::string& key, uint16_t* value
     }
 }
 
-bool WriteDefault(const std::string& path, std::string* error) {
+bool WriteConfig(const std::string& path, const RendezvousConfig& config,
+                 std::string* error) {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
         *error = "Cannot create rendezvous config: " + path;
@@ -65,13 +92,13 @@ bool WriteDefault(const std::string& path, std::string* error) {
     }
     output
         << "{\n"
-        << "  \"bind_address\": \"0.0.0.0\",\n"
-        << "  \"port\": 3478,\n"
-        << "  \"auth_token\": \"\",\n"
-        << "  \"client_timeout_seconds\": 60,\n"
-        << "  \"max_clients_per_room\": 32,\n"
-        << "  \"log_level\": \"Info\",\n"
-        << "  \"log_file\": \"EasyTunnel_rendezvous.log\"\n"
+        << "  \"bind_address\": \"" << EscapeJson(config.bindAddress) << "\",\n"
+        << "  \"port\": " << config.port << ",\n"
+        << "  \"auth_token\": \"" << EscapeJson(config.authToken) << "\",\n"
+        << "  \"client_timeout_seconds\": " << config.clientTimeoutSeconds << ",\n"
+        << "  \"max_clients_per_room\": " << config.maxClientsPerRoom << ",\n"
+        << "  \"log_level\": \"" << ConfigLogLevel(config.logLevel) << "\",\n"
+        << "  \"log_file\": \"" << EscapeJson(config.logFile) << "\"\n"
         << "}\n";
     if (!output.good()) {
         *error = "Cannot write rendezvous config: " + path;
@@ -86,7 +113,7 @@ bool LoadOrCreateRendezvousConfig(const std::string& path, RendezvousConfig* con
     *created = false;
     std::error_code fsError;
     if (!std::filesystem::exists(path, fsError)) {
-        if (!WriteDefault(path, error)) return false;
+        if (!WriteConfig(path, *config, error)) return false;
         *created = true;
         return true;
     }
@@ -121,17 +148,31 @@ bool LoadOrCreateRendezvousConfig(const std::string& path, RendezvousConfig* con
     }
     if (ReadString(json, "log_file", &text)) config->logFile = text;
 
-    if (config->port == 0) {
+    return ValidateRendezvousConfig(*config, error);
+}
+
+bool ValidateRendezvousConfig(const RendezvousConfig& config, std::string* error) {
+    if (config.bindAddress.empty()) {
+        *error = "bind_address cannot be empty";
+        return false;
+    }
+    if (config.port == 0) {
         *error = "port must be 1..65535";
         return false;
     }
-    if (config->clientTimeoutSeconds < 5 || config->clientTimeoutSeconds > 3600) {
+    if (config.clientTimeoutSeconds < 5 || config.clientTimeoutSeconds > 3600) {
         *error = "client_timeout_seconds must be 5..3600";
         return false;
     }
-    if (config->maxClientsPerRoom < 2 || config->maxClientsPerRoom > 32) {
+    if (config.maxClientsPerRoom < 2 || config.maxClientsPerRoom > 32) {
         *error = "max_clients_per_room must be 2..32";
         return false;
     }
     return true;
+}
+
+bool SaveRendezvousConfig(const std::string& path, const RendezvousConfig& config,
+                          std::string* error) {
+    if (!ValidateRendezvousConfig(config, error)) return false;
+    return WriteConfig(path, config, error);
 }
