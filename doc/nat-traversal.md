@@ -303,6 +303,53 @@ NAT4 socket pool matched local port 30017 with peer 203.0.113.20:50020
 NAT4 hole punching confirmed with 203.0.113.20:50020
 ```
 
+## 故障修复记录与排查
+
+### Windows UDP `WSAECONNRESET (10054)` 导致等待端提前停止
+
+分类：**UDP/NAT 穿透状态机 · Windows Winsock 错误处理**。该问题发生在 TUN 打开之前，不属于 TUN 适配器故障。
+
+典型触发顺序：
+
+```text
+A: Wait for peer
+B: 发现 A 并主动连接
+A: 收到 PEER，向 B 的公网端点发送 PUNCH
+远端 NAT 映射尚未建立，或中间设备返回 ICMP Port Unreachable
+Windows: 下一次 recvfrom 返回 WSAECONNRESET (10054)
+```
+
+Winsock 会把此前 UDP 发送引起的 ICMP 不可达延迟报告到下一次 `recvfrom`。在 UDP 打洞阶段，对端映射尚未建立是正常的短暂状态，因此这个错误不能直接证明会合 socket 已失效。
+
+旧行为把会合服务器已响应之后的 `10054` 当作致命接收错误，`DiscoverAndPunch` 立即返回失败。GUI/TUI 的状态回调只更新界面状态，没有把错误原因再次写入核心日志，因此常见日志只有：
+
+```text
+Rendezvous supplied peer 27.38.4.198:51237
+EasyTunnel engine stopped.
+```
+
+修复提交 `0e15780` 调整为：
+
+- 首次收到合法会合响应前，目的不可达仍可用于判断会合服务器无响应；
+- 已收到会合响应后，打洞阶段的 `WSAECONNRESET`、`WSAECONNREFUSED`、网络不可达和主机不可达按瞬态错误处理，继续发送 PUNCH，直至成功或 `punch_timeout`；
+- NAT4 和已连接数据面同样不会因单次 UDP ICMP 错误立即退出；
+- 其他未知 socket 错误仍是致命错误，不会被吞掉；
+- 引擎日志会记录状态迁移、错误码、外部 Stop 与实际退出原因。
+
+Debug 日志中的关键行：
+
+```text
+Transient UDP unreachable during NAT traversal; continuing. err=10054, ...
+```
+
+如果该行偶发后出现 `NAT hole punching confirmed`，说明瞬态 ICMP 已被正确容忍。如果持续出现并最终报 `NAT punch timed out`，应按 NAT/防火墙问题排查，而不是继续检查 Wintun：
+
+- 确认双方 UDP 流量没有被主机或企业防火墙阻止；
+- 对比两端是否都收到了相同 Peer 的 `PEER`；
+- 检查 NAT4 双方是否进入相同 round；
+- 检查公网端口是否随机变化，超出固定偏移预测能力；
+- 使用最终的 `reason=...` 和 `final_state=...` 区分超时、外部 Stop 和 TUN 错误。
+
 ## 部署与兼容性
 
 NAT4 round 屏障依赖 `NAT4_JOIN`、`NAT4_WAIT` 和 `NAT4_PEER`，因此客户端和会合服务器必须一起升级。旧会合服务器会忽略 `NAT4_JOIN`，客户端最终表现为 NAT4 打洞超时。

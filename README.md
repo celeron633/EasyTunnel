@@ -75,7 +75,10 @@ cmake --build build --target EasyTunnel_rendezvous
 
 会合服务器源码位于 `rendezvous/`：`main.cpp` 负责启动，`server.cpp` 负责 UDP 接收循环，`registry.cpp` 负责房间、配对和 NAT4 round 状态，`config.cpp` 负责配置读写。
 
-默认精确端口打洞、NAT4 socket 池、round 屏障和超时状态机详见 [doc/nat-traversal.md](doc/nat-traversal.md)。
+实现文档：
+
+- [TUN 数据面与 Windows/Linux 适配器](doc/tun.md)
+- [NAT 会合、精确端口打洞、NAT4 socket 池与故障排查](doc/nat-traversal.md)
 
 ## 快速开始
 
