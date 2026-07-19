@@ -12,6 +12,7 @@
 struct RendezvousClientSnapshot {
     std::string nodeId;
     std::string endpoint;
+    std::string tunIp;
     std::string pairedWith;
     uint64_t idleSeconds = 0;
     uint32_t nat4Round = 0;

@@ -14,6 +14,7 @@ struct Client {
     std::string node;
     UdpEndpoint endpoint;
     std::chrono::steady_clock::time_point seen;
+    std::string tunIp;
     std::string pairedWith;
     uint32_t nat4Round = 0;
     bool nat4Joined = false;
@@ -185,6 +186,39 @@ struct RendezvousRegistry::Impl {
                     {targetAddress.first, targetAddress.second, target->first});
     }
 
+    void HandleTunIp(const UdpEndpoint& source,
+                     const std::vector<std::string>& fields,
+                     std::chrono::steady_clock::time_point now) {
+        const std::string& roomId = fields[0];
+        const std::string& nodeId = fields[1];
+        const std::string& tunIp = fields[2];
+        const std::string& token = fields[3];
+        in_addr parsedIp{};
+        if (!Authorized(roomId, nodeId, "", token)) {
+            Log(LogLevel::Warn, "Rejected TUN_IP from " + FormatUdpEndpoint(source));
+            SendMessage(sock, source, "ERROR", {"unauthorized"});
+            return;
+        }
+        if (!ParseIpv4(tunIp, &parsedIp)) {
+            Log(LogLevel::Warn, "Rejected invalid TUN IP from "
+                + FormatUdpEndpoint(source));
+            SendMessage(sock, source, "ERROR", {"invalid-tun-ip"});
+            return;
+        }
+
+        const auto room = rooms.find(roomId);
+        if (room == rooms.end()) return;
+        const auto current = room->second.find(nodeId);
+        if (current == room->second.end()
+            || !SameUdpEndpoint(current->second.endpoint, source)) return;
+
+        current->second.seen = now;
+        if (current->second.tunIp == tunIp) return;
+        current->second.tunIp = tunIp;
+        Log(LogLevel::Info, "TUN IP reported peer=" + nodeId + " room=" + roomId
+            + " tun_ip=" + tunIp + " endpoint=" + FormatUdpEndpoint(source));
+    }
+
     void HandleSession(const UdpEndpoint& source, const std::string& type,
                        const std::vector<std::string>& fields,
                        std::chrono::steady_clock::time_point now) {
@@ -192,7 +226,14 @@ struct RendezvousRegistry::Impl {
         const bool isConnect = type == "CONNECT" && fields.size() == 4;
         const bool isUnregister = type == "UNREG" && fields.size() == 3;
         const bool isNat4Join = type == "NAT4_JOIN" && fields.size() == 5;
-        if (!isRegister && !isConnect && !isUnregister && !isNat4Join) return;
+        const bool isTunIp = type == "TUN_IP" && fields.size() == 4;
+        if (!isRegister && !isConnect && !isUnregister && !isNat4Join
+            && !isTunIp) return;
+
+        if (isTunIp) {
+            HandleTunIp(source, fields, now);
+            return;
+        }
 
         const std::string& roomId = fields[0];
         const std::string& nodeId = fields[1];
@@ -235,9 +276,9 @@ struct RendezvousRegistry::Impl {
         auto current = room.find(nodeId);
         if (current == room.end()) {
             current = room.emplace(nodeId,
-                Client{nodeId, source, now, "", 0, false}).first;
+                Client{nodeId, source, now, "", "", 0, false}).first;
             Log(LogLevel::Info, "Registered peer=" + nodeId + " room=" + roomId
-                + " endpoint=" + FormatUdpEndpoint(source));
+                + " endpoint=" + FormatUdpEndpoint(source) + " tun_ip=N/A");
         } else {
             current->second.endpoint = source;
             current->second.seen = now;
@@ -293,6 +334,7 @@ std::vector<RendezvousRoomSnapshot> RendezvousRegistry::Snapshot(
             roomSnapshot.clients.push_back({
                 client.node,
                 FormatUdpEndpoint(client.endpoint),
+                client.tunIp.empty() ? "N/A" : client.tunIp,
                 client.pairedWith,
                 static_cast<uint64_t>((std::max)(int64_t{0}, idle)),
                 client.nat4Round,

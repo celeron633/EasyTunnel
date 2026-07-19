@@ -74,6 +74,11 @@ RendezvousClient::RendezvousClient(const Config& config,
 bool RendezvousClient::SendProbe(socket_t sock) const {
     bool sent = Send(sock, server_, MakeControlMessage("REG",
         {config_.room_id, config_.peer_id, config_.auth_token}));
+    if (!config_.local_tun_ipv4.empty()) {
+        sent = Send(sock, server_, MakeControlMessage("TUN_IP",
+            {config_.room_id, config_.peer_id,
+             config_.local_tun_ipv4, config_.auth_token})) && sent;
+    }
     if (!config_.target_peer_id.empty()) {
         sent = Send(sock, server_, MakeControlMessage("CONNECT",
             {config_.room_id, config_.peer_id,
@@ -85,9 +90,15 @@ bool RendezvousClient::SendProbe(socket_t sock) const {
 bool RendezvousClient::SendNat4Join(socket_t sock,
                                     const std::string& expectedPeerId,
                                     uint32_t round) const {
-    return Send(sock, server_, MakeControlMessage("NAT4_JOIN",
+    bool sent = Send(sock, server_, MakeControlMessage("NAT4_JOIN",
         {config_.room_id, config_.peer_id, expectedPeerId,
          std::to_string(round), config_.auth_token}));
+    if (!config_.local_tun_ipv4.empty()) {
+        sent = Send(sock, server_, MakeControlMessage("TUN_IP",
+            {config_.room_id, config_.peer_id,
+             config_.local_tun_ipv4, config_.auth_token})) && sent;
+    }
+    return sent;
 }
 
 void RendezvousClient::Unregister(socket_t sock) const {
@@ -168,13 +179,17 @@ bool RendezvousClient::HandleUnreachableError(int socketError,
 }
 
 bool ValidateRendezvousSession(const Config& config, std::string* error) {
+    in_addr tunIp{};
     if (!IsSafeControlField(config.room_id)
         || !IsSafeControlField(config.peer_id)
         || (!config.target_peer_id.empty()
             && !IsSafeControlField(config.target_peer_id))
         || (!config.auth_token.empty()
-            && !IsSafeControlField(config.auth_token))) {
-        *error = "room_id/peer_id/target_peer_id/auth_token is invalid";
+            && !IsSafeControlField(config.auth_token))
+        || (!config.local_tun_ipv4.empty()
+            && (!IsSafeControlField(config.local_tun_ipv4)
+                || !ParseIpv4(config.local_tun_ipv4, &tunIp)))) {
+        *error = "room_id/peer_id/target_peer_id/auth_token/local_tun_ipv4 is invalid";
         return false;
     }
     return true;

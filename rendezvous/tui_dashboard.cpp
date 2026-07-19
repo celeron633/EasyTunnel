@@ -28,8 +28,9 @@ ftxui::Component RendezvousTuiApp::BuildDashboardTab() {
             }));
             rows.push_back(separator());
             rows.push_back(hbox({
-                text("Client") | bold | size(WIDTH, EQUAL, 22),
-                text("Public endpoint") | bold | size(WIDTH, EQUAL, 25),
+                text("Client") | bold | size(WIDTH, EQUAL, 20),
+                text("TUN IPv4") | bold | size(WIDTH, EQUAL, 16),
+                text("Public endpoint") | bold | size(WIDTH, EQUAL, 23),
                 text("State") | bold | size(WIDTH, EQUAL, 20),
                 text("Idle") | bold,
             }));
@@ -45,8 +46,9 @@ ftxui::Component RendezvousTuiApp::BuildDashboardTab() {
                     stateColor = Color::Yellow;
                 }
                 rows.push_back(hbox({
-                    text(client.nodeId) | size(WIDTH, EQUAL, 22),
-                    text(client.endpoint) | size(WIDTH, EQUAL, 25),
+                    text(client.nodeId) | size(WIDTH, EQUAL, 20),
+                    text(client.tunIp) | size(WIDTH, EQUAL, 16),
+                    text(client.endpoint) | size(WIDTH, EQUAL, 23),
                     text(state) | color(stateColor) | size(WIDTH, EQUAL, 20),
                     text(std::to_string(client.idleSeconds) + "s"),
                 }));
