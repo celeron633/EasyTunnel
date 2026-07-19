@@ -42,6 +42,7 @@ ftxui::screen
 - 在线客户端刷新和选择
 - Wait for peer、Connect selected、Disconnect
 - TX/RX 包数、累计字节和每秒速度
+- 每 5 秒采样的 TX/RX 速度与延迟柱形历史图
 - Bytes/KB/MB 单位切换按钮
 - 红色 TX、绿色 RX 活动指示
 - 当前连接状态

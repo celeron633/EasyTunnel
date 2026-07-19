@@ -9,8 +9,10 @@
 #include <vector>
 
 #include <ftxui/component/screen_interactive.hpp>
+#include <ftxui/dom/elements.hpp>
 
 #include "../tunnel_engine.h"
+#include "../statistics_history.h"
 #include "tui_config.h"
 
 class TuiApp {
@@ -36,6 +38,8 @@ private:
     void SetStatus(const std::string& message);
     void ProcessAutoWait();
     void UpdateStats();
+    void UpdateStatisticsHistory();
+    ftxui::Element RenderStatisticsCharts() const;
     void UpdateDisplayLabels();
     void SaveIfChanged();
     void CopyAllLogs();
@@ -100,6 +104,7 @@ private:
     uint64_t observedRxPackets_ = 0;
     std::chrono::steady_clock::time_point lastTxActivity_{};
     std::chrono::steady_clock::time_point lastRxActivity_{};
+    StatisticsHistory statisticsHistory_;
 
     std::atomic<bool> exiting_{false};
     std::atomic<int> retryDelaySeconds_{5};

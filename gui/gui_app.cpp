@@ -148,6 +148,7 @@ void GuiApp::Shutdown() {
 
 void GuiApp::RenderFrame() {
     UpdateLiveStats();
+    UpdateStatisticsHistory();
     ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x, viewport->WorkSize.y - 30));

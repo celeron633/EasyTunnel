@@ -78,6 +78,7 @@ int TuiApp::Run() {
     root |= CatchEvent([this](Event event) {
         if (event == Event::Custom) {
             UpdateStats();
+            UpdateStatisticsHistory();
             ProcessAutoWait();
             SaveIfChanged();
             UpdateDisplayLabels();

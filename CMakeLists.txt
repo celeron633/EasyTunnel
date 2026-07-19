@@ -81,9 +81,11 @@ if(BUILD_TUI)
         tui/tui_main.cpp
         tui/tui_app.cpp
         tui/tui_app_connection.cpp
+        tui/tui_app_statistics.cpp
         tui/tui_app_settings.cpp
         tui/tui_app_log.cpp
         tui/tui_config.cpp
+        statistics_history.cpp
         ${COMMON_SOURCES}
         ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_tui PRIVATE ${CMAKE_SOURCE_DIR})
@@ -273,8 +275,10 @@ if(BUILD_GUI)
         gui/gui_main.cpp
         gui/gui_app.cpp
         gui/gui_app_connection.cpp
+        gui/gui_app_statistics.cpp
         gui/gui_app_settings.cpp
         gui/gui_app_log.cpp
+        statistics_history.cpp
         gui/ui_heartbeat.cpp)
     if(WIN32)
         list(APPEND GUI_SOURCES

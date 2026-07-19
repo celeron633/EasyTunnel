@@ -107,6 +107,7 @@ ftxui::Component TuiApp::BuildConnectionTab() {
             text(rttMilliseconds < 0
                 ? "Latency: -- ms"
                 : "Latency: " + std::to_string(rttMilliseconds) + " ms"),
+            RenderStatisticsCharts(),
             separator(),
             hbox({
                 text(txActive ? "* " : ". ")
@@ -118,7 +119,7 @@ ftxui::Component TuiApp::BuildConnectionTab() {
             }),
             separator(),
             hbox({text("Status: ") | bold, text(status) | flex}),
-        }) | border | flex;
+        }) | vscroll_indicator | frame | border | flex;
     });
 }
 

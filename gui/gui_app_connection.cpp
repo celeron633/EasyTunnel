@@ -142,6 +142,7 @@ void GuiApp::RenderConnectionTab() {
     const int64_t rttMilliseconds = stats.rttMilliseconds.load();
     if (rttMilliseconds < 0) ImGui::TextUnformatted("Latency: -- ms");
     else ImGui::Text("Latency: %lld ms", static_cast<long long>(rttMilliseconds));
+    RenderStatisticsCharts();
 }
 
 void GuiApp::UpdateLiveStats() {

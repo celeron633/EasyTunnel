@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "../tunnel_engine.h"
+#include "../statistics_history.h"
 
 struct GLFWwindow;
 #ifdef _WIN32
@@ -48,6 +49,8 @@ private:
     void ShowConfigSaveMessage(std::string message, bool succeeded);
     void RenderConfigSaveStatus();
     void UpdateLiveStats();
+    void UpdateStatisticsHistory();
+    void RenderStatisticsCharts();
     void ProcessAutoWait();
 
     GLFWwindow* window_ = nullptr;
@@ -109,6 +112,7 @@ private:
     uint64_t observedRxPackets_ = 0;
     std::chrono::steady_clock::time_point lastTxActivity_{};
     std::chrono::steady_clock::time_point lastRxActivity_{};
+    StatisticsHistory statisticsHistory_;
     std::atomic<bool> autoWaitEnabledRuntime_{false};
     std::atomic<bool> autoWaitPending_{false};
     std::atomic<bool> suppressAutoWait_{false};
