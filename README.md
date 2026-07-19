@@ -196,7 +196,7 @@ Linux 客户端通常需要 root 或相应的 TUN/network capability。
 - `auth_token` 会明文保存，请限制配置文件访问权限。
 - **Log** 页面显示实时日志，最多保留 2000 行。
 - 文件日志位于 `EasyTunnel_gui.exe` 同目录的 `EasyTunnel_gui.log`。
-- Settings → Misc 中的 **Auto wait for peer** 默认关闭。启用后，GUI 会在启动、断开或错误退出连接后自动向会合服务器注册并等待其他 Peer；错误重试间隔为 1 秒。
+- Settings → Rendezvous 中的 **Auto wait for peer** 默认关闭。启用后，GUI 会在启动、断开或错误退出连接后自动向会合服务器注册并等待其他 Peer。首次启动会立即注册；会合超时、其他错误或手动 Disconnect 后，会按同一区域的 **Retry Delay Seconds** 延迟重试（默认 5 秒，可配置 1–3600 秒）。
 
 ## TUI 客户端
 

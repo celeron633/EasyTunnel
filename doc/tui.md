@@ -39,8 +39,6 @@ ftxui::screen
 
 ### Connection
 
-- Rendezvous Server Addr/Port
-- Room ID、My Peer ID、Auth Token
 - 在线客户端刷新和选择
 - Wait for peer、Connect selected、Disconnect
 - TX/RX 包数、累计字节和每秒速度
@@ -50,11 +48,14 @@ ftxui::screen
 
 ### Settings
 
+- Rendezvous Server Addr/Port
+- Room ID、My Peer ID、Auth Token
 - Adapter Name、Local TUN IPv4、Prefix、MTU
 - Auto configure IPv4
 - Keepalive、Peer Timeout、Punch Timeout
 - NAT4 Source Port Start/Count、Peer Port Offset、Round Timeout
 - 日志级别
+- Rendezvous Retry Delay Seconds
 - Auto wait for peer
 - JSON 配置保存结果
 
@@ -101,6 +102,7 @@ EasyTunnel_tui.json
 - MTU、Prefix、自动配置
 - NAT 保活和超时
 - 日志等级
+- 会合重试延迟
 - Auto wait for peer
 
 `auth_token` 为明文，请限制配置文件权限。
@@ -116,7 +118,7 @@ EasyTunnel_tui.json
 - 对端超时
 - 打洞或网络错误
 
-错误重试有 1 秒退避。退出 TUI 时会设置 `exiting` 和 `suppressAutoWait`，确保停止引擎后不会再次注册。
+程序启动时会立即执行首次自动等待；会合超时、其他错误或手动断开后，按 `rendezvous_retry_delay_seconds` 延迟重试。该值位于 Settings → Rendezvous，默认 5 秒，可配置 1–3600 秒。退出 TUI 时会设置 `exiting`，确保停止引擎后不会再次注册。
 
 ## 统计实现
 

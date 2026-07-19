@@ -22,6 +22,7 @@ struct TuiConfig {
     int nat4PeerPortOffset = 20;
     int nat4RoundTimeout = 10;
     int logLevel = 1;
+    int rendezvousRetryDelaySeconds = 5;
     bool autoWaitForPeer = false;
 };
 

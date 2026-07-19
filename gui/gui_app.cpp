@@ -76,6 +76,7 @@ bool GuiApp::Init() {
         OnStateChanged(state, message);
     });
     autoWaitEnabledRuntime_.store(autoWaitForPeer_);
+    autoWaitRetryDelaySecondsRuntime_.store(rendezvousRetryDelaySeconds_);
     autoWaitPending_.store(autoWaitForPeer_);
     return true;
 }

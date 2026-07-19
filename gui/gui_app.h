@@ -79,6 +79,7 @@ private:
     int nat4PeerPortOffset_ = 20;
     int nat4RoundTimeout_ = 10;
     int logLevelIdx_ = 1;
+    int rendezvousRetryDelaySeconds_ = 5;
     bool autoWaitForPeer_ = false;
 
     std::mutex statusMutex_;
@@ -113,5 +114,6 @@ private:
     std::atomic<bool> suppressAutoWait_{false};
     std::atomic<bool> shuttingDown_{false};
     std::atomic<bool> waitingForPeer_{false};
+    std::atomic<int> autoWaitRetryDelaySecondsRuntime_{5};
     std::atomic<int64_t> autoWaitRetryAfterMs_{0};
 };

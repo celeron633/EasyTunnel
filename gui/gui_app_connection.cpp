@@ -14,26 +14,6 @@
 #include "../util.h"
 
 namespace {
-constexpr float kFormLabelWidth = 155.0f;
-
-bool BeginForm(const char* id) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp)) return false;
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, kFormLabelWidth);
-    ImGui::TableSetupColumn("field", ImGuiTableColumnFlags_WidthStretch);
-    return true;
-}
-
-void EndForm() { ImGui::EndTable(); }
-
-void FormField(const char* label) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(0);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    ImGui::TableSetColumnIndex(1);
-    ImGui::SetNextItemWidth(-FLT_MIN);
-}
-
 const char* ByteUnitName(int unit) {
     switch (unit) {
         case 1: return "KB";
@@ -79,28 +59,6 @@ void GuiApp::RenderConnectionTab() {
     const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
     const bool waiting = active && waitingForPeer_.load();
     const bool canBrowseClients = !active || waiting;
-    bool configChanged = false;
-    ImGui::Spacing();
-    if (active) ImGui::BeginDisabled();
-    if (BeginForm("##RendezvousForm")) {
-        FormField("Rendezvous Server Addr");
-        configChanged |= ImGui::InputText("##ServerAddress", serverAddress_, sizeof(serverAddress_));
-        FormField("Rendezvous Server Port");
-        configChanged |= ImGui::InputInt("##ServerPort", &serverPort_);
-        serverPort_ = std::clamp(serverPort_, 1, 65535);
-        FormField("Room ID");
-        configChanged |= ImGui::InputText("##RoomId", roomId_, sizeof(roomId_));
-        FormField("My Peer ID");
-        configChanged |= ImGui::InputText("##PeerId", peerId_, sizeof(peerId_));
-        FormField("Auth Token");
-        configChanged |= ImGui::InputText("##AuthToken", authToken_, sizeof(authToken_),
-                                          ImGuiInputTextFlags_Password);
-        EndForm();
-    }
-    if (active) ImGui::EndDisabled();
-    if (configChanged) SaveGuiConfig();
-    RenderConfigSaveStatus();
-
     ImGui::Spacing();
     ImGui::SeparatorText("Online clients in this room");
     if (canBrowseClients && ImGui::Button("Refresh clients")) RefreshClients();
@@ -363,7 +321,8 @@ void GuiApp::ProcessAutoWait() {
     if (StartConnection("")) {
         autoWaitPending_.store(false);
     } else {
-        autoWaitRetryAfterMs_.store(nowMs + 1000);
+        autoWaitRetryAfterMs_.store(nowMs
+            + static_cast<int64_t>(autoWaitRetryDelaySecondsRuntime_.load()) * 1000);
     }
 }
 
@@ -372,13 +331,10 @@ void GuiApp::OnStateChanged(TunnelState state, const std::string& message) {
     if (state == TunnelState::Connected) waitingForPeer_.store(false);
     if (state == TunnelState::Disconnected || state == TunnelState::Error) {
         waitingForPeer_.store(false);
-        if (state == TunnelState::Error) {
-            const int64_t retryAt = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count() + 1000;
-            autoWaitRetryAfterMs_.store(retryAt);
-        } else {
-            autoWaitRetryAfterMs_.store(0);
-        }
+        const int64_t retryAt = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count()
+            + static_cast<int64_t>(autoWaitRetryDelaySecondsRuntime_.load()) * 1000;
+        autoWaitRetryAfterMs_.store(retryAt);
         if (!shuttingDown_.load() && !suppressAutoWait_.load()
             && autoWaitEnabledRuntime_.load()) {
             autoWaitPending_.store(true);

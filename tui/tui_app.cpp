@@ -30,6 +30,7 @@ bool TuiApp::Init() {
         configSaveOk_ = false;
     }
     SyncTextFromConfig();
+    retryDelaySeconds_.store(config_.rendezvousRetryDelaySeconds);
     if (!existed) {
         if (SaveTuiConfig(configPath_, config_, &error)) {
             configMessage_ = "Created " + configPath_;

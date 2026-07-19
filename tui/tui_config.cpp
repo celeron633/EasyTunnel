@@ -115,6 +115,8 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     IntValue(json, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
     IntValue(json, "nat4_round_timeout", &config->nat4RoundTimeout);
     IntValue(json, "log_level", &config->logLevel);
+    IntValue(json, "rendezvous_retry_delay_seconds",
+             &config->rendezvousRetryDelaySeconds);
     BoolValue(json, "auto_wait_for_peer", &config->autoWaitForPeer);
 
     config->rendezvousPort = std::clamp(config->rendezvousPort, 1, 65535);
@@ -133,6 +135,8 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     config->nat4PeerPortOffset = std::clamp(config->nat4PeerPortOffset, 0, 256);
     config->nat4RoundTimeout = std::clamp(config->nat4RoundTimeout, 1, 60);
     config->logLevel = std::clamp(config->logLevel, 0, 3);
+    config->rendezvousRetryDelaySeconds = std::clamp(
+        config->rendezvousRetryDelaySeconds, 1, 3600);
     return true;
 }
 
@@ -164,6 +168,8 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "  \"nat4_peer_port_offset\": " << config.nat4PeerPortOffset << ",\n"
         << "  \"nat4_round_timeout\": " << config.nat4RoundTimeout << ",\n"
         << "  \"log_level\": " << config.logLevel << ",\n"
+        << "  \"rendezvous_retry_delay_seconds\": "
+        << config.rendezvousRetryDelaySeconds << ",\n"
         << "  \"auto_wait_for_peer\": " << (config.autoWaitForPeer ? "true" : "false") << "\n"
         << "}\n";
     output.flush();

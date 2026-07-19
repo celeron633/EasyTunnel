@@ -63,6 +63,7 @@ private:
     std::string nat4SourcePortCountText_;
     std::string nat4PeerPortOffsetText_;
     std::string nat4RoundTimeoutText_;
+    std::string rendezvousRetryDelayText_;
 
     std::vector<std::string> clients_;
     int selectedClient_ = 0;
@@ -101,6 +102,7 @@ private:
     std::chrono::steady_clock::time_point lastRxActivity_{};
 
     std::atomic<bool> exiting_{false};
+    std::atomic<int> retryDelaySeconds_{5};
     std::atomic<int64_t> retryAfterMs_{0};
     std::atomic<bool> tickerRunning_{false};
     std::thread tickerThread_;

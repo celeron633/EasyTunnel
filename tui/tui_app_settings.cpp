@@ -5,6 +5,7 @@
 #include <utility>
 
 #include <ftxui/component/component.hpp>
+#include <ftxui/component/component_options.hpp>
 #include <ftxui/dom/elements.hpp>
 
 namespace {
@@ -22,6 +23,13 @@ int ParseInt(const std::string& text, int fallback) {
 ftxui::Component TuiApp::BuildSettingsTab() {
     using namespace ftxui;
 
+    InputOption passwordOption = InputOption::Default();
+    passwordOption.password = true;
+    auto serverAddress = Input(&config_.rendezvousAddress, "server.example.com");
+    auto serverPort = Input(&serverPortText_, "3478");
+    auto roomId = Input(&config_.roomId, "room");
+    auto peerId = Input(&config_.peerId, "peer-id");
+    auto token = Input(&config_.authToken, "optional token", passwordOption);
     auto adapter = Input(&config_.adapterName, "EasyTunnel");
     auto tunIp = Input(&config_.localTunIpv4, "10.66.0.1");
     auto tunPrefix = Input(&tunPrefixText_, "24");
@@ -33,24 +41,38 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto nat4SourcePortCount = Input(&nat4SourcePortCountText_, "25");
     auto nat4PeerPortOffset = Input(&nat4PeerPortOffsetText_, "20");
     auto nat4RoundTimeout = Input(&nat4RoundTimeoutText_, "10");
+    auto rendezvousRetryDelay = Input(&rendezvousRetryDelayText_, "5");
     auto autoConfig = Checkbox("Auto configure IPv4", &config_.autoConfigIpv4);
     auto dummyTraffic = Checkbox("1 KiB/s dummy traffic", &config_.dummyTrafficEnabled);
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
     auto logLevel = Radiobox(&logLevels_, &config_.logLevel);
 
     auto controls = Container::Vertical({
+        serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay, autoWait,
         adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive, peerTimeout,
         punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
-        nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic, autoWait,
+        nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic,
     });
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
          peerTimeout, punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
-         nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic, autoWait] {
+         nat4PeerPortOffset, nat4RoundTimeout, logLevel, serverAddress,
+         serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
+         autoWait] {
         auto row = [](const std::string& label, Component component) {
             return hbox({text(label) | size(WIDTH, EQUAL, 26), component->Render() | flex});
         };
         return vbox({
+            text("Rendezvous") | bold,
+            separator(),
+            row("Rendezvous Server Addr", serverAddress),
+            row("Rendezvous Server Port", serverPort),
+            row("Room ID", roomId),
+            row("My Peer ID", peerId),
+            row("Auth Token", token),
+            row("Retry Delay Seconds", rendezvousRetryDelay),
+            autoWait->Render(),
+            separator(),
             text("TUN adapter") | bold,
             separator(),
             row("Adapter Name", adapter),
@@ -73,10 +95,9 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             separator(),
             text("Misc") | bold,
             dummyTraffic->Render(),
-            autoWait->Render(),
             separator(),
             text(configMessage_) | color(configSaveOk_ ? Color::Green : Color::Red),
-        }) | border | flex;
+        }) | vscroll_indicator | frame | border | flex;
     });
 }
 
@@ -91,6 +112,7 @@ void TuiApp::SyncTextFromConfig() {
     nat4SourcePortCountText_ = std::to_string(config_.nat4SourcePortCount);
     nat4PeerPortOffsetText_ = std::to_string(config_.nat4PeerPortOffset);
     nat4RoundTimeoutText_ = std::to_string(config_.nat4RoundTimeout);
+    rendezvousRetryDelayText_ = std::to_string(config_.rendezvousRetryDelaySeconds);
 }
 
 void TuiApp::SyncConfigFromText() {
@@ -114,6 +136,9 @@ void TuiApp::SyncConfigFromText() {
         ParseInt(nat4PeerPortOffsetText_, config_.nat4PeerPortOffset), 0, 256);
     config_.nat4RoundTimeout = std::clamp(
         ParseInt(nat4RoundTimeoutText_, config_.nat4RoundTimeout), 1, 60);
+    config_.rendezvousRetryDelaySeconds = std::clamp(
+        ParseInt(rendezvousRetryDelayText_, config_.rendezvousRetryDelaySeconds), 1, 3600);
+    retryDelaySeconds_.store(config_.rendezvousRetryDelaySeconds);
 }
 
 std::string TuiApp::ConfigSignature() const {
@@ -125,7 +150,8 @@ std::string TuiApp::ConfigSignature() const {
               << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
               << nat4SourcePortStartText_ << '\n' << nat4SourcePortCountText_ << '\n'
               << nat4PeerPortOffsetText_ << '\n' << nat4RoundTimeoutText_ << '\n'
-              << config_.logLevel << '\n' << config_.dummyTrafficEnabled << '\n'
+              << config_.logLevel << '\n' << rendezvousRetryDelayText_ << '\n'
+              << config_.dummyTrafficEnabled << '\n'
               << config_.autoWaitForPeer;
     return signature.str();
 }

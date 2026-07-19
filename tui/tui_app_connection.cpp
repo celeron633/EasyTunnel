@@ -53,13 +53,6 @@ int64_t SteadyMilliseconds() {
 ftxui::Component TuiApp::BuildConnectionTab() {
     using namespace ftxui;
 
-    InputOption passwordOption = InputOption::Default();
-    passwordOption.password = true;
-    auto serverAddress = Input(&config_.rendezvousAddress, "server.example.com");
-    auto serverPort = Input(&serverPortText_, "3478");
-    auto roomId = Input(&config_.roomId, "room");
-    auto peerId = Input(&config_.peerId, "peer-id");
-    auto token = Input(&config_.authToken, "optional token", passwordOption);
     auto clientList = Radiobox(&clients_, &selectedClient_);
     auto refresh = Button("Refresh clients", [this] { RefreshClients(); });
     auto wait = Button("Wait for peer", [this] { StartConnection(""); });
@@ -81,14 +74,12 @@ ftxui::Component TuiApp::BuildConnectionTab() {
         [this] { statusUnit_ = (statusUnit_ + 1) % 3; }, compactStatusButton);
 
     auto controls = Container::Vertical({
-        serverAddress, serverPort, roomId, peerId, token, refresh, clientList,
-        wait, connect, disconnect, txTotal, rxTotal, txSpeed, rxSpeed,
-        statusTx, statusRx,
+        refresh, clientList, wait, connect, disconnect, txTotal, rxTotal,
+        txSpeed, rxSpeed, statusTx, statusRx,
     });
     return Renderer(controls,
-        [this, serverAddress, serverPort, roomId, peerId, token, refresh,
-         clientList, wait, connect, disconnect, txTotal, rxTotal, txSpeed,
-         rxSpeed, statusTx, statusRx] {
+        [this, refresh, clientList, wait, connect, disconnect, txTotal,
+         rxTotal, txSpeed, rxSpeed, statusTx, statusRx] {
         const auto& stats = engine_.GetStats();
         std::string status;
         { std::lock_guard<std::mutex> lock(statusMutex_); status = status_; }
@@ -97,18 +88,7 @@ ftxui::Component TuiApp::BuildConnectionTab() {
         const bool rxActive = std::chrono::steady_clock::now() - lastRxActivity_
             < std::chrono::milliseconds(350);
         const int64_t rttMilliseconds = stats.rttMilliseconds.load();
-        auto row = [](const std::string& label, Component component) {
-            return hbox({text(label) | size(WIDTH, EQUAL, 26), component->Render() | flex});
-        };
         return vbox({
-            text("Rendezvous") | bold,
-            separator(),
-            row("Rendezvous Server Addr", serverAddress),
-            row("Rendezvous Server Port", serverPort),
-            row("Room ID", roomId),
-            row("My Peer ID", peerId),
-            row("Auth Token", token),
-            separator(),
             hbox({refresh->Render(), text("  Online clients:")}),
             clientList->Render() | frame | size(HEIGHT, LESS_THAN, 7),
             hbox({wait->Render(), connect->Render(), disconnect->Render()}),
@@ -242,7 +222,8 @@ void TuiApp::RefreshClients() {
 void TuiApp::OnStateChanged(TunnelState state, const std::string& message) {
     state_.store(state);
     if (state == TunnelState::Disconnected || state == TunnelState::Error) {
-        retryAfterMs_.store(state == TunnelState::Error ? SteadyMilliseconds() + 1000 : 0);
+        retryAfterMs_.store(SteadyMilliseconds()
+            + static_cast<int64_t>(retryDelaySeconds_.load()) * 1000);
     }
     SetStatus(message.empty() ? "Disconnected" : message);
     screen_.PostEvent(ftxui::Event::Custom);
@@ -259,7 +240,10 @@ void TuiApp::ProcessAutoWait() {
     if (state != TunnelState::Disconnected && state != TunnelState::Error) return;
     const int64_t now = SteadyMilliseconds();
     if (now < retryAfterMs_.load()) return;
-    if (!StartConnection("")) retryAfterMs_.store(now + 1000);
+    if (!StartConnection("")) {
+        retryAfterMs_.store(now
+            + static_cast<int64_t>(retryDelaySeconds_.load()) * 1000);
+    }
 }
 
 void TuiApp::UpdateStats() {

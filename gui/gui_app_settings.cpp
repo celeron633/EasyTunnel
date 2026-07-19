@@ -124,6 +124,52 @@ void CopyToBuffer(const std::string& value, char (&buffer)[N]) {
 void GuiApp::RenderSettingsTab() {
     bool configChanged = false;
     ImGui::Spacing();
+    ImGui::SeparatorText("Rendezvous");
+    if (BeginForm("##RendezvousSettings")) {
+        const TunnelState state = currentState_.load();
+        const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
+        if (active) ImGui::BeginDisabled();
+        FormField("Rendezvous Server Addr");
+        configChanged |= ImGui::InputText(
+            "##ServerAddress", serverAddress_, sizeof(serverAddress_));
+        FormField("Rendezvous Server Port");
+        configChanged |= ImGui::InputInt("##ServerPort", &serverPort_);
+        serverPort_ = std::clamp(serverPort_, 1, 65535);
+        FormField("Room ID");
+        configChanged |= ImGui::InputText("##RoomId", roomId_, sizeof(roomId_));
+        FormField("My Peer ID");
+        configChanged |= ImGui::InputText("##PeerId", peerId_, sizeof(peerId_));
+        FormField("Auth Token");
+        configChanged |= ImGui::InputText("##AuthToken", authToken_, sizeof(authToken_),
+                                          ImGuiInputTextFlags_Password);
+        if (active) ImGui::EndDisabled();
+        FormField("Retry Delay Seconds");
+        const bool retryDelayChanged = ImGui::InputInt(
+            "##RendezvousRetryDelay", &rendezvousRetryDelaySeconds_);
+        rendezvousRetryDelaySeconds_ = std::clamp(rendezvousRetryDelaySeconds_, 1, 3600);
+        if (retryDelayChanged) {
+            autoWaitRetryDelaySecondsRuntime_.store(rendezvousRetryDelaySeconds_);
+        }
+        configChanged |= retryDelayChanged;
+        FormField("Auto wait for peer");
+        const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer", &autoWaitForPeer_);
+        configChanged |= autoWaitChanged;
+        if (autoWaitChanged) {
+            autoWaitEnabledRuntime_.store(autoWaitForPeer_);
+            if (autoWaitForPeer_) {
+                autoWaitRetryAfterMs_.store(0);
+                const TunnelState currentState = currentState_.load();
+                if (currentState == TunnelState::Disconnected
+                    || currentState == TunnelState::Error) {
+                    autoWaitPending_.store(true);
+                }
+            } else {
+                autoWaitPending_.store(false);
+            }
+        }
+        EndForm();
+    }
+    ImGui::Spacing();
     ImGui::SeparatorText("TUN adapter");
     if (BeginForm("##TunSettings")) {
         FormField("Adapter Name");
@@ -185,21 +231,6 @@ void GuiApp::RenderSettingsTab() {
     if (BeginForm("##MiscSettings")) {
         FormField("1 KiB/s dummy traffic");
         configChanged |= ImGui::Checkbox("##DummyTraffic", &dummyTrafficEnabled_);
-        FormField("Auto wait for peer");
-        const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer", &autoWaitForPeer_);
-        configChanged |= autoWaitChanged;
-        if (autoWaitChanged) {
-            autoWaitEnabledRuntime_.store(autoWaitForPeer_);
-            if (autoWaitForPeer_) {
-                autoWaitRetryAfterMs_.store(0);
-                const TunnelState state = currentState_.load();
-                if (state == TunnelState::Disconnected || state == TunnelState::Error) {
-                    autoWaitPending_.store(true);
-                }
-            } else {
-                autoWaitPending_.store(false);
-            }
-        }
         EndForm();
     }
     if (configChanged) SaveGuiConfig();
@@ -242,6 +273,7 @@ bool GuiApp::LoadGuiConfig() {
     JsonInt(json, "nat4_peer_port_offset", &nat4PeerPortOffset_);
     JsonInt(json, "nat4_round_timeout", &nat4RoundTimeout_);
     JsonInt(json, "log_level", &logLevelIdx_);
+    JsonInt(json, "rendezvous_retry_delay_seconds", &rendezvousRetryDelaySeconds_);
     JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
 
     serverPort_ = std::clamp(serverPort_, 1, 65535);
@@ -259,6 +291,7 @@ bool GuiApp::LoadGuiConfig() {
     nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
     nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
     logLevelIdx_ = std::clamp(logLevelIdx_, 0, kLogLevelCount - 1);
+    rendezvousRetryDelaySeconds_ = std::clamp(rendezvousRetryDelaySeconds_, 1, 3600);
     const std::string message = "Configuration loaded from " + configFilePath_;
     ShowConfigSaveMessage(message, true);
     Log(LogLevel::Info, message);
@@ -294,6 +327,8 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"nat4_peer_port_offset\": " << nat4PeerPortOffset_ << ",\n"
         << "  \"nat4_round_timeout\": " << nat4RoundTimeout_ << ",\n"
         << "  \"log_level\": " << logLevelIdx_ << ",\n"
+        << "  \"rendezvous_retry_delay_seconds\": "
+        << rendezvousRetryDelaySeconds_ << ",\n"
         << "  \"auto_wait_for_peer\": " << (autoWaitForPeer_ ? "true" : "false") << "\n"
         << "}\n";
     output.flush();
