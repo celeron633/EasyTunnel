@@ -130,10 +130,16 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
     const std::string punch = MakeControlMessage(
         "PUNCH", {cfg.room_id, cfg.peer_id});
     std::vector<uint8_t> buffer(2048);
+    Log(LogLevel::Debug, "NAT4 traversal started: expected_peer_id="
+        + expectedPeerId + ", first_port=" + std::to_string(firstPort)
+        + ", pool_size=" + std::to_string(cfg.nat4_source_port_count)
+        + ", round_timeout=" + std::to_string(cfg.nat4_round_timeout) + "s");
 
     while (running.load() && std::chrono::steady_clock::now() < deadline) {
         if (firstPort + cfg.nat4_source_port_count - 1 > 65535) {
             *error = "NAT4 source port ranges exhausted before punch succeeded";
+            Log(LogLevel::Error, *error + "; next_first_port="
+                + std::to_string(firstPort));
             return false;
         }
 
@@ -166,7 +172,15 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
         while (running.load() && std::chrono::steady_clock::now() < roundDeadline) {
             const auto now = std::chrono::steady_clock::now();
             if (now >= nextRegistration) {
-                rendezvous.SendNat4Join(registrationSocket, expectedPeerId, round);
+                if (!rendezvous.SendNat4Join(
+                        registrationSocket, expectedPeerId, round)) {
+                    Log(LogLevel::Warn, "Failed to send NAT4_JOIN for round "
+                        + std::to_string(round) + ". err="
+                        + std::to_string(GetSocketError()));
+                } else {
+                    Log(LogLevel::Debug, "Sent NAT4_JOIN for round "
+                        + std::to_string(round));
+                }
                 nextRegistration = now + std::chrono::milliseconds(500);
             }
 
@@ -191,9 +205,23 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                     reinterpret_cast<char*>(buffer.data()),
                     static_cast<int>(buffer.size()), 0,
                     reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
-                if (n < 0) continue;
+                if (n < 0) {
+                    const int receiveError = GetSocketError();
+                    Log(IsUdpDestinationUnreachable(receiveError)
+                            ? LogLevel::Debug : LogLevel::Warn,
+                        "NAT4 recvfrom failed on local port "
+                        + std::to_string(firstPort + candidateIndex)
+                        + ". err=" + std::to_string(receiveError)
+                        + (IsUdpDestinationUnreachable(receiveError)
+                            ? "; transient UDP unreachable ignored" : ""));
+                    continue;
+                }
 
                 const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
+                Log(LogLevel::Debug, "NAT4 RX local_port="
+                    + std::to_string(firstPort + candidateIndex)
+                    + ", source=" + FormatUdpEndpoint(source)
+                    + ", bytes=" + std::to_string(n));
                 if (candidate == registrationSocket) {
                     const RendezvousEvent event = rendezvous.HandlePacket(
                         source, buffer.data(), static_cast<size_t>(n));
@@ -234,18 +262,35 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                             nextPoolPunch = peerInfoTime + std::chrono::seconds(2);
                         }
                     }
+                    if (event.type == RendezvousEventType::Nat4Wait) {
+                        Log(LogLevel::Debug, "Rendezvous reports NAT4_WAIT for round "
+                            + std::to_string(event.round));
+                    }
                     if (event.type != RendezvousEventType::None) continue;
                 }
 
                 std::string type;
                 std::vector<std::string> fields;
                 if (!ParseControlMessage(buffer.data(), static_cast<size_t>(n),
-                                         &type, &fields)) continue;
+                                         &type, &fields)) {
+                    Log(LogLevel::Debug, "Ignored non-control packet in NAT4 round "
+                        + std::to_string(round));
+                    continue;
+                }
 
                 if (!havePeer || !SameIpv4Address(source, rendezvousPeer)
                     || fields.size() < 2 || fields[0] != cfg.room_id
                     || fields[1] != expectedPeerId
-                    || (type != "PUNCH" && type != "PUNCH_ACK")) continue;
+                    || (type != "PUNCH" && type != "PUNCH_ACK")) {
+                    Log(LogLevel::Debug, "Ignored NAT4 control type=" + type
+                        + " from " + FormatUdpEndpoint(source)
+                        + ": have_peer=" + (havePeer ? "true" : "false")
+                        + ", same_ip="
+                        + (havePeer && SameIpv4Address(source, rendezvousPeer)
+                            ? "true" : "false")
+                        + ", fields=" + std::to_string(fields.size()));
+                    continue;
+                }
 
                 *peer = source;
                 *sock = candidate;
@@ -271,10 +316,15 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
         rendezvous.Unregister(registrationSocket);
         ClosePool(&pool);
         *sock = kInvalidSocket;
+        Log(LogLevel::Debug, "NAT4 round " + std::to_string(round)
+            + " ended without a match; advancing source-port range");
         firstPort += cfg.nat4_source_port_count;
         ++round;
     }
 
     *error = running.load() ? "NAT4 punch timed out" : "NAT traversal stopped";
+    Log(running.load() ? LogLevel::Error : LogLevel::Debug,
+        "NAT4 traversal finished without a connection: " + *error
+        + ", rounds_attempted=" + std::to_string(round));
     return false;
 }

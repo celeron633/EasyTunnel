@@ -71,20 +71,21 @@ RendezvousClient::RendezvousClient(const Config& config,
       responseDeadline_(std::chrono::steady_clock::now()
                         + kRendezvousResponseTimeout) {}
 
-void RendezvousClient::SendProbe(socket_t sock) const {
-    Send(sock, server_, MakeControlMessage("REG",
+bool RendezvousClient::SendProbe(socket_t sock) const {
+    bool sent = Send(sock, server_, MakeControlMessage("REG",
         {config_.room_id, config_.peer_id, config_.auth_token}));
     if (!config_.target_peer_id.empty()) {
-        Send(sock, server_, MakeControlMessage("CONNECT",
+        sent = Send(sock, server_, MakeControlMessage("CONNECT",
             {config_.room_id, config_.peer_id,
-             config_.target_peer_id, config_.auth_token}));
+             config_.target_peer_id, config_.auth_token})) && sent;
     }
+    return sent;
 }
 
-void RendezvousClient::SendNat4Join(socket_t sock,
+bool RendezvousClient::SendNat4Join(socket_t sock,
                                     const std::string& expectedPeerId,
                                     uint32_t round) const {
-    Send(sock, server_, MakeControlMessage("NAT4_JOIN",
+    return Send(sock, server_, MakeControlMessage("NAT4_JOIN",
         {config_.room_id, config_.peer_id, expectedPeerId,
          std::to_string(round), config_.auth_token}));
 }

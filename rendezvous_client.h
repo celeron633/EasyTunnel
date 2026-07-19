@@ -33,8 +33,8 @@ class RendezvousClient {
 public:
     RendezvousClient(const Config& config, const UdpEndpoint& server);
 
-    void SendProbe(socket_t sock) const;
-    void SendNat4Join(socket_t sock, const std::string& expectedPeerId,
+    bool SendProbe(socket_t sock) const;
+    bool SendNat4Join(socket_t sock, const std::string& expectedPeerId,
                       uint32_t round) const;
     void Unregister(socket_t sock) const;
 

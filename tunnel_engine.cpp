@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <sstream>
 #include <vector>
 
 #include "hexdump.h"
@@ -28,6 +29,22 @@
 namespace {
 constexpr int kMaxPacketSize = 65535;
 constexpr int kSocketRecvTimeoutMs = 1000;
+
+const char* TunnelStateName(TunnelState state) {
+	switch (state) {
+		case TunnelState::Disconnected: return "Disconnected";
+		case TunnelState::Connecting: return "Connecting";
+		case TunnelState::Connected: return "Connected";
+		case TunnelState::Error: return "Error";
+		default: return "Unknown";
+	}
+}
+
+std::string CurrentThreadId() {
+	std::ostringstream output;
+	output << std::this_thread::get_id();
+	return output.str();
+}
 }  // namespace
 
 TunnelEngine::TunnelEngine() = default;
@@ -38,9 +55,11 @@ TunnelEngine::~TunnelEngine() {
 
 bool TunnelEngine::Start(const Config& cfg) {
 	if (running_.load()) {
+		Log(LogLevel::Warn, "TunnelEngine::Start ignored: engine is already running");
 		return false;
 	}
 	if (workerThread_.joinable()) {
+		Log(LogLevel::Debug, "Joining previous tunnel worker before restart");
 		workerThread_.join();
 	}
 
@@ -59,9 +78,14 @@ bool TunnelEngine::Start(const Config& cfg) {
 }
 
 void TunnelEngine::Stop() {
-	running_.store(false);
+	const bool wasRunning = running_.exchange(false);
+	Log(LogLevel::Debug, "TunnelEngine::Stop requested: was_running="
+		+ std::string(wasRunning ? "true" : "false")
+		+ ", state=" + TunnelStateName(state_.load())
+		+ ", caller_thread=" + CurrentThreadId());
 	if (workerThread_.joinable()) {
 		workerThread_.join();
+		Log(LogLevel::Debug, "TunnelEngine::Stop joined worker thread");
 	}
 }
 
@@ -75,7 +99,10 @@ void TunnelEngine::SetStateCallback(StateCallback cb) {
 }
 
 void TunnelEngine::SetState(TunnelState state, const std::string& msg) {
-	state_.store(state);
+	const TunnelState previous = state_.exchange(state);
+	Log(LogLevel::Debug, "Tunnel state " + std::string(TunnelStateName(previous))
+		+ " -> " + TunnelStateName(state)
+		+ (msg.empty() ? "" : ": " + msg));
 	std::lock_guard<std::mutex> lock(cbMutex_);
 	if (stateCallback_) {
 		stateCallback_(state, msg);
@@ -85,31 +112,64 @@ void TunnelEngine::SetState(TunnelState state, const std::string& msg) {
 void TunnelEngine::WorkerThread(Config cfg) {
 	SetLogLevel(cfg.log_level);
 
-	Log(LogLevel::Info, "EasyTunnel engine starting...");
+	Log(LogLevel::Info, "EasyTunnel engine starting... worker_thread="
+		+ CurrentThreadId());
 	Log(LogLevel::Info,
 		"Rendezvous: " + cfg.rendezvous_addr + ":"
 		+ std::to_string(cfg.rendezvous_port));
+	Log(LogLevel::Debug, "Engine config: mode="
+		+ std::string(cfg.target_peer_id.empty() ? "wait" : "connect")
+		+ ", peer_id=" + cfg.peer_id
+		+ (cfg.target_peer_id.empty() ? "" : ", target_peer_id=" + cfg.target_peer_id)
+		+ ", punch_timeout=" + std::to_string(cfg.punch_timeout) + "s"
+		+ ", nat4_source_ports=" + std::to_string(cfg.nat4_source_port_start)
+		+ "+" + std::to_string(cfg.nat4_source_port_count)
+		+ ", nat4_peer_port_offset=" + std::to_string(cfg.nat4_peer_port_offset));
 
 	socket_t sock = kInvalidSocket;
 	UdpEndpoint server{};
 	std::unique_ptr<TunAdapter> tunAdapter(TunAdapter::Create());
+	std::string exitReason = "worker completed";
+	std::mutex exitReasonMutex;
+	auto setExitReason = [&](const std::string& reason) {
+		std::lock_guard<std::mutex> lock(exitReasonMutex);
+		exitReason = reason;
+	};
+	auto getExitReason = [&]() {
+		std::lock_guard<std::mutex> lock(exitReasonMutex);
+		return exitReason;
+	};
 
 	do {
 		UdpEndpoint peer{};
 		std::string socketError;
 		if (!OpenRendezvousSocket(cfg, kSocketRecvTimeoutMs, &sock, &server, &socketError)) {
+			setExitReason("failed to open rendezvous socket");
+			Log(LogLevel::Error, getExitReason() + ": " + socketError);
 			SetState(TunnelState::Error, socketError);
 			break;
 		}
+		Log(LogLevel::Debug, "Opened rendezvous UDP socket; resolved_server="
+			+ FormatUdpEndpoint(server) + ", recv_timeout_ms="
+			+ std::to_string(kSocketRecvTimeoutMs));
 		SetState(TunnelState::Connecting,
 			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
 			                           : "Connecting to " + cfg.target_peer_id);
 		if (!DiscoverAndPunch(&sock, cfg, server, running_, &peer, &socketError)) {
-			SetState(TunnelState::Error, socketError);
+			if (!running_.load()) {
+				setExitReason("stop requested during NAT traversal");
+				Log(LogLevel::Debug, getExitReason() + ": " + socketError);
+			} else {
+				setExitReason("NAT traversal failed");
+				Log(LogLevel::Error, getExitReason() + ": " + socketError);
+				SetState(TunnelState::Error, socketError);
+			}
 			break;
 		}
 
 		if (!tunAdapter->Open(cfg)) {
+			setExitReason("failed to open TUN adapter");
+			Log(LogLevel::Error, getExitReason());
 			SetState(TunnelState::Error, "Failed to open TUN adapter");
 			break;
 		}
@@ -124,6 +184,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 				size_t pktLen = 0;
 				if (!tunAdapter->ReadPacket(buf.data(), buf.size(), pktLen)) {
 					Log(LogLevel::Error, "TUN read failed; stopping.");
+					setExitReason("TUN read failed");
 					running_.store(false);
 					break;
 				}
@@ -180,7 +241,10 @@ void TunnelEngine::WorkerThread(Config cfg) {
 					const int err = GetSocketError();
 					if (!running_.load()) break;
 					if (!IsRecvTimeout(err)) {
-						Log(LogLevel::Error, "recvfrom failed. err=" + std::to_string(err));
+						Log(IsUdpDestinationUnreachable(err) ? LogLevel::Debug : LogLevel::Error,
+							"Data-plane recvfrom failed. err=" + std::to_string(err)
+							+ (IsUdpDestinationUnreachable(err)
+								? "; transient UDP unreachable ignored" : ""));
 					}
 				} else {
 					UdpEndpoint source{};
@@ -237,7 +301,11 @@ void TunnelEngine::WorkerThread(Config cfg) {
 					nextDummyTraffic = now + std::chrono::seconds(1);
 				}
 				if (now - lastPeerSeen > std::chrono::seconds(cfg.peer_timeout)) {
-					SetState(TunnelState::Error, "Peer keepalive timed out; NAT mapping may be lost");
+					const std::string timeoutError =
+						"Peer keepalive timed out; NAT mapping may be lost";
+					Log(LogLevel::Error, timeoutError);
+					setExitReason("peer keepalive timed out");
+					SetState(TunnelState::Error, timeoutError);
 					running_.store(false);
 					break;
 				}
@@ -250,6 +318,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		while (running_.load()) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(200));
 		}
+		if (getExitReason() == "worker completed") setExitReason("stop requested");
+		Log(LogLevel::Debug, "Data-plane shutdown started: reason=" + getExitReason());
 
 		ShutdownSocket(sock);
 
@@ -269,5 +339,6 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		SetState(TunnelState::Disconnected, "Tunnel stopped");
 	}
 
-	Log(LogLevel::Info, "EasyTunnel engine stopped.");
+	Log(LogLevel::Info, "EasyTunnel engine stopped. reason=" + getExitReason()
+		+ ", final_state=" + TunnelStateName(state_.load()));
 }
