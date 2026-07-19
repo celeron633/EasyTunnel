@@ -1,4 +1,4 @@
-name: Build EasyTunnel (MSVC)
+name: Build EasyTunnel
 
 on:
   workflow_dispatch:
@@ -24,11 +24,12 @@ jobs:
       - name: Configure (CMake + MSVC)
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
-      - name: Build Release (console + GUI + TUI)
+      - name: Build Release (console + GUI + TUI + rendezvous TUI)
         run: |
           cmake --build build --config Release --target EasyTunnel
           cmake --build build --config Release --target EasyTunnel_gui
           cmake --build build --config Release --target EasyTunnel_tui
+          cmake --build build --config Release --target EasyTunnel_rendezvous_tui
 
       - name: Package EasyTunnel release
         shell: pwsh
@@ -40,6 +41,7 @@ jobs:
           Copy-Item "build/Release/EasyTunnel.exe" "dist/EasyTunnel/EasyTunnel.exe" -Force
           Copy-Item "build/Release/EasyTunnel_gui.exe" "dist/EasyTunnel/EasyTunnel_gui.exe" -Force
           Copy-Item "build/Release/EasyTunnel_tui.exe" "dist/EasyTunnel/EasyTunnel_tui.exe" -Force
+          Copy-Item "build/Release/EasyTunnel_rendezvous_tui.exe" "dist/EasyTunnel/EasyTunnel_rendezvous_tui.exe" -Force
 
           if (Test-Path "build/Release/wintun.dll") {
             Copy-Item "build/Release/wintun.dll" "dist/EasyTunnel/wintun.dll" -Force
@@ -47,6 +49,10 @@ jobs:
 
           if (Test-Path "conf/tunnel.conf.example") {
             Copy-Item "conf/tunnel.conf.example" "dist/EasyTunnel/tunnel.conf.example" -Force
+          }
+
+          if (Test-Path "conf/rendezvous.json.example") {
+            Copy-Item "conf/rendezvous.json.example" "dist/EasyTunnel/EasyTunnel_rendezvous.json.example" -Force
           }
 
           if (Test-Path "README.md") {
@@ -65,8 +71,95 @@ jobs:
           name: EasyTunnel-release
           path: dist/EasyTunnel.zip
 
+  build-linux-amd64:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgl1-mesa-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            wayland-protocols \
+            xorg-dev
+
+      - name: Verify amd64 runner
+        run: test "$(uname -m)" = "x86_64"
+
+      - name: Configure (CMake + GCC)
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_GUI=ON
+          -DBUILD_TUI=ON
+
+      - name: Build all Linux binaries
+        run: |
+          cmake --build build --parallel --target \
+            EasyTunnel \
+            EasyTunnel_gui \
+            EasyTunnel_tui \
+            EasyTunnel_rendezvous \
+            EasyTunnel_rendezvous_tui
+
+      - name: Package Linux amd64 release
+        run: |
+          set -euo pipefail
+          package_dir="dist/EasyTunnel-linux-amd64"
+          mkdir -p "$package_dir"
+
+          install -m 755 build/EasyTunnel "$package_dir/EasyTunnel"
+          install -m 755 build/EasyTunnel_gui "$package_dir/EasyTunnel_gui"
+          install -m 755 build/EasyTunnel_tui "$package_dir/EasyTunnel_tui"
+          install -m 755 build/EasyTunnel_rendezvous "$package_dir/EasyTunnel_rendezvous"
+          install -m 755 build/EasyTunnel_rendezvous_tui "$package_dir/EasyTunnel_rendezvous_tui"
+
+          cp conf/tunnel.conf.example "$package_dir/tunnel.conf.example"
+          cp conf/rendezvous.json.example "$package_dir/EasyTunnel_rendezvous.json.example"
+          cp README.md LICENSE "$package_dir/"
+
+          cd dist
+          cmake -E tar cfv EasyTunnel-linux-amd64.zip \
+            --format=zip EasyTunnel-linux-amd64
+
+      - name: Upload Linux amd64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyTunnel-linux-amd64
+          path: dist/EasyTunnel-linux-amd64.zip
+
+  release:
+    needs:
+      - build-msvc
+      - build-linux-amd64
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EasyTunnel-release
+          path: dist/windows
+
+      - name: Download Linux amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EasyTunnel-linux-amd64
+          path: dist/linux-amd64
+
       - name: Upload tag build to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/EasyTunnel.zip
+          files: |
+            dist/windows/EasyTunnel.zip
+            dist/linux-amd64/EasyTunnel-linux-amd64.zip
