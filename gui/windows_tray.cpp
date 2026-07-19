@@ -13,40 +13,15 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-#include <algorithm>
 #include <cwchar>
-#include <utility>
 
 #include "../log.h"
 
 namespace {
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;
-constexpr UINT kShowWindowCommand = 1001;
-constexpr UINT kExitCommand = 1002;
-constexpr UINT kDisconnectCommand = 1003;
+constexpr UINT kExitCommand = 1001;
 constexpr wchar_t kWindowTitle[] = L"EasyTunnel";
-
-struct TrayMenuItem {
-    UINT command;
-    const wchar_t* text;
-};
-
-constexpr TrayMenuItem kShowWindowMenuItem{
-    kShowWindowCommand, L"Show Main Window"};
-constexpr TrayMenuItem kDisconnectMenuItem{
-    kDisconnectCommand, L"Disconnect"};
-constexpr TrayMenuItem kExitMenuItem{kExitCommand, L"Exit"};
-
-const TrayMenuItem* MenuItemFromData(ULONG_PTR itemData) {
-    const auto* item = reinterpret_cast<const TrayMenuItem*>(itemData);
-    if (item == &kShowWindowMenuItem || item == &kDisconnectMenuItem
-        || item == &kExitMenuItem) {
-        return item;
-    }
-    return nullptr;
-}
-
 }  // namespace
 
 struct WindowsTray::Impl {
@@ -59,17 +34,11 @@ struct WindowsTray::Impl {
     HICON icon = nullptr;
     bool ownsIcon = false;
     UINT taskbarCreatedMessage = 0;
-    std::function<void()> disconnectCallback;
-    std::function<void()> exitCallback;
 
-    bool Init(GLFWwindow* glfwWindowValue,
-              std::function<void()> disconnectCallbackValue,
-              std::function<void()> exitCallbackValue) {
+    bool Init(GLFWwindow* glfwWindowValue) {
         if (!glfwWindowValue || active) return false;
 
         glfwWindow = glfwWindowValue;
-        disconnectCallback = std::move(disconnectCallbackValue);
-        exitCallback = std::move(exitCallbackValue);
         window = glfwGetWin32Window(glfwWindow);
         if (!window) return false;
 
@@ -97,7 +66,9 @@ struct WindowsTray::Impl {
         iconData.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         iconData.uCallbackMessage = kTrayCallbackMessage;
         iconData.hIcon = icon;
-        CopyTooltipText(kWindowTitle);
+        static_assert(sizeof(kWindowTitle) <= sizeof(iconData.szTip));
+        std::wmemcpy(iconData.szTip, kWindowTitle,
+                     sizeof(kWindowTitle) / sizeof(kWindowTitle[0]));
 
         if (!AddIcon()) {
             Log(LogLevel::Error, "Failed to add the Windows tray icon");
@@ -114,12 +85,6 @@ struct WindowsTray::Impl {
         return true;
     }
 
-    void CopyTooltipText(const wchar_t* text) {
-        constexpr std::size_t capacity = sizeof(iconData.szTip) / sizeof(iconData.szTip[0]);
-        std::wcsncpy(iconData.szTip, text, capacity - 1);
-        iconData.szTip[capacity - 1] = L'\0';
-    }
-
     void Shutdown() {
         if (window) Shell_NotifyIconW(NIM_DELETE, &iconData);
         if (window && previousWindowProc) {
@@ -134,8 +99,6 @@ struct WindowsTray::Impl {
         previousWindowProc = nullptr;
         window = nullptr;
         glfwWindow = nullptr;
-        disconnectCallback = {};
-        exitCallback = {};
     }
 
     void HideWindow() const {
@@ -147,17 +110,22 @@ struct WindowsTray::Impl {
         SetForegroundWindow(window);
     }
 
+    void ConfirmExit() const {
+        const int result = MessageBoxW(
+            window, L"Exit EasyTunnel?", kWindowTitle,
+            MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
+        if (result == IDYES) {
+            glfwSetWindowShouldClose(glfwWindow, GLFW_TRUE);
+        } else {
+            HideWindow();
+        }
+    }
+
     void ShowContextMenu() const {
         HMENU menu = CreatePopupMenu();
         if (!menu) return;
 
-        AppendMenuW(menu, MF_OWNERDRAW, kShowWindowMenuItem.command,
-                    reinterpret_cast<LPCWSTR>(&kShowWindowMenuItem));
-        AppendMenuW(menu, MF_OWNERDRAW, kDisconnectMenuItem.command,
-                    reinterpret_cast<LPCWSTR>(&kDisconnectMenuItem));
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_OWNERDRAW, kExitMenuItem.command,
-                    reinterpret_cast<LPCWSTR>(&kExitMenuItem));
+        AppendMenuW(menu, MF_STRING, kExitCommand, L"Exit");
 
         POINT cursor{};
         GetCursorPos(&cursor);
@@ -167,65 +135,8 @@ struct WindowsTray::Impl {
             cursor.x, cursor.y, 0, window, nullptr);
         DestroyMenu(menu);
 
-        if (command == kShowWindowCommand) RestoreWindow();
-        if (command == kDisconnectCommand && disconnectCallback) {
-            RestoreWindow();
-            disconnectCallback();
-        }
-        if (command == kExitCommand && exitCallback) {
-            RestoreWindow();
-            exitCallback();
-        }
+        if (command == kExitCommand) ConfirmExit();
         PostMessageW(window, WM_NULL, 0, 0);
-    }
-
-    bool MeasureMenuItem(MEASUREITEMSTRUCT* measure) const {
-        if (!measure || measure->CtlType != ODT_MENU) return false;
-        const TrayMenuItem* item = MenuItemFromData(measure->itemData);
-        if (!item) return false;
-
-        HDC dc = GetDC(window);
-        if (!dc) return false;
-        HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        HGDIOBJ previousFont = SelectObject(dc, font);
-        SIZE textSize{};
-        GetTextExtentPoint32W(dc, item->text, static_cast<int>(std::wcslen(item->text)),
-                              &textSize);
-        SelectObject(dc, previousFont);
-        ReleaseDC(window, dc);
-
-        const UINT horizontalPadding = static_cast<UINT>(GetSystemMetrics(SM_CXMENUCHECK));
-        const UINT verticalPadding = 8;
-        measure->itemWidth = static_cast<UINT>(textSize.cx) + horizontalPadding * 2;
-        measure->itemHeight = std::max(static_cast<UINT>(GetSystemMetrics(SM_CYMENU)),
-                                       static_cast<UINT>(textSize.cy) + verticalPadding);
-        return true;
-    }
-
-    bool DrawMenuItem(DRAWITEMSTRUCT* draw) const {
-        if (!draw || draw->CtlType != ODT_MENU) return false;
-        const TrayMenuItem* item = MenuItemFromData(draw->itemData);
-        if (!item) return false;
-
-        const bool selected = (draw->itemState & ODS_SELECTED) != 0;
-        FillRect(draw->hDC, &draw->rcItem,
-                 GetSysColorBrush(selected ? COLOR_HIGHLIGHT : COLOR_MENU));
-
-        const int previousBackgroundMode = SetBkMode(draw->hDC, TRANSPARENT);
-        const COLORREF previousTextColor = SetTextColor(
-            draw->hDC, GetSysColor(selected ? COLOR_HIGHLIGHTTEXT : COLOR_MENUTEXT));
-        HFONT font = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        HGDIOBJ previousFont = SelectObject(draw->hDC, font);
-
-        RECT textRect = draw->rcItem;
-        textRect.left += GetSystemMetrics(SM_CXMENUCHECK);
-        DrawTextW(draw->hDC, item->text, -1, &textRect,
-                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-
-        SelectObject(draw->hDC, previousFont);
-        SetTextColor(draw->hDC, previousTextColor);
-        SetBkMode(draw->hDC, previousBackgroundMode);
-        return true;
     }
 
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
@@ -235,23 +146,13 @@ struct WindowsTray::Impl {
         }
 
         if (message == WM_CLOSE) {
-            HideWindow();
+            ConfirmExit();
             return 0;
         }
 
         if (message == WM_SYSCOMMAND && (wParam & 0xfff0U) == SC_MINIMIZE) {
             HideWindow();
             return 0;
-        }
-
-        if (message == WM_MEASUREITEM
-            && MeasureMenuItem(reinterpret_cast<MEASUREITEMSTRUCT*>(lParam))) {
-            return TRUE;
-        }
-
-        if (message == WM_DRAWITEM
-            && DrawMenuItem(reinterpret_cast<DRAWITEMSTRUCT*>(lParam))) {
-            return TRUE;
         }
 
         if (message == kTrayCallbackMessage) {
@@ -285,10 +186,8 @@ WindowsTray::~WindowsTray() {
     Shutdown();
 }
 
-bool WindowsTray::Init(GLFWwindow* window,
-                       std::function<void()> disconnectCallback,
-                       std::function<void()> exitCallback) {
-    return impl_->Init(window, std::move(disconnectCallback), std::move(exitCallback));
+bool WindowsTray::Init(GLFWwindow* window) {
+    return impl_->Init(window);
 }
 
 void WindowsTray::Shutdown() {

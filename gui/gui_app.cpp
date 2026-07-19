@@ -10,8 +10,6 @@
 #include "ui_heartbeat.h"
 
 #ifdef _WIN32
-#include "disconnect_confirmation_dialog.h"
-#include "exit_confirmation_dialog.h"
 #include "windows_tray.h"
 #endif
 
@@ -69,18 +67,8 @@ bool GuiApp::Init() {
     uiHeartbeat_ = std::make_unique<UiHeartbeat>();
     uiHeartbeat_->Start(OpenGLInfo());
 #ifdef _WIN32
-    disconnectConfirmationDialog_ = std::make_unique<DisconnectConfirmationDialog>();
-    exitConfirmationDialog_ = std::make_unique<ExitConfirmationDialog>();
     windowsTray_ = std::make_unique<WindowsTray>();
-    if (!windowsTray_->Init(
-            window_,
-            [this]() {
-                const TunnelState state = currentState_.load();
-                const bool hasActiveConnection = state == TunnelState::Connecting
-                    || state == TunnelState::Connected;
-                disconnectConfirmationDialog_->Open(hasActiveConnection);
-            },
-            [this]() { exitConfirmationDialog_->Open(); })) {
+    if (!windowsTray_->Init(window_)) {
         return false;
     }
 #endif
@@ -143,8 +131,6 @@ void GuiApp::Shutdown() {
         windowsTray_->Shutdown();
         windowsTray_.reset();
     }
-    disconnectConfirmationDialog_.reset();
-    exitConfirmationDialog_.reset();
 #endif
     if (uiHeartbeat_) uiHeartbeat_->SetPhase(UiPhase::ShutdownUi);
     ImGui_ImplOpenGL3_Shutdown();
@@ -185,14 +171,4 @@ void GuiApp::RenderFrame() {
     }
     ImGui::End();
     RenderStatusBar();
-#ifdef _WIN32
-    if (disconnectConfirmationDialog_
-        && disconnectConfirmationDialog_->Render()
-            == DisconnectConfirmationDialog::Result::Confirmed) {
-        Disconnect();
-    }
-    if (exitConfirmationDialog_ && exitConfirmationDialog_->Render()) {
-        glfwSetWindowShouldClose(window_, GLFW_TRUE);
-    }
-#endif
 }

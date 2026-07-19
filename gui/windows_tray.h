@@ -1,12 +1,10 @@
 #pragma once
 
-#include <functional>
 #include <memory>
 
 struct GLFWwindow;
 
-// Owns the Windows notification-area icon and the native window behavior that
-// hides the GUI when the user closes or minimizes it.
+// Owns the Windows notification-area icon and the native minimize/exit behavior.
 class WindowsTray {
 public:
     WindowsTray();
@@ -15,9 +13,7 @@ public:
     WindowsTray(const WindowsTray&) = delete;
     WindowsTray& operator=(const WindowsTray&) = delete;
 
-    bool Init(GLFWwindow* window,
-              std::function<void()> disconnectCallback,
-              std::function<void()> exitCallback);
+    bool Init(GLFWwindow* window);
     void Shutdown();
 
 private:

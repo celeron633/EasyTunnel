@@ -278,9 +278,7 @@ if(BUILD_GUI)
         gui/ui_heartbeat.cpp)
     if(WIN32)
         list(APPEND GUI_SOURCES
-            gui/windows_tray.cpp
-            gui/disconnect_confirmation_dialog.cpp
-            gui/exit_confirmation_dialog.cpp)
+            gui/windows_tray.cpp)
     endif()
     add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
