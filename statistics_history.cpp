@@ -14,7 +14,7 @@ void StatisticsHistory::Update(uint64_t txBytes, uint64_t rxBytes,
     }
 
     const double elapsed = std::chrono::duration<double>(now - previousSampleTime_).count();
-    if (elapsed < 5.0) return;
+    if (elapsed < 1.0) return;
 
     const uint64_t txDelta = txBytes >= previousTxBytes_
         ? txBytes - previousTxBytes_ : txBytes;

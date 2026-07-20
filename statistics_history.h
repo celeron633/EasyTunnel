@@ -14,7 +14,7 @@ struct StatisticsSample {
 
 class StatisticsHistory {
 public:
-    static constexpr std::size_t kMaxSamples = 24;
+    static constexpr std::size_t kMaxSamples = 60;
 
     void Update(uint64_t txBytes, uint64_t rxBytes, int64_t latencyMilliseconds);
     const std::vector<StatisticsSample>& Samples() const { return samples_; }

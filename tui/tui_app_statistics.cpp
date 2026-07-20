@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <ctime>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -11,19 +10,6 @@
 #include <ftxui/dom/elements.hpp>
 
 namespace {
-std::string TimeLabel(std::chrono::system_clock::time_point time) {
-    const std::time_t value = std::chrono::system_clock::to_time_t(time);
-    std::tm local{};
-#ifdef _WIN32
-    localtime_s(&local, &value);
-#else
-    localtime_r(&value, &local);
-#endif
-    std::ostringstream output;
-    output << std::put_time(&local, "%H:%M:%S");
-    return output.str();
-}
-
 std::string ValueLabel(float value) {
     std::ostringstream output;
     output << std::fixed << std::setprecision(value < 10.0f ? 1 : 0) << value;
@@ -31,7 +17,6 @@ std::string ValueLabel(float value) {
 }
 
 ftxui::Element BarChart(const std::string& title, ftxui::Color chartColor,
-                        const std::vector<StatisticsSample>& samples,
                         const std::vector<float>& values) {
     using namespace ftxui;
     const float maximum = (std::max)(1.0f,
@@ -58,8 +43,7 @@ ftxui::Element BarChart(const std::string& title, ftxui::Color chartColor,
                 | size(WIDTH, EQUAL, 6),
             bars | color(chartColor) | flex,
         }) | size(HEIGHT, EQUAL, 4),
-        hbox({text(TimeLabel(samples.front().timestamp)) | dim, filler(),
-              text(TimeLabel(samples.back().timestamp)) | dim}),
+        hbox({text("60 s") | dim, filler(), text("0") | dim}),
     }) | flex;
 }
 
@@ -82,7 +66,7 @@ ftxui::Element TuiApp::RenderStatisticsCharts() const {
     using namespace ftxui;
     const auto& samples = statisticsHistory_.Samples();
     if (samples.empty()) {
-        return vbox({separator(), text("5-second history") | bold,
+        return vbox({separator(), text("60-second history") | bold,
                      text("Collecting the first sample...") | dim});
     }
     const auto tx = Values(samples,
@@ -93,12 +77,12 @@ ftxui::Element TuiApp::RenderStatisticsCharts() const {
         [](const StatisticsSample& sample) { return sample.latencyMilliseconds; });
     return vbox({
         separator(),
-        text("5-second history") | bold,
+        text("60-second history") | bold,
         hbox({
-            BarChart("TX speed (KiB/s)", Color::RedLight, samples, tx),
+            BarChart("TX speed (KiB/s)", Color::RedLight, tx),
             separator(),
-            BarChart("RX speed (KiB/s)", Color::GreenLight, samples, rx),
+            BarChart("RX speed (KiB/s)", Color::GreenLight, rx),
         }),
-        BarChart("Latency (ms)", Color::YellowLight, samples, latency),
+        BarChart("Latency (ms)", Color::YellowLight, latency),
     });
 }

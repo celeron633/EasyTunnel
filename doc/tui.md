@@ -42,7 +42,7 @@ ftxui::screen
 - 在线客户端刷新和选择
 - Wait for peer、Connect selected、Disconnect
 - TX/RX 包数、累计字节和每秒速度
-- 每 5 秒采样的 TX/RX 速度与延迟柱形历史图
+- 每 1 秒采样的最近 60 秒 TX/RX 速度与延迟柱形历史图
 - Bytes/KB/MB 单位切换按钮
 - 红色 TX、绿色 RX 活动指示
 - 当前连接状态
@@ -125,6 +125,7 @@ EasyTunnel_tui.json
 
 - 包数和累计字节直接读取 `TunnelStats` 原子计数器
 - 速度每 1 秒按字节差值除以实际时间计算
+- 速度与延迟历史每 1 秒采样，最多保留最近 60 秒
 - 单位可在 Bytes、KB、MB 之间独立切换
 - Ticker 检测包计数增加，TX/RX 指示在 350ms 内显示高亮
 
