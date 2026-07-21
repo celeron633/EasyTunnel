@@ -173,6 +173,10 @@ void TunnelEngine::WorkerThread(Config cfg) {
 			SetState(TunnelState::Error, "Failed to open TUN adapter");
 			break;
 		}
+		if (!ReportRendezvousTunIp(sock, cfg, server)) {
+			Log(LogLevel::Warn, "Failed to report TUN IP after tunnel setup. err="
+				+ std::to_string(GetSocketError()));
+		}
 
 		SetState(TunnelState::Connected, "Data plane is up");
 		Log(LogLevel::Info, "Data plane is up.");

@@ -209,10 +209,10 @@ struct RendezvousRegistry::Impl {
         const auto room = rooms.find(roomId);
         if (room == rooms.end()) return;
         const auto current = room->second.find(nodeId);
-        if (current == room->second.end()
-            || !SameUdpEndpoint(current->second.endpoint, source)) return;
+        if (current == room->second.end()) return;
 
         current->second.seen = now;
+        current->second.endpoint = source;
         if (current->second.tunIp == tunIp) return;
         current->second.tunIp = tunIp;
         Log(LogLevel::Info, "TUN IP reported peer=" + nodeId + " room=" + roomId

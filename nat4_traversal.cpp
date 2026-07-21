@@ -303,9 +303,9 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                     Send(candidate, source, confirm);
                     std::this_thread::sleep_for(std::chrono::milliseconds(200));
                 }
-                if (candidate != registrationSocket) {
-                    rendezvous.Unregister(registrationSocket);
-                }
+                // The engine reports TUN_IP after this function returns and the
+                // TUN adapter is open. Keep the registration alive so the server
+                // can migrate it from registrationSocket to the winner endpoint.
                 ClosePool(&pool, candidate);
                 Log(LogLevel::Info, "NAT4 hole punching confirmed with "
                     + FormatUdpEndpoint(*peer));

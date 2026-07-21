@@ -58,6 +58,8 @@ bool OpenRendezvousSocket(const Config& config, int recvTimeoutMs,
                           std::string* error);
 void UnregisterRendezvous(socket_t sock, const Config& config,
                           const UdpEndpoint& server);
+bool ReportRendezvousTunIp(socket_t sock, const Config& config,
+                           const UdpEndpoint& server);
 bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort,
                            const std::string& roomId, const std::string& authToken,
                            std::vector<std::string>* clients, std::string* error);

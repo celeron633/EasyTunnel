@@ -74,11 +74,6 @@ RendezvousClient::RendezvousClient(const Config& config,
 bool RendezvousClient::SendProbe(socket_t sock) const {
     bool sent = Send(sock, server_, MakeControlMessage("REG",
         {config_.room_id, config_.peer_id, config_.auth_token}));
-    if (!config_.local_tun_ipv4.empty()) {
-        sent = Send(sock, server_, MakeControlMessage("TUN_IP",
-            {config_.room_id, config_.peer_id,
-             config_.local_tun_ipv4, config_.auth_token})) && sent;
-    }
     if (!config_.target_peer_id.empty()) {
         sent = Send(sock, server_, MakeControlMessage("CONNECT",
             {config_.room_id, config_.peer_id,
@@ -90,15 +85,9 @@ bool RendezvousClient::SendProbe(socket_t sock) const {
 bool RendezvousClient::SendNat4Join(socket_t sock,
                                     const std::string& expectedPeerId,
                                     uint32_t round) const {
-    bool sent = Send(sock, server_, MakeControlMessage("NAT4_JOIN",
+    return Send(sock, server_, MakeControlMessage("NAT4_JOIN",
         {config_.room_id, config_.peer_id, expectedPeerId,
          std::to_string(round), config_.auth_token}));
-    if (!config_.local_tun_ipv4.empty()) {
-        sent = Send(sock, server_, MakeControlMessage("TUN_IP",
-            {config_.room_id, config_.peer_id,
-             config_.local_tun_ipv4, config_.auth_token})) && sent;
-    }
-    return sent;
 }
 
 void RendezvousClient::Unregister(socket_t sock) const {
@@ -216,6 +205,14 @@ void UnregisterRendezvous(socket_t sock, const Config& config,
     if (sock == kInvalidSocket) return;
     Send(sock, server, MakeControlMessage("UNREG",
         {config.room_id, config.peer_id, config.auth_token}));
+}
+
+bool ReportRendezvousTunIp(socket_t sock, const Config& config,
+                           const UdpEndpoint& server) {
+    if (sock == kInvalidSocket || config.local_tun_ipv4.empty()) return true;
+    return Send(sock, server, MakeControlMessage("TUN_IP",
+        {config.room_id, config.peer_id,
+         config.local_tun_ipv4, config.auth_token}));
 }
 
 bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort,

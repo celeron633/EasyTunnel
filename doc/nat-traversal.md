@@ -13,7 +13,7 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 
 ### 客户端模块边界
 
-`RendezvousClient` 只处理会合服务器方向的控制逻辑，包括发送 `REG`、`TUN_IP`、`CONNECT`、`NAT4_JOIN`、`UNREG`，识别服务器来源，解析 `REGISTERED`、`PEER`、`ERROR` 和 NAT4 响应，以及判断首次响应超时。在线客户端的 `LIST` 查询和会合 UDP socket 的创建也由该模块负责。
+`RendezvousClient` 只处理会合服务器方向的控制逻辑，包括发送 `REG`、`CONNECT`、`NAT4_JOIN`、`UNREG`，以及穿透成功后发送一次 `TUN_IP`；同时负责识别服务器来源，解析 `REGISTERED`、`PEER`、`ERROR` 和 NAT4 响应，以及判断首次响应超时。在线客户端的 `LIST` 查询和会合 UDP socket 的创建也由该模块负责。
 
 `nat_traversal.cpp` 和 `nat4_traversal.cpp` 保留 UDP 收包循环与 Peer 打洞状态机。同一个 socket 需要同时接收会合服务器控制包和 Peer 的 `PUNCH`，因此 NAT 模块按数据来源把服务器包交给 `RendezvousClient`，把 Peer 包留在打洞流程中处理。
 
@@ -62,10 +62,7 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 
 ```text
 REG(room_id, peer_id, auth_token)
-TUN_IP(room_id, peer_id, local_tun_ipv4, auth_token)
 ```
-
-`TUN_IP` 是可选的客户端信息上报。新版客户端在 `REG` 后发送该消息；新版服务器会校验它来自同一注册端点，将地址写入 console/日志，并在 TUI 客户端列表显示。未上报时 TUI 显示 `N/A`。它与 `REG` 分离，因此新版客户端仍可向忽略未知消息的旧服务器注册。
 
 会合服务器从 UDP 数据报的真实来源获得该客户端的公网 `IPv4:port`，注册成功后返回：
 
@@ -81,7 +78,6 @@ REGISTERED
 
 ```text
 REG(room_id, peer_id, auth_token)
-TUN_IP(room_id, peer_id, local_tun_ipv4, auth_token)
 CONNECT(room_id, peer_id, target_peer_id, auth_token)
 ```
 
@@ -92,6 +88,14 @@ PEER(peer_public_ip, peer_public_port, peer_id)
 ```
 
 服务器只交换端点，不转发隧道数据。打洞成功后的 TUN IPv4 数据直接在两个客户端之间传输。
+
+双方各自在收到合法 `PUNCH` 或 `PUNCH_ACK`、确认穿透成功后，使用最终承载隧道的 socket 发送一次可选信息：
+
+```text
+TUN_IP(room_id, peer_id, local_tun_ipv4, auth_token)
+```
+
+穿透期间不会发送 `TUN_IP`。服务器校验上报并将 NAT4 winner socket 更新为节点的最终端点，然后把地址写入 console/日志及 TUI 客户端列表；未上报时显示 `N/A`。旧服务器会忽略这一可选消息。
 
 ## 默认模式：精确端口打洞
 
