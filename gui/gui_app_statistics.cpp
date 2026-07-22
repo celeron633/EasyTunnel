@@ -53,7 +53,8 @@ void RenderTimeAxis(const char* id) {
 template <typename Value>
 void RenderHistogram(const char* id, const char* title,
                      const std::vector<StatisticsSample>& samples,
-                     float plotHeight, const char* unit, Value value) {
+                     float plotHeight, const char* unit,
+                     const ImVec4& color, const ImVec4& hoveredColor, Value value) {
     constexpr float kPreferredBarSlotWidth = 3.0f;
     const float plotWidth = (std::max)(1.0f, ImGui::GetContentRegionAvail().x);
     const std::size_t renderedColumns = (std::max)(StatisticsHistory::kMaxSamples,
@@ -69,8 +70,11 @@ void RenderHistogram(const char* id, const char* title,
     const float scaleMaximum = NiceScaleMaximum(
         *std::max_element(values.begin(), values.end()));
     RenderChartHeader(title, ScaleLabel(scaleMaximum, unit));
+    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
+    ImGui::PushStyleColor(ImGuiCol_PlotHistogramHovered, hoveredColor);
     ImGui::PlotHistogram(id, values.data(), static_cast<int>(values.size()), 0,
                          nullptr, 0.0f, scaleMaximum, ImVec2(-FLT_MIN, plotHeight));
+    ImGui::PopStyleColor(2);
     RenderTimeAxis(id);
 }
 }  // namespace
@@ -96,16 +100,25 @@ void GuiApp::RenderStatisticsCharts() {
     const float availableHeight = ImGui::GetContentRegionAvail().y;
     const float plotHeight = (std::max)(kMinimumPlotHeight,
         (availableHeight - nonPlotHeight) * 0.5f);
+    const ImVec4 txColor(0.88f, 0.16f, 0.18f, 1.0f);
+    const ImVec4 rxColor(0.16f, 0.78f, 0.24f, 1.0f);
+    const ImVec4 latencyColor(0.95f, 0.76f, 0.12f, 1.0f);
+    const ImVec4 txHoveredColor(0.20f, 1.0f, 0.30f, 1.0f);
+    const ImVec4 rxHoveredColor(1.0f, 0.20f, 0.20f, 1.0f);
+    const ImVec4 latencyHoveredColor(1.0f, 0.90f, 0.24f, 1.0f);
     if (ImGui::BeginTable("##SpeedHistory", 2,
                           ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableNextColumn();
         RenderHistogram("##TxHistory", "TX speed", samples, plotHeight, "KiB/s",
+            txColor, txHoveredColor,
             [](const StatisticsSample& sample) { return sample.txKibPerSecond; });
         ImGui::TableNextColumn();
         RenderHistogram("##RxHistory", "RX speed", samples, plotHeight, "KiB/s",
+            rxColor, rxHoveredColor,
             [](const StatisticsSample& sample) { return sample.rxKibPerSecond; });
         ImGui::EndTable();
     }
     RenderHistogram("##LatencyHistory", "Latency", samples, plotHeight, "ms",
+        latencyColor, latencyHoveredColor,
         [](const StatisticsSample& sample) { return sample.latencyMilliseconds; });
 }
