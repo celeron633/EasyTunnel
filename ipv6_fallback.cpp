@@ -15,6 +15,7 @@
 #else
 #include <cerrno>
 #include <fcntl.h>
+#include <netdb.h>
 #include <unistd.h>
 #endif
 
