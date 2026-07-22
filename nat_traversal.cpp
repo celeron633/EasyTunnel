@@ -67,7 +67,8 @@ long long MillisecondsRemaining(std::chrono::steady_clock::time_point deadline) 
 
 bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server, const std::atomic<bool>& running,
-                      UdpEndpoint* peer, std::string* error) {
+                      UdpEndpoint* peer, std::string* matchedPeerId,
+                      std::string* error) {
     if (!ValidateRendezvousSession(cfg, error)) return false;
     RendezvousClient rendezvous(cfg, server);
     const auto selectionDeadline = std::chrono::steady_clock::now()
@@ -176,6 +177,7 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                 && rendezvousEvent.peerId != cfg.target_peer_id) continue;
             *peer = rendezvousEvent.peer;
             expectedPeerId = rendezvousEvent.peerId;
+            if (matchedPeerId != nullptr) *matchedPeerId = expectedPeerId;
             if (!havePeer) {
                 havePeer = true;
                 punchDeadline = now + std::chrono::seconds(cfg.punch_timeout);

@@ -41,9 +41,15 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto nat4SourcePortCount = Input(&nat4SourcePortCountText_, "25");
     auto nat4PeerPortOffset = Input(&nat4PeerPortOffsetText_, "20");
     auto nat4RoundTimeout = Input(&nat4RoundTimeoutText_, "10");
+    auto ipv6ListenPort = Input(&ipv6ListenPortText_, "0");
+    auto ipv6ProbeHost = Input(&config_.ipv6ProbeHost, "2400:3200::1");
+    auto ipv6ProbePort = Input(&ipv6ProbePortText_, "53");
+    auto ipv6FallbackTimeout = Input(&ipv6FallbackTimeoutText_, "15");
     auto rendezvousRetryDelay = Input(&rendezvousRetryDelayText_, "5");
     auto autoConfig = Checkbox("Auto configure IPv4", &config_.autoConfigIpv4);
     auto dummyTraffic = Checkbox("1 KiB/s dummy traffic", &config_.dummyTrafficEnabled);
+    auto ipv6Fallback = Checkbox("Enable IPv6 fallback", &config_.ipv6FallbackEnabled);
+    auto ipv6Inbound = Checkbox("Accept inbound IPv6 UDP", &config_.ipv6AcceptInbound);
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
     auto logLevel = Radiobox(&logLevels_, &config_.logLevel);
 
@@ -52,13 +58,16 @@ ftxui::Component TuiApp::BuildSettingsTab() {
         adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive, peerTimeout,
         punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
         nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic,
+        ipv6Fallback, ipv6Inbound, ipv6ListenPort, ipv6ProbeHost,
+        ipv6ProbePort, ipv6FallbackTimeout,
     });
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
          peerTimeout, punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
          nat4PeerPortOffset, nat4RoundTimeout, logLevel, serverAddress,
          serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
-         autoWait] {
+         autoWait, ipv6Fallback, ipv6Inbound, ipv6ListenPort,
+         ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout] {
         auto row = [](const std::string& label, Component component) {
             return hbox({text(label) | size(WIDTH, EQUAL, 26), component->Render() | flex});
         };
@@ -93,6 +102,14 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             text("Log") | bold,
             row("Log Level", logLevel),
             separator(),
+            text("IPv6 Fallback") | bold,
+            ipv6Fallback->Render(),
+            ipv6Inbound->Render(),
+            row("IPv6 Listen Port (0=auto)", ipv6ListenPort),
+            row("IPv6 Probe Host", ipv6ProbeHost),
+            row("IPv6 Probe TCP Port", ipv6ProbePort),
+            row("IPv6 Timeout Seconds", ipv6FallbackTimeout),
+            separator(),
             text("Misc") | bold,
             dummyTraffic->Render(),
             separator(),
@@ -112,6 +129,9 @@ void TuiApp::SyncTextFromConfig() {
     nat4SourcePortCountText_ = std::to_string(config_.nat4SourcePortCount);
     nat4PeerPortOffsetText_ = std::to_string(config_.nat4PeerPortOffset);
     nat4RoundTimeoutText_ = std::to_string(config_.nat4RoundTimeout);
+    ipv6ListenPortText_ = std::to_string(config_.ipv6ListenPort);
+    ipv6ProbePortText_ = std::to_string(config_.ipv6ProbePort);
+    ipv6FallbackTimeoutText_ = std::to_string(config_.ipv6FallbackTimeout);
     rendezvousRetryDelayText_ = std::to_string(config_.rendezvousRetryDelaySeconds);
 }
 
@@ -136,6 +156,12 @@ void TuiApp::SyncConfigFromText() {
         ParseInt(nat4PeerPortOffsetText_, config_.nat4PeerPortOffset), 0, 256);
     config_.nat4RoundTimeout = std::clamp(
         ParseInt(nat4RoundTimeoutText_, config_.nat4RoundTimeout), 1, 60);
+    config_.ipv6ListenPort = std::clamp(
+        ParseInt(ipv6ListenPortText_, config_.ipv6ListenPort), 0, 65535);
+    config_.ipv6ProbePort = std::clamp(
+        ParseInt(ipv6ProbePortText_, config_.ipv6ProbePort), 1, 65535);
+    config_.ipv6FallbackTimeout = std::clamp(
+        ParseInt(ipv6FallbackTimeoutText_, config_.ipv6FallbackTimeout), 1, 120);
     config_.rendezvousRetryDelaySeconds = std::clamp(
         ParseInt(rendezvousRetryDelayText_, config_.rendezvousRetryDelaySeconds), 1, 3600);
     retryDelaySeconds_.store(config_.rendezvousRetryDelaySeconds);
@@ -150,6 +176,9 @@ std::string TuiApp::ConfigSignature() const {
               << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
               << nat4SourcePortStartText_ << '\n' << nat4SourcePortCountText_ << '\n'
               << nat4PeerPortOffsetText_ << '\n' << nat4RoundTimeoutText_ << '\n'
+              << config_.ipv6FallbackEnabled << '\n' << config_.ipv6AcceptInbound << '\n'
+              << ipv6ListenPortText_ << '\n' << config_.ipv6ProbeHost << '\n'
+              << ipv6ProbePortText_ << '\n' << ipv6FallbackTimeoutText_ << '\n'
               << config_.logLevel << '\n' << rendezvousRetryDelayText_ << '\n'
               << config_.dummyTrafficEnabled << '\n'
               << config_.autoWaitForPeer;

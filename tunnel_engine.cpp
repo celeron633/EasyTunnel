@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "hexdump.h"
+#include "ipv6_fallback.h"
 #include "log.h"
 #include "nat_traversal.h"
 #include "rendezvous_client.h"
@@ -124,10 +125,15 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ ", punch_timeout=" + std::to_string(cfg.punch_timeout) + "s"
 		+ ", nat4_source_ports=" + std::to_string(cfg.nat4_source_port_start)
 		+ "+" + std::to_string(cfg.nat4_source_port_count)
-		+ ", nat4_peer_port_offset=" + std::to_string(cfg.nat4_peer_port_offset));
+		+ ", nat4_peer_port_offset=" + std::to_string(cfg.nat4_peer_port_offset)
+		+ ", ipv6_fallback=" + (cfg.ipv6_fallback_enabled ? "enabled" : "disabled")
+		+ ", ipv6_accept_inbound=" + (cfg.ipv6_accept_inbound ? "true" : "false")
+		+ ", ipv6_probe=" + cfg.ipv6_probe_host + ":"
+		+ std::to_string(cfg.ipv6_probe_port));
 
 	socket_t sock = kInvalidSocket;
 	UdpEndpoint server{};
+	UdpEndpoint peer{};
 	std::unique_ptr<TunAdapter> tunAdapter(TunAdapter::Create());
 	std::string exitReason = "worker completed";
 	std::mutex exitReasonMutex;
@@ -141,7 +147,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 	};
 
 	do {
-		UdpEndpoint peer{};
+		std::string matchedPeerId;
 		std::string socketError;
 		if (!OpenRendezvousSocket(cfg, kSocketRecvTimeoutMs, &sock, &server, &socketError)) {
 			setExitReason("failed to open rendezvous socket");
@@ -155,16 +161,29 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		SetState(TunnelState::Connecting,
 			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
 			                           : "Connecting to " + cfg.target_peer_id);
-		if (!DiscoverAndPunch(&sock, cfg, server, running_, &peer, &socketError)) {
-			if (!running_.load()) {
+		bool traversalConnected = DiscoverAndPunch(
+			&sock, cfg, server, running_, &peer, &matchedPeerId, &socketError);
+		if (!traversalConnected) {
+			const std::string ipv4Error = socketError;
+			if (running_.load() && cfg.ipv6_fallback_enabled
+				&& !matchedPeerId.empty()) {
+				SetState(TunnelState::Connecting, "IPv4 failed; trying IPv6 fallback");
+				std::string ipv6Error;
+				traversalConnected = DiscoverAndConnectIpv6(
+					&sock, cfg, server, running_, matchedPeerId, &peer, &ipv6Error);
+				if (!traversalConnected) {
+					socketError = ipv4Error + "; " + ipv6Error;
+				}
+			}
+			if (!traversalConnected && !running_.load()) {
 				setExitReason("stop requested during NAT traversal");
 				Log(LogLevel::Debug, getExitReason() + ": " + socketError);
-			} else {
+			} else if (!traversalConnected) {
 				setExitReason("NAT traversal failed");
 				Log(LogLevel::Error, getExitReason() + ": " + socketError);
 				SetState(TunnelState::Error, socketError);
 			}
-			break;
+			if (!traversalConnected) break;
 		}
 
 		if (!tunAdapter->Open(cfg)) {
@@ -173,7 +192,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 			SetState(TunnelState::Error, "Failed to open TUN adapter");
 			break;
 		}
-		if (!ReportRendezvousTunIp(sock, cfg, server)) {
+		if (peer.family == AF_INET && !ReportRendezvousTunIp(sock, cfg, server)) {
 			Log(LogLevel::Warn, "Failed to report TUN IP after tunnel setup. err="
 				+ std::to_string(GetSocketError()));
 		}
@@ -333,7 +352,9 @@ void TunnelEngine::WorkerThread(Config cfg) {
 	} while (false);
 
 	running_.store(false);
-	if (sock != kInvalidSocket) UnregisterRendezvous(sock, cfg, server);
+	if (sock != kInvalidSocket && server.family == peer.family) {
+		UnregisterRendezvous(sock, cfg, server);
+	}
 	CloseSocket(sock);
 	if (tunAdapter) {
 		tunAdapter->Close();

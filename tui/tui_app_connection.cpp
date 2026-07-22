@@ -137,6 +137,9 @@ bool TuiApp::Validate(std::string* error) const {
     if (ParseInt(serverPortText_, 0) < 1 || ParseInt(serverPortText_, 0) > 65535) {
         *error = "Invalid rendezvous port"; return false;
     }
+    if (config_.ipv6FallbackEnabled && config_.ipv6ProbeHost.empty()) {
+        *error = "IPv6 probe host is required"; return false;
+    }
     return true;
 }
 
@@ -173,6 +176,15 @@ Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
         std::clamp(ParseInt(nat4PeerPortOffsetText_, 20), 0, 256));
     output.nat4_round_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(nat4RoundTimeoutText_, 10), 1, 60));
+    output.ipv6_fallback_enabled = config_.ipv6FallbackEnabled;
+    output.ipv6_accept_inbound = config_.ipv6AcceptInbound;
+    output.ipv6_listen_port = static_cast<uint16_t>(
+        std::clamp(ParseInt(ipv6ListenPortText_, 0), 0, 65535));
+    output.ipv6_probe_host = config_.ipv6ProbeHost;
+    output.ipv6_probe_port = static_cast<uint16_t>(
+        std::clamp(ParseInt(ipv6ProbePortText_, 53), 1, 65535));
+    output.ipv6_fallback_timeout = static_cast<uint16_t>(
+        std::clamp(ParseInt(ipv6FallbackTimeoutText_, 15), 1, 120));
     TryParseLogLevel(logLevels_[std::clamp(config_.logLevel, 0, 3)], &output.log_level);
     return output;
 }

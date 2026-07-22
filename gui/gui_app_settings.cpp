@@ -227,6 +227,27 @@ void GuiApp::RenderSettingsTab() {
         EndForm();
     }
     ImGui::Spacing();
+    ImGui::SeparatorText("IPv6 Fallback");
+    if (BeginForm("##Ipv6FallbackSettings")) {
+        FormField("Enable Fallback");
+        configChanged |= ImGui::Checkbox("##Ipv6Fallback", &ipv6FallbackEnabled_);
+        FormField("Accept Inbound UDP");
+        configChanged |= ImGui::Checkbox("##Ipv6Inbound", &ipv6AcceptInbound_);
+        FormField("Listen Port (0=auto)");
+        configChanged |= ImGui::InputInt("##Ipv6ListenPort", &ipv6ListenPort_);
+        ipv6ListenPort_ = std::clamp(ipv6ListenPort_, 0, 65535);
+        FormField("Probe Host");
+        configChanged |= ImGui::InputText(
+            "##Ipv6ProbeHost", ipv6ProbeHost_, sizeof(ipv6ProbeHost_));
+        FormField("Probe TCP Port");
+        configChanged |= ImGui::InputInt("##Ipv6ProbePort", &ipv6ProbePort_);
+        ipv6ProbePort_ = std::clamp(ipv6ProbePort_, 1, 65535);
+        FormField("Timeout Seconds");
+        configChanged |= ImGui::InputInt("##Ipv6FallbackTimeout", &ipv6FallbackTimeout_);
+        ipv6FallbackTimeout_ = std::clamp(ipv6FallbackTimeout_, 1, 120);
+        EndForm();
+    }
+    ImGui::Spacing();
     ImGui::SeparatorText("Misc");
     if (BeginForm("##MiscSettings")) {
         FormField("1 KiB/s dummy traffic");
@@ -272,6 +293,12 @@ bool GuiApp::LoadGuiConfig() {
     JsonInt(json, "nat4_source_port_count", &nat4SourcePortCount_);
     JsonInt(json, "nat4_peer_port_offset", &nat4PeerPortOffset_);
     JsonInt(json, "nat4_round_timeout", &nat4RoundTimeout_);
+    JsonBool(json, "ipv6_fallback_enabled", &ipv6FallbackEnabled_);
+    JsonBool(json, "ipv6_accept_inbound", &ipv6AcceptInbound_);
+    JsonInt(json, "ipv6_listen_port", &ipv6ListenPort_);
+    if (JsonString(json, "ipv6_probe_host", &text)) CopyToBuffer(text, ipv6ProbeHost_);
+    JsonInt(json, "ipv6_probe_port", &ipv6ProbePort_);
+    JsonInt(json, "ipv6_fallback_timeout", &ipv6FallbackTimeout_);
     JsonInt(json, "log_level", &logLevelIdx_);
     JsonInt(json, "rendezvous_retry_delay_seconds", &rendezvousRetryDelaySeconds_);
     JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
@@ -290,6 +317,9 @@ bool GuiApp::LoadGuiConfig() {
     }
     nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
     nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
+    ipv6ListenPort_ = std::clamp(ipv6ListenPort_, 0, 65535);
+    ipv6ProbePort_ = std::clamp(ipv6ProbePort_, 1, 65535);
+    ipv6FallbackTimeout_ = std::clamp(ipv6FallbackTimeout_, 1, 120);
     logLevelIdx_ = std::clamp(logLevelIdx_, 0, kLogLevelCount - 1);
     rendezvousRetryDelaySeconds_ = std::clamp(rendezvousRetryDelaySeconds_, 1, 3600);
     const std::string message = "Configuration loaded from " + configFilePath_;
@@ -326,6 +356,14 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"nat4_source_port_count\": " << nat4SourcePortCount_ << ",\n"
         << "  \"nat4_peer_port_offset\": " << nat4PeerPortOffset_ << ",\n"
         << "  \"nat4_round_timeout\": " << nat4RoundTimeout_ << ",\n"
+        << "  \"ipv6_fallback_enabled\": "
+        << (ipv6FallbackEnabled_ ? "true" : "false") << ",\n"
+        << "  \"ipv6_accept_inbound\": "
+        << (ipv6AcceptInbound_ ? "true" : "false") << ",\n"
+        << "  \"ipv6_listen_port\": " << ipv6ListenPort_ << ",\n"
+        << "  \"ipv6_probe_host\": \"" << JsonEscape(ipv6ProbeHost_) << "\",\n"
+        << "  \"ipv6_probe_port\": " << ipv6ProbePort_ << ",\n"
+        << "  \"ipv6_fallback_timeout\": " << ipv6FallbackTimeout_ << ",\n"
         << "  \"log_level\": " << logLevelIdx_ << ",\n"
         << "  \"rendezvous_retry_delay_seconds\": "
         << rendezvousRetryDelaySeconds_ << ",\n"

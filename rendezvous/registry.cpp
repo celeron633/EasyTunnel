@@ -18,6 +18,10 @@ struct Client {
     std::string pairedWith;
     uint32_t nat4Round = 0;
     bool nat4Joined = false;
+    std::string ipv6Address;
+    uint16_t ipv6Port = 0;
+    bool ipv6AcceptInbound = false;
+    bool ipv6Joined = false;
 };
 using Room = std::unordered_map<std::string, Client>;
 
@@ -51,10 +55,11 @@ size_t RemoveExpired(Room* room, std::chrono::steady_clock::time_point now,
         }
     }
     for (auto& entry : *room) {
-        if (!entry.second.pairedWith.empty()
+            if (!entry.second.pairedWith.empty()
             && room->find(entry.second.pairedWith) == room->end()) {
             entry.second.pairedWith.clear();
             entry.second.nat4Joined = false;
+            entry.second.ipv6Joined = false;
         }
     }
     return removed;
@@ -71,6 +76,22 @@ bool ParseRound(const std::string& text, uint32_t* round) {
     } catch (...) {
         return false;
     }
+}
+
+bool ParsePort(const std::string& text, uint16_t* port) {
+    try {
+        size_t consumed = 0;
+        const unsigned long parsed = std::stoul(text, &consumed);
+        if (consumed != text.size() || parsed == 0 || parsed > 65535) return false;
+        *port = static_cast<uint16_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool IsIpv6Gua(const in6_addr& address) {
+    return (address.s6_addr[0] & 0xe0) == 0x20;
 }
 }  // namespace
 
@@ -186,6 +207,71 @@ struct RendezvousRegistry::Impl {
                     {targetAddress.first, targetAddress.second, target->first});
     }
 
+    void HandleIpv6Join(Room& room, Room::iterator current,
+                        const UdpEndpoint& source,
+                        const std::vector<std::string>& fields) {
+        in6_addr ipv6{};
+        uint16_t port = 0;
+        if (!ParseIpv6(fields[3], &ipv6) || !IsIpv6Gua(ipv6)
+            || !ParsePort(fields[4], &port)
+            || (fields[5] != "0" && fields[5] != "1")) {
+            SendMessage(sock, source, "ERROR", {"invalid-ipv6-endpoint"});
+            return;
+        }
+
+        const auto target = room.find(fields[2]);
+        if ((!current->second.pairedWith.empty()
+                && current->second.pairedWith != fields[2])
+            || (target != room.end() && target != current
+                && !target->second.pairedWith.empty()
+                && target->second.pairedWith != current->first)) {
+            SendMessage(sock, source, "ERROR", {"peer-busy"});
+            return;
+        }
+
+        current->second.endpoint = source;
+        current->second.pairedWith = fields[2];
+        current->second.ipv6Address = fields[3];
+        current->second.ipv6Port = port;
+        current->second.ipv6AcceptInbound = fields[5] == "1";
+        current->second.ipv6Joined = true;
+
+        if (target == room.end() || target == current
+            || !target->second.ipv6Joined
+            || target->second.pairedWith != current->first) {
+            SendMessage(sock, source, "V6_WAIT");
+            return;
+        }
+        if (!current->second.ipv6AcceptInbound
+            && !target->second.ipv6AcceptInbound) {
+            SendMessage(sock, source, "ERROR", {"ipv6-no-inbound-peer"});
+            SendMessage(sock, target->second.endpoint, "ERROR",
+                        {"ipv6-no-inbound-peer"});
+            return;
+        }
+
+        const bool currentListens = current->second.ipv6AcceptInbound
+            && (!target->second.ipv6AcceptInbound
+                || current->first < target->first);
+        const std::string currentRole = currentListens ? "listen" : "connect";
+        const std::string targetRole = currentListens ? "connect" : "listen";
+        Log(LogLevel::Info, "IPv6 fallback ready room=" + fields[0]
+            + " peer=" + current->first + " endpoint=["
+            + current->second.ipv6Address + "]:"
+            + std::to_string(current->second.ipv6Port) + " role=" + currentRole
+            + " target=" + target->first + " endpoint=["
+            + target->second.ipv6Address + "]:"
+            + std::to_string(target->second.ipv6Port) + " role=" + targetRole);
+        SendMessage(sock, target->second.endpoint, "V6_PEER",
+                    {current->second.ipv6Address,
+                     std::to_string(current->second.ipv6Port), current->first,
+                     targetRole});
+        SendMessage(sock, source, "V6_PEER",
+                    {target->second.ipv6Address,
+                     std::to_string(target->second.ipv6Port), target->first,
+                     currentRole});
+    }
+
     void HandleTunIp(const UdpEndpoint& source,
                      const std::vector<std::string>& fields,
                      std::chrono::steady_clock::time_point now) {
@@ -226,9 +312,10 @@ struct RendezvousRegistry::Impl {
         const bool isConnect = type == "CONNECT" && fields.size() == 4;
         const bool isUnregister = type == "UNREG" && fields.size() == 3;
         const bool isNat4Join = type == "NAT4_JOIN" && fields.size() == 5;
+        const bool isIpv6Join = type == "V6_JOIN" && fields.size() == 7;
         const bool isTunIp = type == "TUN_IP" && fields.size() == 4;
         if (!isRegister && !isConnect && !isUnregister && !isNat4Join
-            && !isTunIp) return;
+            && !isIpv6Join && !isTunIp) return;
 
         if (isTunIp) {
             HandleTunIp(source, fields, now);
@@ -237,8 +324,10 @@ struct RendezvousRegistry::Impl {
 
         const std::string& roomId = fields[0];
         const std::string& nodeId = fields[1];
-        const std::string targetId = (isConnect || isNat4Join) ? fields[2] : "";
-        const std::string& token = fields[isNat4Join ? 4 : (isConnect ? 3 : 2)];
+        const std::string targetId = (isConnect || isNat4Join || isIpv6Join)
+            ? fields[2] : "";
+        const std::string& token = fields[isIpv6Join ? 6
+            : (isNat4Join ? 4 : (isConnect ? 3 : 2))];
         if (!Authorized(roomId, nodeId, targetId, token)) {
             Log(LogLevel::Warn, "Rejected " + type + " from " + FormatUdpEndpoint(source));
             SendMessage(sock, source, "ERROR", {"unauthorized"});
@@ -259,6 +348,7 @@ struct RendezvousRegistry::Impl {
                     if (entry.second.pairedWith == nodeId) {
                         entry.second.pairedWith.clear();
                         entry.second.nat4Joined = false;
+                        entry.second.ipv6Joined = false;
                     }
                 }
                 Log(LogLevel::Info, "Unregistered peer=" + nodeId + " room=" + roomId
@@ -285,9 +375,12 @@ struct RendezvousRegistry::Impl {
         }
         if (isRegister) {
             current->second.nat4Joined = false;
+            current->second.ipv6Joined = false;
             SendMessage(sock, source, "REGISTERED");
         } else if (isNat4Join) {
             HandleNat4Join(room, current, source, fields);
+        } else if (isIpv6Join) {
+            HandleIpv6Join(room, current, source, fields);
         } else {
             HandleConnect(room, current, source, fields);
         }

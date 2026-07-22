@@ -46,7 +46,7 @@ EasyTunnel 使用三层 TUN，而不是二层 TAP。TUN 每次读写的是一个
 ```text
 创建 UDP socket
   → 向会合服务器登记并选择 Peer
-  → 完成 PUNCH/PUNCH_ACK 或 NAT4 打洞
+  → 完成 PUNCH/PUNCH_ACK、NAT4 打洞，或在二者失败后完成 IPv6 Fallback
   → 打开并配置 TUN
   → 状态切换为 Connected
   → 启动 TUN→UDP 和 UDP→TUN 两个转发线程

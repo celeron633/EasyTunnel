@@ -282,6 +282,12 @@ KEEPALIVE       ──► winning UDP socket ──► confirmed peer endpoint
 | `nat4_source_port_count` | 25 | 0～60 | 每轮 socket 数量；0 表示关闭 NAT4 |
 | `nat4_peer_port_offset` | 20 | 0～256 | 预测公网端口的固定正偏移 |
 | `nat4_round_timeout` | 10 | 1～60 秒 | 单轮 socket 池等待时间 |
+| `ipv6_fallback_enabled` | false | `true/false` | IPv4/NAT4 均失败后允许尝试 IPv6 |
+| `ipv6_accept_inbound` | false | `true/false` | 声明本端允许主动入站 IPv6 UDP |
+| `ipv6_listen_port` | 0 | 0～65535 | IPv6 数据端口；0 为自动分配 |
+| `ipv6_probe_host` | `2400:3200::1` | IPv6 地址或可解析 AAAA 的主机名 | IPv6 公网 TCP 探针目标 |
+| `ipv6_probe_port` | 53 | 1～65535 | IPv6 公网 TCP 探针端口 |
+| `ipv6_fallback_timeout` | 15 | 1～120 秒 | IPv6 端点交换和确认超时 |
 | `keepalive_interval` | 15 | 正整数 | 连接后的保活间隔 |
 | `peer_timeout` | 45 | 大于保活间隔 | 连接后的 Peer 失活超时 |
 | `dummy_traffic_enabled` | false | `true/false` | 每秒发送 1024 字节的 Peer 填充流量 |

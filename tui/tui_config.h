@@ -21,6 +21,12 @@ struct TuiConfig {
     int nat4SourcePortCount = 25;
     int nat4PeerPortOffset = 20;
     int nat4RoundTimeout = 10;
+    bool ipv6FallbackEnabled = false;
+    bool ipv6AcceptInbound = false;
+    int ipv6ListenPort = 0;
+    std::string ipv6ProbeHost = "2400:3200::1";
+    int ipv6ProbePort = 53;
+    int ipv6FallbackTimeout = 15;
     int logLevel = 1;
     int rendezvousRetryDelaySeconds = 5;
     bool autoWaitForPeer = false;

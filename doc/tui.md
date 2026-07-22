@@ -55,6 +55,7 @@ ftxui::screen
 - Auto configure IPv4
 - Keepalive、Peer Timeout、Punch Timeout
 - NAT4 Source Port Start/Count、Peer Port Offset、Round Timeout
+- IPv6 Fallback 开关、主动入站声明、监听端口、TCP 探针主机/端口和超时（位于 Misc 之前）
 - 日志级别
 - Rendezvous Retry Delay Seconds
 - Auto wait for peer

@@ -114,6 +114,12 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     IntValue(json, "nat4_source_port_count", &config->nat4SourcePortCount);
     IntValue(json, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
     IntValue(json, "nat4_round_timeout", &config->nat4RoundTimeout);
+    BoolValue(json, "ipv6_fallback_enabled", &config->ipv6FallbackEnabled);
+    BoolValue(json, "ipv6_accept_inbound", &config->ipv6AcceptInbound);
+    IntValue(json, "ipv6_listen_port", &config->ipv6ListenPort);
+    StringValue(json, "ipv6_probe_host", &config->ipv6ProbeHost);
+    IntValue(json, "ipv6_probe_port", &config->ipv6ProbePort);
+    IntValue(json, "ipv6_fallback_timeout", &config->ipv6FallbackTimeout);
     IntValue(json, "log_level", &config->logLevel);
     IntValue(json, "rendezvous_retry_delay_seconds",
              &config->rendezvousRetryDelaySeconds);
@@ -134,6 +140,9 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     }
     config->nat4PeerPortOffset = std::clamp(config->nat4PeerPortOffset, 0, 256);
     config->nat4RoundTimeout = std::clamp(config->nat4RoundTimeout, 1, 60);
+    config->ipv6ListenPort = std::clamp(config->ipv6ListenPort, 0, 65535);
+    config->ipv6ProbePort = std::clamp(config->ipv6ProbePort, 1, 65535);
+    config->ipv6FallbackTimeout = std::clamp(config->ipv6FallbackTimeout, 1, 120);
     config->logLevel = std::clamp(config->logLevel, 0, 3);
     config->rendezvousRetryDelaySeconds = std::clamp(
         config->rendezvousRetryDelaySeconds, 1, 3600);
@@ -167,6 +176,14 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "  \"nat4_source_port_count\": " << config.nat4SourcePortCount << ",\n"
         << "  \"nat4_peer_port_offset\": " << config.nat4PeerPortOffset << ",\n"
         << "  \"nat4_round_timeout\": " << config.nat4RoundTimeout << ",\n"
+        << "  \"ipv6_fallback_enabled\": "
+        << (config.ipv6FallbackEnabled ? "true" : "false") << ",\n"
+        << "  \"ipv6_accept_inbound\": "
+        << (config.ipv6AcceptInbound ? "true" : "false") << ",\n"
+        << "  \"ipv6_listen_port\": " << config.ipv6ListenPort << ",\n"
+        << "  \"ipv6_probe_host\": \"" << Escape(config.ipv6ProbeHost) << "\",\n"
+        << "  \"ipv6_probe_port\": " << config.ipv6ProbePort << ",\n"
+        << "  \"ipv6_fallback_timeout\": " << config.ipv6FallbackTimeout << ",\n"
         << "  \"log_level\": " << config.logLevel << ",\n"
         << "  \"rendezvous_retry_delay_seconds\": "
         << config.rendezvousRetryDelaySeconds << ",\n"

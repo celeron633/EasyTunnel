@@ -46,6 +46,7 @@ set(COMMON_SOURCES
     rendezvous_client.cpp
     nat_traversal.cpp
     nat4_traversal.cpp
+    ipv6_fallback.cpp
 )
 
 # ---------------------------------------------------------------------------

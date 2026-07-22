@@ -27,6 +27,18 @@ nat4_source_port_count=25
 nat4_peer_port_offset=20
 nat4_round_timeout=10
 
+# Optional UDP/IPv6 data-plane fallback after IPv4 and NAT4 punching fail.
+# Both peers must enable it. At least one peer must accept unsolicited inbound
+# IPv6 UDP; port 0 asks the OS to choose the local data port.
+ipv6_fallback_enabled=false
+ipv6_accept_inbound=false
+ipv6_listen_port=0
+# TCP endpoint used to verify IPv6 Internet reachability and select the GUA.
+# An IPv6 literal (without brackets) or an AAAA-capable hostname is accepted.
+ipv6_probe_host=2400:3200::1
+ipv6_probe_port=53
+ipv6_fallback_timeout=15
+
 adapter_name=EasyTunnel
 local_tun_ipv4=10.66.0.1
 tun_prefix=24

@@ -9,7 +9,8 @@ constexpr size_t kPeerDummyTrafficPacketSize = 1024;
 
 bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server, const std::atomic<bool>& running,
-                      UdpEndpoint* peer, std::string* error);
+                      UdpEndpoint* peer, std::string* matchedPeerId,
+                      std::string* error);
 
 // Describes how an incoming UDP packet was handled by HandlePeerControl.
 struct PeerControlResult {

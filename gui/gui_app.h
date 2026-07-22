@@ -81,6 +81,12 @@ private:
     int nat4SourcePortCount_ = 25;
     int nat4PeerPortOffset_ = 20;
     int nat4RoundTimeout_ = 10;
+    bool ipv6FallbackEnabled_ = false;
+    bool ipv6AcceptInbound_ = false;
+    int ipv6ListenPort_ = 0;
+    char ipv6ProbeHost_[256] = "2400:3200::1";
+    int ipv6ProbePort_ = 53;
+    int ipv6FallbackTimeout_ = 15;
     int logLevelIdx_ = 1;
     int rendezvousRetryDelaySeconds_ = 5;
     bool autoWaitForPeer_ = false;

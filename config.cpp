@@ -152,6 +152,33 @@ bool LoadConfig(const std::string& file, Config* out) {
         Log(LogLevel::Error, "nat4_round_timeout must be between 1 and 60");
         return false;
     }
+    if (!get("ipv6_fallback_enabled").empty()) {
+        out->ipv6_fallback_enabled = ParseBool(get("ipv6_fallback_enabled"));
+    }
+    if (!get("ipv6_accept_inbound").empty()) {
+        out->ipv6_accept_inbound = ParseBool(get("ipv6_accept_inbound"));
+    }
+    if (!get("ipv6_listen_port").empty()
+        && !ParseUInt16(get("ipv6_listen_port"), &out->ipv6_listen_port)) {
+        Log(LogLevel::Error, "Invalid ipv6_listen_port");
+        return false;
+    }
+    if (!get("ipv6_probe_host").empty()) {
+        out->ipv6_probe_host = get("ipv6_probe_host");
+    }
+    if (!get("ipv6_probe_port").empty()
+        && (!ParseUInt16(get("ipv6_probe_port"), &out->ipv6_probe_port)
+            || out->ipv6_probe_port == 0)) {
+        Log(LogLevel::Error, "Invalid ipv6_probe_port");
+        return false;
+    }
+    if (!get("ipv6_fallback_timeout").empty()
+        && (!ParseUInt16(get("ipv6_fallback_timeout"), &out->ipv6_fallback_timeout)
+            || out->ipv6_fallback_timeout == 0
+            || out->ipv6_fallback_timeout > 120)) {
+        Log(LogLevel::Error, "ipv6_fallback_timeout must be between 1 and 120");
+        return false;
+    }
     if (out->nat4_source_port_count > 0
         && static_cast<uint32_t>(out->nat4_source_port_start)
             + out->nat4_source_port_count - 1 > 65535) {
@@ -202,6 +229,12 @@ bool LoadConfig(const std::string& file, Config* out) {
     }
     if (out->tun_mtu > 1472) {
         Log(LogLevel::Warn, "tun_mtu is greater than 1472; may cause UDP/IPv4 fragmentation");
+    }
+    if (out->ipv6_probe_host.empty()
+        || out->ipv6_probe_host.size() > 255
+        || out->ipv6_probe_host.find_first_of("\t\r\n") != std::string::npos) {
+        Log(LogLevel::Error, "Invalid ipv6_probe_host");
+        return false;
     }
     return true;
 }
