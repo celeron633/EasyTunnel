@@ -401,15 +401,40 @@ struct RendezvousRegistry::Impl {
     void HandleSession(const UdpEndpoint& source, const std::string& type,
                        const std::vector<std::string>& fields,
                        std::chrono::steady_clock::time_point now) {
-        const bool isRegister = type == "REG" && fields.size() == 4;
-        const bool isConnect = type == "CONNECT" && fields.size() == 5;
-        const bool isUnregister = type == "UNREG" && fields.size() == 3;
-        const bool isNat4Join = type == "NAT4_JOIN" && fields.size() == 5;
-        const bool isIpv6Join = type == "V6_JOIN" && fields.size() == 7;
-        const bool isIpv4RelayJoin = type == "RELAY_JOIN" && fields.size() == 4;
-        const bool isTunIp = type == "TUN_IP" && fields.size() == 4;
-        if (!isRegister && !isConnect && !isUnregister && !isNat4Join
-            && !isIpv6Join && !isIpv4RelayJoin && !isTunIp) return;
+        size_t expectedFields = 0;
+        if (type == "REG") expectedFields = 4;
+        else if (type == "CONNECT") expectedFields = 5;
+        else if (type == "UNREG") expectedFields = 3;
+        else if (type == "NAT4_JOIN") expectedFields = 5;
+        else if (type == "V6_JOIN") expectedFields = 7;
+        else if (type == "RELAY_JOIN") expectedFields = 4;
+        else if (type == "TUN_IP") expectedFields = 4;
+
+        const std::string loggedType =
+            IsSafeControlField(type) ? type : "<invalid>";
+        if (expectedFields == 0) {
+            Log(LogLevel::Debug, "Ignored rendezvous session message type="
+                + loggedType + " from " + FormatUdpEndpoint(source)
+                + ": unknown message type, fields="
+                + std::to_string(fields.size()));
+            return;
+        }
+        if (fields.size() != expectedFields) {
+            Log(LogLevel::Debug, "Ignored rendezvous session message type="
+                + loggedType + " from " + FormatUdpEndpoint(source)
+                + ": field count mismatch, expected="
+                + std::to_string(expectedFields) + ", actual="
+                + std::to_string(fields.size()));
+            return;
+        }
+
+        const bool isRegister = type == "REG";
+        const bool isConnect = type == "CONNECT";
+        const bool isUnregister = type == "UNREG";
+        const bool isNat4Join = type == "NAT4_JOIN";
+        const bool isIpv6Join = type == "V6_JOIN";
+        const bool isIpv4RelayJoin = type == "RELAY_JOIN";
+        const bool isTunIp = type == "TUN_IP";
 
         if (isTunIp) {
             HandleTunIp(source, fields, now);
