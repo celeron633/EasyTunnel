@@ -1,6 +1,9 @@
 #pragma once
 
 #include <string>
+#include <vector>
+
+#include "../config.h"
 
 struct TuiConfig {
     std::string rendezvousAddress = "127.0.0.1";
@@ -21,13 +24,12 @@ struct TuiConfig {
     int nat4SourcePortCount = 25;
     int nat4PeerPortOffset = 20;
     int nat4RoundTimeout = 10;
-    bool ipv6FallbackEnabled = false;
+    std::vector<TraversalModeSetting> traversalModes = DefaultTraversalModes();
     bool ipv6AcceptInbound = false;
     int ipv6ListenPort = 0;
     std::string ipv6ProbeHost = "2400:3200::1";
     int ipv6ProbePort = 53;
     int ipv6FallbackTimeout = 15;
-    bool ipv4RelayFallbackEnabled = false;
     int logLevel = 1;
     int rendezvousRetryDelaySeconds = 5;
     bool autoWaitForPeer = false;

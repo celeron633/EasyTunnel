@@ -3,19 +3,19 @@
 跨 IPv4、IPv6 和 Relay 的客户端、服务端状态切换见
 [state-machine.md](state-machine.md)。
 
-IPv6 Fallback 是 IPv4 精确端口打洞和 NAT4 socket 池均失败后的可选数据面。
+IPv6 直连是四种可排序穿透模式之一，可以放在普通 NAT、增强 NAT4 或 Relay 的前后。
 它不改变 TUN 内层协议：TUN 中仍只转发 IPv4 包，只是把这些包封装在 Peer 之间的
 公网 IPv6 UDP 数据报中发送。
 
-如果 IPv6 Fallback 也失败且启用了 IPv4 Relay Fallback，引擎会继续尝试会合服务器
-代理；IPv6 成功时仍保持 Peer 直连，不经过 relay。
+如果 IPv6 失败，引擎会继续尝试策略列表中位于它后面的已启用模式；IPv6 成功时仍
+保持 Peer 直连，不经过 relay。
 
 ## 启用条件
 
 只有同时满足以下条件才会尝试：
 
-1. 本端配置 `ipv6_fallback_enabled=true`；
-2. IPv4 Punch 已匹配到目标 Peer，但精确端口和 NAT4 尝试均失败；
+1. 本端 `traversal_modes` 中的 `ipv6` 为 `true`；
+2. IPv4 会合通道已匹配到目标 Peer，且执行到策略列表中的 `ipv6`；
 3. 本机对配置的 `ipv6_probe_host:ipv6_probe_port` 完成 IPv6 TCP 连接；
 4. 探测连接实际选出的本地源地址属于 IPv6 GUA（`2000::/3`）；
 5. 对端也完成以上检测并向会合服务器发送 `V6_JOIN`；
@@ -100,15 +100,15 @@ IPv6 Peer 通道新增消息：
 
 | 配置项 | 默认值 | 范围 | 含义 |
 | --- | ---: | ---: | --- |
-| `ipv6_fallback_enabled` | `false` | `true/false` | 启用 IPv6 Fallback 能力 |
+| `traversal_modes` 中的 `ipv6` | `false` | `true/false` | 启用 IPv6 直连并确定其顺序 |
 | `ipv6_accept_inbound` | `false` | `true/false` | 本端防火墙/光猫允许主动入站 IPv6 UDP |
 | `ipv6_listen_port` | `0` | 0～65535 | 数据 socket 本地端口；0 为系统自动分配 |
 | `ipv6_probe_host` | `2400:3200::1` | IPv6 地址或 AAAA 主机名 | 用于验证公网 IPv6 并选择实际出站 GUA |
 | `ipv6_probe_port` | `53` | 1～65535 | 探针使用的 TCP 端口 |
 | `ipv6_fallback_timeout` | `15` | 1～120 秒 | 端点交换和直连确认的等待时间 |
 
-无界面客户端在 `tunnel.conf` 中使用以上同名配置。TUI 和 GUI 的 Settings 页面在
-`IPv6 Fallback` 分组中提供同样的选项，该分组位于 `Misc` 之前。
+无界面客户端在 `tunnel.conf` 的 `traversal_modes` 中启用该模式。TUI 和 GUI 的
+Settings 页面在 Traversal strategy 表格中提供开关和排序，IPv6 参数位于单独分组。
 
 如果配置固定端口，需要同时在操作系统防火墙和光猫 IPv6 防火墙中允许该 UDP 端口。
 `ipv6_accept_inbound=true` 是管理员对网络策略的声明，程序不会自动修改公网入站规则。
@@ -118,7 +118,7 @@ IPv6 Peer 通道新增消息：
 成功路径会依次出现类似日志：
 
 ```text
-IPv4 traversal failed; checking IPv6 fallback
+Trying IPv6 direct connection
 IPv6 GUA connectivity verified: 240e::1234
 IPv6 peer node-b at [240e::5678]:41000, role=connect
 IPv6 fallback confirmed with [240e::5678]:41000

@@ -48,33 +48,55 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto rendezvousRetryDelay = Input(&rendezvousRetryDelayText_, "5");
     auto autoConfig = Checkbox("Auto configure IPv4", &config_.autoConfigIpv4);
     auto dummyTraffic = Checkbox("1 KiB/s dummy traffic", &config_.dummyTrafficEnabled);
-    auto ipv6Fallback = Checkbox("Enable IPv6 fallback", &config_.ipv6FallbackEnabled);
     auto ipv6Inbound = Checkbox("Accept inbound IPv6 UDP", &config_.ipv6AcceptInbound);
-    auto ipv4RelayFallback = Checkbox("Enable IPv4 relay fallback",
-                                      &config_.ipv4RelayFallbackEnabled);
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
     auto logLevel = Radiobox(&logLevels_, &config_.logLevel);
 
-    auto controls = Container::Vertical({
+    Components modeCheckboxes;
+    Components modeUpButtons;
+    Components modeDownButtons;
+    Components modeRows;
+    for (size_t i = 0; i < config_.traversalModes.size(); ++i) {
+        auto checkbox = Checkbox("", &config_.traversalModes[i].enabled);
+        auto up = Button("Up", [this, i] {
+            if (i > 0) std::swap(config_.traversalModes[i], config_.traversalModes[i - 1]);
+        });
+        auto down = Button("Down", [this, i] {
+            if (i + 1 < config_.traversalModes.size()) {
+                std::swap(config_.traversalModes[i], config_.traversalModes[i + 1]);
+            }
+        });
+        modeCheckboxes.push_back(checkbox);
+        modeUpButtons.push_back(up);
+        modeDownButtons.push_back(down);
+        modeRows.push_back(Container::Horizontal({checkbox, up, down}));
+    }
+
+    Components controlList = {
         serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay, autoWait,
-        adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive, peerTimeout,
-        punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
+        adapter, tunIp, tunPrefix, tunMtu, autoConfig,
+    };
+    controlList.insert(controlList.end(), modeRows.begin(), modeRows.end());
+    controlList.insert(controlList.end(), {
+        keepalive, peerTimeout, punchTimeout,
+        nat4SourcePortStart, nat4SourcePortCount,
         nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic,
-        ipv6Fallback, ipv6Inbound, ipv6ListenPort, ipv6ProbeHost,
-        ipv6ProbePort, ipv6FallbackTimeout, ipv4RelayFallback,
+        ipv6Inbound, ipv6ListenPort, ipv6ProbeHost,
+        ipv6ProbePort, ipv6FallbackTimeout,
     });
+    auto controls = Container::Vertical(controlList);
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
          peerTimeout, punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
          nat4PeerPortOffset, nat4RoundTimeout, logLevel, serverAddress,
          serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
-         autoWait, ipv6Fallback, ipv6Inbound, ipv6ListenPort,
+         autoWait, ipv6Inbound, ipv6ListenPort,
          ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout,
-         ipv4RelayFallback] {
+         modeCheckboxes, modeUpButtons, modeDownButtons] {
         auto row = [](const std::string& label, Component component) {
             return hbox({text(label) | size(WIDTH, EQUAL, 26), component->Render() | flex});
         };
-        return vbox({
+        Elements content = {
             text("Rendezvous") | bold,
             separator(),
             row("Rendezvous Server Addr", serverAddress),
@@ -93,6 +115,21 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             row("TUN MTU", tunMtu),
             autoConfig->Render(),
             separator(),
+            text("Traversal strategy") | bold,
+            hbox({text("On") | size(WIDTH, EQUAL, 5),
+                  text("Priority") | size(WIDTH, EQUAL, 9),
+                  text("Mode") | flex, text("Order") | size(WIDTH, EQUAL, 18)}),
+        };
+        for (size_t i = 0; i < config_.traversalModes.size(); ++i) {
+            content.push_back(hbox({
+                modeCheckboxes[i]->Render() | size(WIDTH, EQUAL, 5),
+                text(std::to_string(i + 1)) | size(WIDTH, EQUAL, 9),
+                text(TraversalModeDisplayName(config_.traversalModes[i].mode)) | flex,
+                modeUpButtons[i]->Render(), text(" "), modeDownButtons[i]->Render(),
+            }));
+        }
+        Elements remainder = {
+            separator(),
             text("NAT liveness") | bold,
             row("Keepalive Seconds", keepalive),
             row("Peer Timeout Seconds", peerTimeout),
@@ -105,22 +142,20 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             text("Log") | bold,
             row("Log Level", logLevel),
             separator(),
-            text("IPv6 Fallback") | bold,
-            ipv6Fallback->Render(),
+            text("IPv6 direct connection") | bold,
             ipv6Inbound->Render(),
             row("IPv6 Listen Port (0=auto)", ipv6ListenPort),
             row("IPv6 Probe Host", ipv6ProbeHost),
             row("IPv6 Probe TCP Port", ipv6ProbePort),
             row("IPv6 Timeout Seconds", ipv6FallbackTimeout),
             separator(),
-            text("IPv4 Relay Fallback") | bold,
-            ipv4RelayFallback->Render(),
-            separator(),
             text("Misc") | bold,
             dummyTraffic->Render(),
             separator(),
             text(configMessage_) | color(configSaveOk_ ? Color::Green : Color::Red),
-        }) | vscroll_indicator | frame | border | flex;
+        };
+        content.insert(content.end(), remainder.begin(), remainder.end());
+        return vbox(std::move(content)) | vscroll_indicator | frame | border | flex;
     });
 }
 
@@ -153,7 +188,7 @@ void TuiApp::SyncConfigFromText() {
     config_.nat4SourcePortStart = std::clamp(
         ParseInt(nat4SourcePortStartText_, config_.nat4SourcePortStart), 1, 65535);
     config_.nat4SourcePortCount = std::clamp(
-        ParseInt(nat4SourcePortCountText_, config_.nat4SourcePortCount), 0, 60);
+        ParseInt(nat4SourcePortCountText_, config_.nat4SourcePortCount), 1, 60);
     if (config_.nat4SourcePortCount > 0) {
         config_.nat4SourcePortStart = (std::min)(
             config_.nat4SourcePortStart, 65536 - config_.nat4SourcePortCount);
@@ -182,10 +217,10 @@ std::string TuiApp::ConfigSignature() const {
               << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
               << nat4SourcePortStartText_ << '\n' << nat4SourcePortCountText_ << '\n'
               << nat4PeerPortOffsetText_ << '\n' << nat4RoundTimeoutText_ << '\n'
-              << config_.ipv6FallbackEnabled << '\n' << config_.ipv6AcceptInbound << '\n'
+              << SerializeTraversalModes(config_.traversalModes) << '\n'
+              << config_.ipv6AcceptInbound << '\n'
               << ipv6ListenPortText_ << '\n' << config_.ipv6ProbeHost << '\n'
               << ipv6ProbePortText_ << '\n' << ipv6FallbackTimeoutText_ << '\n'
-              << config_.ipv4RelayFallbackEnabled << '\n'
               << config_.logLevel << '\n' << rendezvousRetryDelayText_ << '\n'
               << config_.dummyTrafficEnabled << '\n'
               << config_.autoWaitForPeer;

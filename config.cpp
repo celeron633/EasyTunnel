@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <algorithm>
 #include <fstream>
 #include <limits>
 #include <string>
@@ -61,6 +62,103 @@ bool ParseUInt8(const std::string& text, uint8_t* out) {
 }
 
 }  // namespace
+
+std::vector<TraversalModeSetting> DefaultTraversalModes() {
+    return {
+        {TraversalMode::Nat, true},
+        {TraversalMode::Nat4, true},
+        {TraversalMode::Ipv6, false},
+        {TraversalMode::Ipv4Relay, false},
+    };
+}
+
+const char* TraversalModeName(TraversalMode mode) {
+    switch (mode) {
+        case TraversalMode::Nat: return "nat";
+        case TraversalMode::Nat4: return "nat4";
+        case TraversalMode::Ipv6: return "ipv6";
+        case TraversalMode::Ipv4Relay: return "ipv4_relay";
+        default: return "unknown";
+    }
+}
+
+const char* TraversalModeDisplayName(TraversalMode mode) {
+    switch (mode) {
+        case TraversalMode::Nat: return "NAT traversal";
+        case TraversalMode::Nat4: return "Enhanced NAT4 traversal";
+        case TraversalMode::Ipv6: return "IPv6 direct connection";
+        case TraversalMode::Ipv4Relay: return "IPv4 traffic relay";
+        default: return "Unknown";
+    }
+}
+
+bool ParseTraversalModes(const std::string& text,
+                         std::vector<TraversalModeSetting>* modes,
+                         std::string* error) {
+    if (modes == nullptr) return false;
+    std::vector<TraversalModeSetting> parsed;
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t comma = text.find(',', start);
+        const std::string item = Trim(text.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        const size_t colon = item.find(':');
+        if (colon == std::string::npos || item.find(':', colon + 1) != std::string::npos) {
+            if (error) *error = "Each traversal mode must use name:true or name:false";
+            return false;
+        }
+        const std::string name = Trim(item.substr(0, colon));
+        const std::string enabledText = Trim(item.substr(colon + 1));
+        TraversalMode mode;
+        if (name == "nat") mode = TraversalMode::Nat;
+        else if (name == "nat4") mode = TraversalMode::Nat4;
+        else if (name == "ipv6") mode = TraversalMode::Ipv6;
+        else if (name == "ipv4_relay") mode = TraversalMode::Ipv4Relay;
+        else {
+            if (error) *error = "Unknown traversal mode: " + name;
+            return false;
+        }
+        if (std::any_of(parsed.begin(), parsed.end(), [mode](const auto& value) {
+                return value.mode == mode;
+            })) {
+            if (error) *error = "Duplicate traversal mode: " + name;
+            return false;
+        }
+        bool enabled = false;
+        if (enabledText == "true") enabled = true;
+        else if (enabledText != "false") {
+            if (error) *error = "Traversal mode state must be true or false: " + name;
+            return false;
+        }
+        parsed.push_back({mode, enabled});
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    if (parsed.size() != 4) {
+        if (error) *error = "traversal_modes must contain nat, nat4, ipv6 and ipv4_relay exactly once";
+        return false;
+    }
+    *modes = std::move(parsed);
+    return true;
+}
+
+std::string SerializeTraversalModes(
+    const std::vector<TraversalModeSetting>& modes) {
+    std::string output;
+    for (const auto& mode : modes) {
+        if (!output.empty()) output += ',';
+        output += TraversalModeName(mode.mode);
+        output += mode.enabled ? ":true" : ":false";
+    }
+    return output;
+}
+
+bool IsTraversalModeEnabled(const Config& config, TraversalMode mode) {
+    const auto found = std::find_if(
+        config.traversal_modes.begin(), config.traversal_modes.end(),
+        [mode](const auto& value) { return value.mode == mode; });
+    return found != config.traversal_modes.end() && found->enabled;
+}
 
 bool LoadConfig(const std::string& file, Config* out) {
     std::ifstream in(file);
@@ -128,6 +226,21 @@ bool LoadConfig(const std::string& file, Config* out) {
         Log(LogLevel::Error, "Invalid punch_timeout");
         return false;
     }
+    if (get("traversal_modes").empty()) {
+        Log(LogLevel::Error, "Missing required config key: traversal_modes");
+        return false;
+    }
+    std::string traversalModesError;
+    if (!ParseTraversalModes(get("traversal_modes"), &out->traversal_modes,
+                             &traversalModesError)) {
+        Log(LogLevel::Error, "Invalid traversal_modes: " + traversalModesError);
+        return false;
+    }
+    if (std::none_of(out->traversal_modes.begin(), out->traversal_modes.end(),
+                     [](const auto& mode) { return mode.enabled; })) {
+        Log(LogLevel::Error, "At least one traversal mode must be enabled");
+        return false;
+    }
     if (!get("nat4_source_port_start").empty()
         && (!ParseUInt16(get("nat4_source_port_start"), &out->nat4_source_port_start)
             || out->nat4_source_port_start == 0)) {
@@ -136,8 +249,9 @@ bool LoadConfig(const std::string& file, Config* out) {
     }
     if (!get("nat4_source_port_count").empty()
         && (!ParseUInt16(get("nat4_source_port_count"), &out->nat4_source_port_count)
+            || out->nat4_source_port_count == 0
             || out->nat4_source_port_count > 60)) {
-        Log(LogLevel::Error, "nat4_source_port_count must be between 0 and 60");
+        Log(LogLevel::Error, "nat4_source_port_count must be between 1 and 60");
         return false;
     }
     if (!get("nat4_peer_port_offset").empty()
@@ -151,9 +265,6 @@ bool LoadConfig(const std::string& file, Config* out) {
             || out->nat4_round_timeout == 0 || out->nat4_round_timeout > 60)) {
         Log(LogLevel::Error, "nat4_round_timeout must be between 1 and 60");
         return false;
-    }
-    if (!get("ipv6_fallback_enabled").empty()) {
-        out->ipv6_fallback_enabled = ParseBool(get("ipv6_fallback_enabled"));
     }
     if (!get("ipv6_accept_inbound").empty()) {
         out->ipv6_accept_inbound = ParseBool(get("ipv6_accept_inbound"));
@@ -178,10 +289,6 @@ bool LoadConfig(const std::string& file, Config* out) {
             || out->ipv6_fallback_timeout > 120)) {
         Log(LogLevel::Error, "ipv6_fallback_timeout must be between 1 and 120");
         return false;
-    }
-    if (!get("ipv4_relay_fallback_enabled").empty()) {
-        out->ipv4_relay_fallback_enabled = ParseBool(
-            get("ipv4_relay_fallback_enabled"));
     }
     if (out->nat4_source_port_count > 0
         && static_cast<uint32_t>(out->nat4_source_port_start)

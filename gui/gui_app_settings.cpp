@@ -190,6 +190,43 @@ void GuiApp::RenderSettingsTab() {
         EndForm();
     }
     ImGui::Spacing();
+    ImGui::SeparatorText("Traversal strategy");
+    if (ImGui::BeginTable("##TraversalModes", 4,
+            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg
+                | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 65.0f);
+        ImGui::TableSetupColumn("Priority", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+        ImGui::TableSetupColumn("Mode", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Order", ImGuiTableColumnFlags_WidthFixed, 95.0f);
+        ImGui::TableHeadersRow();
+        for (size_t i = 0; i < traversalModes_.size(); ++i) {
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            configChanged |= ImGui::Checkbox("##Enabled", &traversalModes_[i].enabled);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%d", static_cast<int>(i + 1));
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(TraversalModeDisplayName(traversalModes_[i].mode));
+            ImGui::TableSetColumnIndex(3);
+            if (i == 0) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("Up")) {
+                std::swap(traversalModes_[i], traversalModes_[i - 1]);
+                configChanged = true;
+            }
+            if (i == 0) ImGui::EndDisabled();
+            ImGui::SameLine();
+            if (i + 1 == traversalModes_.size()) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("Down")) {
+                std::swap(traversalModes_[i], traversalModes_[i + 1]);
+                configChanged = true;
+            }
+            if (i + 1 == traversalModes_.size()) ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Spacing();
     ImGui::SeparatorText("NAT liveness");
     if (BeginForm("##NatSettings")) {
         FormField("Keepalive Seconds");
@@ -206,7 +243,7 @@ void GuiApp::RenderSettingsTab() {
         nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
         FormField("NAT4 Source Port Count");
         configChanged |= ImGui::InputInt("##Nat4SourcePortCount", &nat4SourcePortCount_);
-        nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 0, 60);
+        nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 1, 60);
         if (nat4SourcePortCount_ > 0) {
             nat4SourcePortStart_ = (std::min)(
                 nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
@@ -227,10 +264,8 @@ void GuiApp::RenderSettingsTab() {
         EndForm();
     }
     ImGui::Spacing();
-    ImGui::SeparatorText("IPv6 Fallback");
+    ImGui::SeparatorText("IPv6 direct connection");
     if (BeginForm("##Ipv6FallbackSettings")) {
-        FormField("Enable Fallback");
-        configChanged |= ImGui::Checkbox("##Ipv6Fallback", &ipv6FallbackEnabled_);
         FormField("Accept Inbound UDP");
         configChanged |= ImGui::Checkbox("##Ipv6Inbound", &ipv6AcceptInbound_);
         FormField("Listen Port (0=auto)");
@@ -245,14 +280,6 @@ void GuiApp::RenderSettingsTab() {
         FormField("Timeout Seconds");
         configChanged |= ImGui::InputInt("##Ipv6FallbackTimeout", &ipv6FallbackTimeout_);
         ipv6FallbackTimeout_ = std::clamp(ipv6FallbackTimeout_, 1, 120);
-        EndForm();
-    }
-    ImGui::Spacing();
-    ImGui::SeparatorText("IPv4 Relay Fallback");
-    if (BeginForm("##Ipv4RelayFallbackSettings")) {
-        FormField("Enable Fallback");
-        configChanged |= ImGui::Checkbox(
-            "##Ipv4RelayFallback", &ipv4RelayFallbackEnabled_);
         EndForm();
     }
     ImGui::Spacing();
@@ -297,18 +324,24 @@ bool GuiApp::LoadGuiConfig() {
     JsonInt(json, "peer_timeout", &peerTimeout_);
     JsonBool(json, "dummy_traffic_enabled", &dummyTrafficEnabled_);
     JsonInt(json, "punch_timeout", &punchTimeout_);
+    if (JsonString(json, "traversal_modes", &text)) {
+        std::string traversalError;
+        if (!ParseTraversalModes(text, &traversalModes_, &traversalError)) {
+            const std::string message = "Invalid traversal_modes: " + traversalError;
+            ShowConfigSaveMessage(message, false);
+            Log(LogLevel::Error, message);
+            return false;
+        }
+    }
     JsonInt(json, "nat4_source_port_start", &nat4SourcePortStart_);
     JsonInt(json, "nat4_source_port_count", &nat4SourcePortCount_);
     JsonInt(json, "nat4_peer_port_offset", &nat4PeerPortOffset_);
     JsonInt(json, "nat4_round_timeout", &nat4RoundTimeout_);
-    JsonBool(json, "ipv6_fallback_enabled", &ipv6FallbackEnabled_);
     JsonBool(json, "ipv6_accept_inbound", &ipv6AcceptInbound_);
     JsonInt(json, "ipv6_listen_port", &ipv6ListenPort_);
     if (JsonString(json, "ipv6_probe_host", &text)) CopyToBuffer(text, ipv6ProbeHost_);
     JsonInt(json, "ipv6_probe_port", &ipv6ProbePort_);
     JsonInt(json, "ipv6_fallback_timeout", &ipv6FallbackTimeout_);
-    JsonBool(json, "ipv4_relay_fallback_enabled",
-             &ipv4RelayFallbackEnabled_);
     JsonInt(json, "log_level", &logLevelIdx_);
     JsonInt(json, "rendezvous_retry_delay_seconds", &rendezvousRetryDelaySeconds_);
     JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
@@ -320,7 +353,7 @@ bool GuiApp::LoadGuiConfig() {
     peerTimeout_ = std::clamp(peerTimeout_, keepaliveInterval_ + 1, 3600);
     punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
     nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
-    nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 0, 60);
+    nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 1, 60);
     if (nat4SourcePortCount_ > 0) {
         nat4SourcePortStart_ = (std::min)(
             nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
@@ -362,20 +395,18 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"peer_timeout\": " << peerTimeout_ << ",\n"
         << "  \"dummy_traffic_enabled\": " << (dummyTrafficEnabled_ ? "true" : "false") << ",\n"
         << "  \"punch_timeout\": " << punchTimeout_ << ",\n"
+        << "  \"traversal_modes\": \""
+        << SerializeTraversalModes(traversalModes_) << "\",\n"
         << "  \"nat4_source_port_start\": " << nat4SourcePortStart_ << ",\n"
         << "  \"nat4_source_port_count\": " << nat4SourcePortCount_ << ",\n"
         << "  \"nat4_peer_port_offset\": " << nat4PeerPortOffset_ << ",\n"
         << "  \"nat4_round_timeout\": " << nat4RoundTimeout_ << ",\n"
-        << "  \"ipv6_fallback_enabled\": "
-        << (ipv6FallbackEnabled_ ? "true" : "false") << ",\n"
         << "  \"ipv6_accept_inbound\": "
         << (ipv6AcceptInbound_ ? "true" : "false") << ",\n"
         << "  \"ipv6_listen_port\": " << ipv6ListenPort_ << ",\n"
         << "  \"ipv6_probe_host\": \"" << JsonEscape(ipv6ProbeHost_) << "\",\n"
         << "  \"ipv6_probe_port\": " << ipv6ProbePort_ << ",\n"
         << "  \"ipv6_fallback_timeout\": " << ipv6FallbackTimeout_ << ",\n"
-        << "  \"ipv4_relay_fallback_enabled\": "
-        << (ipv4RelayFallbackEnabled_ ? "true" : "false") << ",\n"
         << "  \"log_level\": " << logLevelIdx_ << ",\n"
         << "  \"rendezvous_retry_delay_seconds\": "
         << rendezvousRetryDelaySeconds_ << ",\n"

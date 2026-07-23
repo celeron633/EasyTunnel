@@ -1,6 +1,7 @@
 # EasyTunnel NAT 会合与打洞流程
 
-本文描述当前实现中的 IPv4/UDP 会合、默认精确端口打洞和 NAT4 多 socket 回退流程。相关代码主要位于：
+本文描述当前实现中的 IPv4/UDP 会合、普通精确端口打洞和增强 NAT4。普通 NAT 与
+NAT4 是两个可独立开关、可自由排序的策略。相关代码主要位于：
 
 跨 IPv4、IPv6 和 Relay 的统一状态切换见 [state-machine.md](state-machine.md)。
 
@@ -38,21 +39,19 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 会合服务器交换公网端点
        │
        ▼
-默认精确端口打洞（默认先尝试 2 秒）
+按 traversal_modes 选择下一项
        │
-       ├── 成功 ──► 成功 socket 接管隧道数据面
-       │
-       └── 失败
-             │
-             ├── nat4_source_port_count = 0
-             │      └── 继续精确端口尝试，直到 punch_timeout
-             │
-             └── NAT4 socket 池多轮打洞
-                    ├── 成功 ──► 命中的 socket 接管数据面
-                    └── 总超时 ──► Error
+       ├── nat  ──► 普通精确端口打洞
+       ├── nat4 ──► NAT4 socket 池多轮打洞
+       ├── ipv6 ──► IPv6 直连
+       └── ipv4_relay ──► IPv4 中继
+              │
+              ├── 成功 ──► 对应 socket 接管数据面
+              └── 失败 ──► 继续下一项；无剩余项则 Error
 ```
 
-默认模式和 NAT4 模式共享同一个总打洞期限。收到第一个有效 `PEER` 后开始计算 `punch_timeout`；默认值为 30 秒。
+收到第一个有效 `PEER` 后才开始策略循环。普通 NAT 与 NAT4 各自使用一次完整的
+`punch_timeout`。
 
 ## 会合阶段
 
@@ -132,13 +131,12 @@ Client A                   Rendezvous                   Client B
 
 ### 默认模式持续时间
 
-- NAT4 socket 池启用时：精确端口快速路径默认运行约 2 秒，随后自动切换 NAT4。
-- `nat4_source_port_count=0` 时：禁用 NAT4 回退，精确端口模式持续到 `punch_timeout`。
+- 普通 NAT 独立运行到 `punch_timeout`，失败后由全局策略循环选择下一项。
 - 主动端在一直找不到目标 Peer 时，也会在 `punch_timeout` 后退出。
 
 ## NAT4 模式：多 socket 端口预测
 
-精确端口阶段未成功时，客户端先注销并关闭原会合 socket，然后进入独立的 NAT4 状态机。
+策略循环执行到 NAT4 时，客户端先注销并关闭原会合 socket，然后进入 NAT4 状态机。
 
 默认参数为：
 
@@ -255,7 +253,7 @@ round 1: 30025～30049
 round 2: 30050～30074
 ```
 
-默认 `punch_timeout=30` 时，扣除约 2 秒精确端口尝试后，通常可以运行两轮完整的 10 秒 NAT4 尝试和一轮缩短的尝试。需要更多轮次时应增大 `punch_timeout`。
+默认 `punch_timeout=30` 时，NAT4 通常可以运行两轮完整的 10 秒尝试和一轮缩短的尝试。需要更多轮次时应增大 `punch_timeout`。
 
 ## 成功后的数据面
 
@@ -271,7 +269,7 @@ KEEPALIVE       ──► winning UDP socket ──► confirmed peer endpoint
 - `keepalive_interval=15`：每 15 秒发送一次 `KEEPALIVE`；
 - `peer_timeout=45`：45 秒内没有合法 Peer 数据或控制包则连接进入 Error；
 - `dummy_traffic_enabled=false`：启用后每秒向 Peer 发送一个 1024 字节的 `PADDING` 包；两端都启用时每个方向约 1 KiB/s，接收后直接消费、不进入 TUN，但计入客户端收发统计；
-- `punch_timeout=30`：收到 Peer 后，默认模式和 NAT4 模式共享的打洞总期限。
+- `punch_timeout=30`：普通 NAT、增强 NAT4 和 Relay 各自的尝试期限。
 
 数据面只接受最终确认端点发来的 IPv4 数据。握手之后不会继续接受同 IP 的任意端口变化。
 
@@ -279,12 +277,12 @@ KEEPALIVE       ──► winning UDP socket ──► confirmed peer endpoint
 
 | 配置 | 默认值 | 约束 | 说明 |
 |---|---:|---:|---|
-| `punch_timeout` | 30 | 正整数；GUI/TUI 上限 600 秒 | 收到 Peer 后的总打洞期限 |
+| `traversal_modes` | 见下文 | 四种模式各一次 | 模式开关和执行顺序 |
+| `punch_timeout` | 30 | 正整数；GUI/TUI 上限 600 秒 | 普通 NAT、NAT4 和 Relay 各自的策略期限 |
 | `nat4_source_port_start` | 30000 | 1～65535 | 第一段连续本地端口起点 |
-| `nat4_source_port_count` | 25 | 0～60 | 每轮 socket 数量；0 表示关闭 NAT4 |
+| `nat4_source_port_count` | 25 | 1～60 | 每轮 socket 数量 |
 | `nat4_peer_port_offset` | 20 | 0～256 | 预测公网端口的固定正偏移 |
 | `nat4_round_timeout` | 10 | 1～60 秒 | 单轮 socket 池等待时间 |
-| `ipv6_fallback_enabled` | false | `true/false` | IPv4/NAT4 均失败后允许尝试 IPv6 |
 | `ipv6_accept_inbound` | false | `true/false` | 声明本端允许主动入站 IPv6 UDP |
 | `ipv6_listen_port` | 0 | 0～65535 | IPv6 数据端口；0 为自动分配 |
 | `ipv6_probe_host` | `2400:3200::1` | IPv6 地址或可解析 AAAA 的主机名 | IPv6 公网 TCP 探针目标 |
@@ -296,12 +294,16 @@ KEEPALIVE       ──► winning UDP socket ──► confirmed peer endpoint
 
 `nat4_source_port_start + nat4_source_port_count - 1` 不能超过 65535。Windows 使用 `select` 管理池，因此 socket 数量限制为 60，为控制 socket 集合保留余量。
 
+```ini
+traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:false
+```
+
 ## 典型日志
 
-切换到 NAT4：
+进入 NAT4：
 
 ```text
-Exact-port punch did not complete; switching to NAT4 socket pool
+Trying enhanced NAT4 traversal
 NAT4 round 0, source ports 30000-30024, peer offset=+20
 ```
 
@@ -337,7 +339,7 @@ Windows: 下一次 recvfrom 返回 WSAECONNRESET (10054)
 
 Winsock 会把此前 UDP 发送引起的 ICMP 不可达延迟报告到下一次 `recvfrom`。在 UDP 打洞阶段，对端映射尚未建立是正常的短暂状态，因此这个错误不能直接证明会合 socket 已失效。
 
-旧行为把会合服务器已响应之后的 `10054` 当作致命接收错误，`DiscoverAndPunch` 立即返回失败。GUI/TUI 的状态回调只更新界面状态，没有把错误原因再次写入核心日志，因此常见日志只有：
+旧行为把会合服务器已响应之后的 `10054` 当作致命接收错误，普通 NAT 立即返回失败。GUI/TUI 的状态回调只更新界面状态，没有把错误原因再次写入核心日志，因此常见日志只有：
 
 ```text
 Rendezvous supplied peer 27.38.4.198:51237
@@ -379,5 +381,5 @@ NAT4 round 屏障依赖 `NAT4_JOIN`、`NAT4_WAIT` 和 `NAT4_PEER`，因此客户
 - 两端进入相同 round 的时间差持续超过单轮超时；
 - NAT 映射在握手或连接期间被主动回收。
 
-如果启用 IPv4 Relay Fallback，以上直连路径均失败后会继续请求会合服务器代理；否则
-连接进入 Error。Relay 的线程模型和协议见 [ipv4-relay-fallback.md](ipv4-relay-fallback.md)。
+如果策略列表中后面还有启用项，当前直连策略失败后会继续下一项；所有启用项都失败
+后连接进入 Error。Relay 的线程模型和协议见 [ipv4-relay-fallback.md](ipv4-relay-fallback.md)。

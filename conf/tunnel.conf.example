@@ -20,17 +20,22 @@ peer_timeout=45
 # but is included in the client traffic statistics.
 dummy_traffic_enabled=false
 punch_timeout=30
-# n4-style fallback: bind a consecutive UDP socket pool and predict the peer's
-# increasing public port. Set source_port_count=0 to disable the fallback.
+
+# Ordered traversal strategy. Every mode must appear exactly once; use true or
+# false to enable or disable it. Both peers should use the same enabled order.
+# Available modes: nat, nat4, ipv6, ipv4_relay.
+traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:false
+
+# NAT4 binds a consecutive UDP socket pool and predicts the peer's increasing
+# public port. Disable it through traversal_modes rather than using a zero count.
 nat4_source_port_start=30000
 nat4_source_port_count=25
 nat4_peer_port_offset=20
 nat4_round_timeout=10
 
-# Optional UDP/IPv6 data-plane fallback after IPv4 and NAT4 punching fail.
-# Both peers must enable it. At least one peer must accept unsolicited inbound
+# IPv6 direct-connection parameters. Both peers must enable this mode. At least
+# one peer must accept unsolicited inbound
 # IPv6 UDP; port 0 asks the OS to choose the local data port.
-ipv6_fallback_enabled=false
 ipv6_accept_inbound=false
 ipv6_listen_port=0
 # TCP endpoint used to verify IPv6 Internet reachability and select the GUA.
@@ -39,9 +44,8 @@ ipv6_probe_host=2400:3200::1
 ipv6_probe_port=53
 ipv6_fallback_timeout=15
 
-# Optional final fallback through the rendezvous server's IPv4 UDP relay.
-# Both peers and the rendezvous server must enable relay support.
-ipv4_relay_fallback_enabled=false
+# The ipv4_relay mode additionally requires relay support on both peers and the
+# rendezvous server.
 
 adapter_name=EasyTunnel
 local_tun_ipv4=10.66.0.1

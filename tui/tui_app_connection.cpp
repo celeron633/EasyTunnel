@@ -137,7 +137,17 @@ bool TuiApp::Validate(std::string* error) const {
     if (ParseInt(serverPortText_, 0) < 1 || ParseInt(serverPortText_, 0) > 65535) {
         *error = "Invalid rendezvous port"; return false;
     }
-    if (config_.ipv6FallbackEnabled && config_.ipv6ProbeHost.empty()) {
+    const bool anyModeEnabled = std::any_of(
+        config_.traversalModes.begin(), config_.traversalModes.end(),
+        [](const auto& setting) { return setting.enabled; });
+    if (!anyModeEnabled) {
+        *error = "Enable at least one traversal mode"; return false;
+    }
+    const auto ipv6Mode = std::find_if(
+        config_.traversalModes.begin(), config_.traversalModes.end(),
+        [](const auto& setting) { return setting.mode == TraversalMode::Ipv6; });
+    if (ipv6Mode != config_.traversalModes.end() && ipv6Mode->enabled
+        && config_.ipv6ProbeHost.empty()) {
         *error = "IPv6 probe host is required"; return false;
     }
     return true;
@@ -163,10 +173,11 @@ Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
     output.dummy_traffic_enabled = config_.dummyTrafficEnabled;
     output.punch_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(punchTimeoutText_, 30), 1, 600));
+    output.traversal_modes = config_.traversalModes;
     output.nat4_source_port_start = static_cast<uint16_t>(
         std::clamp(ParseInt(nat4SourcePortStartText_, 30000), 1, 65535));
     output.nat4_source_port_count = static_cast<uint16_t>(
-        std::clamp(ParseInt(nat4SourcePortCountText_, 25), 0, 60));
+        std::clamp(ParseInt(nat4SourcePortCountText_, 25), 1, 60));
     if (output.nat4_source_port_count > 0) {
         output.nat4_source_port_start = static_cast<uint16_t>((std::min)(
             static_cast<int>(output.nat4_source_port_start),
@@ -176,7 +187,6 @@ Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
         std::clamp(ParseInt(nat4PeerPortOffsetText_, 20), 0, 256));
     output.nat4_round_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(nat4RoundTimeoutText_, 10), 1, 60));
-    output.ipv6_fallback_enabled = config_.ipv6FallbackEnabled;
     output.ipv6_accept_inbound = config_.ipv6AcceptInbound;
     output.ipv6_listen_port = static_cast<uint16_t>(
         std::clamp(ParseInt(ipv6ListenPortText_, 0), 0, 65535));
@@ -185,7 +195,6 @@ Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
         std::clamp(ParseInt(ipv6ProbePortText_, 53), 1, 65535));
     output.ipv6_fallback_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(ipv6FallbackTimeoutText_, 15), 1, 120));
-    output.ipv4_relay_fallback_enabled = config_.ipv4RelayFallbackEnabled;
     TryParseLogLevel(logLevels_[std::clamp(config_.logLevel, 0, 3)], &output.log_level);
     return output;
 }

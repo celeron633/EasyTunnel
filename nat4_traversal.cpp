@@ -115,15 +115,27 @@ int WaitReadable(const std::vector<socket_t>& pool, fd_set* readable) {
 }  // namespace
 
 bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
-                          RendezvousClient& rendezvous,
+                          const UdpEndpoint& rendezvousServer,
                           const std::atomic<bool>& running,
                           const std::string& expectedPeerId,
-                          std::chrono::steady_clock::time_point deadline,
                           UdpEndpoint* peer, std::string* error) {
+    if (expectedPeerId.empty()) {
+        *error = "NAT4 traversal requires a selected peer";
+        return false;
+    }
     if (cfg.nat4_source_port_count == 0) {
         *error = "NAT4 socket pool is disabled";
         return false;
     }
+
+    RendezvousClient rendezvous(cfg, rendezvousServer);
+    if (*sock != kInvalidSocket) {
+        rendezvous.Unregister(*sock);
+        CloseSocket(*sock);
+        *sock = kInvalidSocket;
+    }
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(cfg.punch_timeout);
 
     uint32_t firstPort = cfg.nat4_source_port_start;
     uint32_t round = 0;
@@ -154,6 +166,11 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
 
         const socket_t registrationSocket = pool.front();
         *sock = registrationSocket;
+        auto closeRound = [&]() {
+            rendezvous.Unregister(registrationSocket);
+            ClosePool(&pool);
+            *sock = kInvalidSocket;
+        };
         Log(LogLevel::Info, "NAT4 round "
             + std::to_string(round) + ", source ports "
             + std::to_string(firstPort) + "-"
@@ -189,9 +206,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
             if (ready < 0) {
                 *error = "select failed during NAT4 traversal. err="
                     + std::to_string(GetSocketError());
-                rendezvous.Unregister(registrationSocket);
-                ClosePool(&pool);
-                *sock = kInvalidSocket;
+                closeRound();
                 return false;
             }
             if (ready == 0) continue;
@@ -227,9 +242,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                         source, buffer.data(), static_cast<size_t>(n));
                     if (event.type == RendezvousEventType::Error) {
                         *error = event.error;
-                        rendezvous.Unregister(registrationSocket);
-                        ClosePool(&pool);
-                        *sock = kInvalidSocket;
+                        closeRound();
                         return false;
                     }
                     if (event.type == RendezvousEventType::Nat4Peer
@@ -247,9 +260,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
                                                 cfg.nat4_peer_port_offset,
                                                 &predicted)) {
                                 *error = "Predicted NAT4 peer port exceeds 65535";
-                                rendezvous.Unregister(registrationSocket);
-                                ClosePool(&pool);
-                                *sock = kInvalidSocket;
+                                closeRound();
                                 return false;
                             }
                             Log(LogLevel::Info, "NAT4 peer observed as "
@@ -313,9 +324,7 @@ bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
             }
         }
 
-        rendezvous.Unregister(registrationSocket);
-        ClosePool(&pool);
-        *sock = kInvalidSocket;
+        closeRound();
         Log(LogLevel::Debug, "NAT4 round " + std::to_string(round)
             + " ended without a match; advancing source-port range");
         firstPort += cfg.nat4_source_port_count;

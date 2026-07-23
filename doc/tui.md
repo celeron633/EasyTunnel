@@ -53,9 +53,11 @@ ftxui::screen
 - Room ID、My Peer ID、Auth Token
 - Adapter Name、Local TUN IPv4、Prefix、MTU
 - Auto configure IPv4
+- Traversal strategy 表格：普通 NAT、增强 NAT4、IPv6、IPv4 Relay 逐项开关、优先级和 Up/Down 排序
+- NAT4 Source Port Start/Count、Peer Port Offset、Round Timeout
 - Keepalive、Peer Timeout、Punch Timeout
 - NAT4 Source Port Start/Count、Peer Port Offset、Round Timeout
-- IPv6 Fallback 开关、主动入站声明、监听端口、TCP 探针主机/端口和超时（位于 Misc 之前）
+- IPv6 主动入站声明、监听端口、TCP 探针主机/端口和超时（位于 Misc 之前）
 - 日志级别
 - Rendezvous Retry Delay Seconds
 - Auto wait for peer
@@ -106,7 +108,7 @@ EasyTunnel_tui.json
 - 日志等级
 - 会合重试延迟
 - Auto wait for peer
-- IPv6 Fallback 和 IPv4 Relay Fallback
+- 有序的四种穿透模式及其开关
 
 `auth_token` 为明文，请限制配置文件权限。
 

@@ -182,8 +182,8 @@ bool DiscoverAndConnectIpv6(socket_t* sock, const Config& config,
                             const std::atomic<bool>& running,
                             const std::string& expectedPeerId,
                             UdpEndpoint* peer, std::string* error) {
-    if (!config.ipv6_fallback_enabled) {
-        *error = "IPv6 fallback is disabled";
+    if (!IsTraversalModeEnabled(config, TraversalMode::Ipv6)) {
+        *error = "IPv6 direct connection is disabled";
         return false;
     }
     if (expectedPeerId.empty()) {
@@ -193,7 +193,7 @@ bool DiscoverAndConnectIpv6(socket_t* sock, const Config& config,
 
     in6_addr localAddress{};
     std::string localAddressText;
-    Log(LogLevel::Info, "IPv4 traversal failed; checking IPv6 fallback");
+    Log(LogLevel::Info, "Trying IPv6 direct connection");
     if (!DiscoverReachableGua(config.ipv6_probe_host, config.ipv6_probe_port,
                               &localAddress, &localAddressText)) {
         *error = "No reachable IPv6 GUA (TCP probe to "

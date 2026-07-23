@@ -110,18 +110,21 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     IntValue(json, "peer_timeout", &config->peerTimeout);
     BoolValue(json, "dummy_traffic_enabled", &config->dummyTrafficEnabled);
     IntValue(json, "punch_timeout", &config->punchTimeout);
+    std::string traversalModes;
+    if (StringValue(json, "traversal_modes", &traversalModes)
+        && !ParseTraversalModes(traversalModes, &config->traversalModes, error)) {
+        *error = "Invalid traversal_modes: " + *error;
+        return false;
+    }
     IntValue(json, "nat4_source_port_start", &config->nat4SourcePortStart);
     IntValue(json, "nat4_source_port_count", &config->nat4SourcePortCount);
     IntValue(json, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
     IntValue(json, "nat4_round_timeout", &config->nat4RoundTimeout);
-    BoolValue(json, "ipv6_fallback_enabled", &config->ipv6FallbackEnabled);
     BoolValue(json, "ipv6_accept_inbound", &config->ipv6AcceptInbound);
     IntValue(json, "ipv6_listen_port", &config->ipv6ListenPort);
     StringValue(json, "ipv6_probe_host", &config->ipv6ProbeHost);
     IntValue(json, "ipv6_probe_port", &config->ipv6ProbePort);
     IntValue(json, "ipv6_fallback_timeout", &config->ipv6FallbackTimeout);
-    BoolValue(json, "ipv4_relay_fallback_enabled",
-              &config->ipv4RelayFallbackEnabled);
     IntValue(json, "log_level", &config->logLevel);
     IntValue(json, "rendezvous_retry_delay_seconds",
              &config->rendezvousRetryDelaySeconds);
@@ -135,7 +138,7 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
                                      config->keepaliveInterval + 1, 3600);
     config->punchTimeout = std::clamp(config->punchTimeout, 1, 600);
     config->nat4SourcePortStart = std::clamp(config->nat4SourcePortStart, 1, 65535);
-    config->nat4SourcePortCount = std::clamp(config->nat4SourcePortCount, 0, 60);
+    config->nat4SourcePortCount = std::clamp(config->nat4SourcePortCount, 1, 60);
     if (config->nat4SourcePortCount > 0) {
         config->nat4SourcePortStart = (std::min)(
             config->nat4SourcePortStart, 65536 - config->nat4SourcePortCount);
@@ -174,20 +177,18 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "  \"peer_timeout\": " << config.peerTimeout << ",\n"
         << "  \"dummy_traffic_enabled\": " << (config.dummyTrafficEnabled ? "true" : "false") << ",\n"
         << "  \"punch_timeout\": " << config.punchTimeout << ",\n"
+        << "  \"traversal_modes\": \""
+        << SerializeTraversalModes(config.traversalModes) << "\",\n"
         << "  \"nat4_source_port_start\": " << config.nat4SourcePortStart << ",\n"
         << "  \"nat4_source_port_count\": " << config.nat4SourcePortCount << ",\n"
         << "  \"nat4_peer_port_offset\": " << config.nat4PeerPortOffset << ",\n"
         << "  \"nat4_round_timeout\": " << config.nat4RoundTimeout << ",\n"
-        << "  \"ipv6_fallback_enabled\": "
-        << (config.ipv6FallbackEnabled ? "true" : "false") << ",\n"
         << "  \"ipv6_accept_inbound\": "
         << (config.ipv6AcceptInbound ? "true" : "false") << ",\n"
         << "  \"ipv6_listen_port\": " << config.ipv6ListenPort << ",\n"
         << "  \"ipv6_probe_host\": \"" << Escape(config.ipv6ProbeHost) << "\",\n"
         << "  \"ipv6_probe_port\": " << config.ipv6ProbePort << ",\n"
         << "  \"ipv6_fallback_timeout\": " << config.ipv6FallbackTimeout << ",\n"
-        << "  \"ipv4_relay_fallback_enabled\": "
-        << (config.ipv4RelayFallbackEnabled ? "true" : "false") << ",\n"
         << "  \"log_level\": " << config.logLevel << ",\n"
         << "  \"rendezvous_retry_delay_seconds\": "
         << config.rendezvousRetryDelaySeconds << ",\n"

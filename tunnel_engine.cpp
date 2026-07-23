@@ -9,6 +9,7 @@
 #include "ipv4_relay_fallback.h"
 #include "ipv6_fallback.h"
 #include "log.h"
+#include "nat4_traversal.h"
 #include "nat_traversal.h"
 #include "rendezvous_client.h"
 
@@ -127,12 +128,10 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ ", nat4_source_ports=" + std::to_string(cfg.nat4_source_port_start)
 		+ "+" + std::to_string(cfg.nat4_source_port_count)
 		+ ", nat4_peer_port_offset=" + std::to_string(cfg.nat4_peer_port_offset)
-		+ ", ipv6_fallback=" + (cfg.ipv6_fallback_enabled ? "enabled" : "disabled")
+		+ ", traversal_modes=" + SerializeTraversalModes(cfg.traversal_modes)
 		+ ", ipv6_accept_inbound=" + (cfg.ipv6_accept_inbound ? "true" : "false")
 		+ ", ipv6_probe=" + cfg.ipv6_probe_host + ":"
-		+ std::to_string(cfg.ipv6_probe_port)
-		+ ", ipv4_relay_fallback="
-		+ (cfg.ipv4_relay_fallback_enabled ? "enabled" : "disabled"));
+		+ std::to_string(cfg.ipv6_probe_port));
 
 	socket_t sock = kInvalidSocket;
 	UdpEndpoint server{};
@@ -164,36 +163,50 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		SetState(TunnelState::Connecting,
 			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
 			                           : "Connecting to " + cfg.target_peer_id);
-		bool traversalConnected = DiscoverAndPunch(
-			&sock, cfg, server, running_, &peer, &matchedPeerId, &socketError);
-		if (!traversalConnected) {
-			std::string fallbackErrors = socketError;
-			if (running_.load() && cfg.ipv6_fallback_enabled
-				&& !matchedPeerId.empty()) {
-				SetState(TunnelState::Connecting, "IPv4 failed; trying IPv6 fallback");
-				std::string ipv6Error;
-				traversalConnected = DiscoverAndConnectIpv6(
-					&sock, cfg, server, running_, matchedPeerId, &peer, &ipv6Error);
-				if (!traversalConnected) {
-					fallbackErrors += "; " + ipv6Error;
+		bool traversalConnected = DiscoverPeer(
+			sock, cfg, server, running_, &peer, &matchedPeerId, &socketError);
+		if (traversalConnected) {
+			traversalConnected = false;
+			std::string traversalErrors;
+			for (const auto& strategy : cfg.traversal_modes) {
+				if (!running_.load() || !strategy.enabled) continue;
+				const std::string displayName = TraversalModeDisplayName(strategy.mode);
+				SetState(TunnelState::Connecting, "Trying " + displayName);
+				std::string strategyError;
+				switch (strategy.mode) {
+					case TraversalMode::Nat:
+						traversalConnected = PunchPeer(
+							&sock, cfg, server, running_, matchedPeerId,
+							&peer, &strategyError);
+						break;
+					case TraversalMode::Nat4:
+						traversalConnected = DiscoverAndPunchNat4(
+							&sock, cfg, server, running_, matchedPeerId,
+							&peer, &strategyError);
+						break;
+					case TraversalMode::Ipv6:
+						traversalConnected = DiscoverAndConnectIpv6(
+							&sock, cfg, server, running_, matchedPeerId,
+							&peer, &strategyError);
+						break;
+					case TraversalMode::Ipv4Relay:
+						traversalConnected = DiscoverAndConnectIpv4Relay(
+							&sock, cfg, server, running_, matchedPeerId,
+							&peer, &strategyError);
+						break;
 				}
+				if (traversalConnected) break;
+				if (!traversalErrors.empty()) traversalErrors += "; ";
+				traversalErrors += displayName + ": " + strategyError;
 			}
-			if (!traversalConnected && running_.load()
-				&& cfg.ipv4_relay_fallback_enabled
-				&& !matchedPeerId.empty()) {
-				SetState(TunnelState::Connecting,
-					"Direct paths failed; trying IPv4 relay fallback");
-				std::string relayError;
-				traversalConnected = DiscoverAndConnectIpv4Relay(
-					&sock, cfg, server, running_, matchedPeerId, &peer, &relayError);
-				if (!traversalConnected) fallbackErrors += "; " + relayError;
-			}
-			socketError = fallbackErrors;
+			if (!traversalConnected) socketError = traversalErrors;
+		}
+		if (!traversalConnected) {
 			if (!traversalConnected && !running_.load()) {
 				setExitReason("stop requested during NAT traversal");
 				Log(LogLevel::Debug, getExitReason() + ": " + socketError);
 			} else if (!traversalConnected) {
-				setExitReason("NAT traversal failed");
+				setExitReason("all enabled traversal modes failed");
 				Log(LogLevel::Error, getExitReason() + ": " + socketError);
 				SetState(TunnelState::Error, socketError);
 			}

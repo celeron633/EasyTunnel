@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(EasyTunnel LANGUAGES C CXX)
 
+include(CTest)
+
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
@@ -32,6 +34,17 @@ find_package(Threads REQUIRED)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(BUILD_TESTING)
+    add_executable(EasyTunnel_config_tests
+        tests/config_traversal_modes_test.cpp
+        config.cpp
+        log.cpp)
+    target_include_directories(EasyTunnel_config_tests PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(EasyTunnel_config_tests PRIVATE spdlog::spdlog_header_only)
+    add_test(NAME config_traversal_modes COMMAND EasyTunnel_config_tests
+        ${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example)
+endif()
 
 # ---------------------------------------------------------------------------
 # Common sources (platform-independent) - shared between console and GUI

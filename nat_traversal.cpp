@@ -1,13 +1,11 @@
 #include "nat_traversal.h"
 
-#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <thread>
 #include <vector>
 
 #include "log.h"
-#include "nat4_traversal.h"
 #include "nat_protocol.h"
 #include "rendezvous_client.h"
 
@@ -65,71 +63,45 @@ long long MillisecondsRemaining(std::chrono::steady_clock::time_point deadline) 
 
 }  // namespace
 
-bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
-                      const UdpEndpoint& server, const std::atomic<bool>& running,
-                      UdpEndpoint* peer, std::string* matchedPeerId,
-                      std::string* error) {
+bool DiscoverPeer(socket_t sock, const Config& cfg,
+                  const UdpEndpoint& server, const std::atomic<bool>& running,
+                  UdpEndpoint* peer, std::string* matchedPeerId,
+                  std::string* error) {
     if (!ValidateRendezvousSession(cfg, error)) return false;
     RendezvousClient rendezvous(cfg, server);
     const auto selectionDeadline = std::chrono::steady_clock::now()
         + (cfg.target_peer_id.empty() ? std::chrono::hours(24 * 365)
                                       : std::chrono::seconds(cfg.punch_timeout));
-    auto punchDeadline = (std::chrono::steady_clock::time_point::max)();
-    auto legacyDeadline = (std::chrono::steady_clock::time_point::max)();
     auto nextProbe = std::chrono::steady_clock::time_point{};
-    bool havePeer = false;
-    std::string expectedPeerId;
     std::vector<uint8_t> buffer(2048);
-    Log(LogLevel::Debug, "NAT traversal started: mode="
+    Log(LogLevel::Debug, "Peer discovery started: mode="
         + std::string(cfg.target_peer_id.empty() ? "wait" : "connect")
         + ", peer_id=" + cfg.peer_id
         + (cfg.target_peer_id.empty() ? "" : ", target_peer_id=" + cfg.target_peer_id)
-        + ", punch_timeout_ms="
-        + std::to_string(static_cast<unsigned long long>(cfg.punch_timeout) * 1000ULL)
-        + ", nat4_pool_size=" + std::to_string(cfg.nat4_source_port_count));
+        + ", selection_timeout_ms="
+        + std::to_string(static_cast<unsigned long long>(cfg.punch_timeout) * 1000ULL));
     while (running.load()) {
         const auto now = std::chrono::steady_clock::now();
         if (rendezvous.ResponseTimedOut(now, error)) {
-            Log(LogLevel::Error, "NAT traversal aborted: " + *error);
+            Log(LogLevel::Error, "Peer discovery aborted: " + *error);
             return false;
         }
-        if ((!havePeer && rendezvous.HasResponded() && now >= selectionDeadline)
-            || (havePeer && now >= punchDeadline)) break;
-        if (havePeer && cfg.nat4_source_port_count > 0 && now >= legacyDeadline) {
-            Log(LogLevel::Info, "Exact-port punch did not complete; switching to NAT4 socket pool");
-            rendezvous.Unregister(*sock);
-            CloseSocket(*sock);
-            *sock = kInvalidSocket;
-            return DiscoverAndPunchNat4(sock, cfg, rendezvous, running,
-                                        expectedPeerId, punchDeadline, peer, error);
-        }
+        if (rendezvous.HasResponded() && now >= selectionDeadline) break;
         if (now >= nextProbe) {
-            if (!rendezvous.SendProbe(*sock)) {
+            if (!rendezvous.SendProbe(sock)) {
                 Log(LogLevel::Warn, "Failed to send rendezvous probe to "
                     + FormatUdpEndpoint(server) + ". err="
                     + std::to_string(GetSocketError()));
             } else {
                 Log(LogLevel::Debug, "Sent rendezvous probe; local="
-                    + LocalSocketEndpoint(*sock) + ", server="
+                    + LocalSocketEndpoint(sock) + ", server="
                     + FormatUdpEndpoint(server));
-            }
-            if (havePeer) {
-                if (!Send(*sock, *peer, MakeControlMessage(
-                        "PUNCH", {cfg.room_id, cfg.peer_id}))) {
-                    Log(LogLevel::Debug, "Failed to send PUNCH to "
-                        + FormatUdpEndpoint(*peer) + ". err="
-                        + std::to_string(GetSocketError()));
-                } else {
-                    Log(LogLevel::Debug, "Sent PUNCH to "
-                        + FormatUdpEndpoint(*peer) + "; deadline_ms="
-                        + std::to_string(MillisecondsRemaining(punchDeadline)));
-                }
             }
             nextProbe = now + std::chrono::milliseconds(500);
         }
         sockaddr_storage sourceAddress{};
         socket_len_t sourceLen = static_cast<socket_len_t>(sizeof(sourceAddress));
-        const int n = recvfrom(*sock, reinterpret_cast<char*>(buffer.data()),
+        const int n = recvfrom(sock, reinterpret_cast<char*>(buffer.data()),
             static_cast<int>(buffer.size()), 0,
             reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
         if (n < 0) {
@@ -146,10 +118,8 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
                 // as WSAECONNRESET (10054); retry instead of aborting the punch.
                 Log(LogLevel::Debug, "Transient UDP unreachable during NAT traversal; "
                     "continuing. err=" + std::to_string(socketError)
-                    + ", have_peer=" + (havePeer ? "true" : "false")
                     + ", deadline_ms="
-                    + std::to_string(MillisecondsRemaining(
-                        havePeer ? punchDeadline : selectionDeadline)));
+                    + std::to_string(MillisecondsRemaining(selectionDeadline)));
                 continue;
             }
             *error = "UDP receive failed during NAT traversal. err="
@@ -160,7 +130,7 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
         const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
         const RendezvousEvent rendezvousEvent = rendezvous.HandlePacket(
             source, buffer.data(), static_cast<size_t>(n));
-        Log(LogLevel::Debug, "NAT traversal RX: source="
+        Log(LogLevel::Debug, "Peer discovery RX: source="
             + FormatUdpEndpoint(source) + ", bytes=" + std::to_string(n)
             + ", rendezvous_event=" + RendezvousEventName(rendezvousEvent.type));
         if (rendezvousEvent.type == RendezvousEventType::Error) {
@@ -176,79 +146,93 @@ bool DiscoverAndPunch(socket_t* sock, const Config& cfg,
             if (!cfg.target_peer_id.empty()
                 && rendezvousEvent.peerId != cfg.target_peer_id) continue;
             *peer = rendezvousEvent.peer;
-            expectedPeerId = rendezvousEvent.peerId;
-            if (matchedPeerId != nullptr) *matchedPeerId = expectedPeerId;
-            if (!havePeer) {
-                havePeer = true;
-                punchDeadline = now + std::chrono::seconds(cfg.punch_timeout);
-                legacyDeadline = cfg.nat4_source_port_count > 0
-                    ? now + std::chrono::seconds(2) : punchDeadline;
-                Log(LogLevel::Info, "Rendezvous supplied peer id="
-                    + expectedPeerId + ", endpoint=" + FormatUdpEndpoint(*peer)
-                    + ", punch_deadline_ms="
-                    + std::to_string(MillisecondsRemaining(punchDeadline)));
-            } else {
-                Log(LogLevel::Debug, "Rendezvous refreshed peer id="
-                    + expectedPeerId + ", endpoint=" + FormatUdpEndpoint(*peer));
-            }
-            if (!Send(*sock, *peer, MakeControlMessage(
-                    "PUNCH", {cfg.room_id, cfg.peer_id}))) {
-                Log(LogLevel::Debug, "Failed to send immediate PUNCH to "
-                    + FormatUdpEndpoint(*peer) + ". err="
-                    + std::to_string(GetSocketError()));
-            }
-            continue;
-        }
-        if (rendezvousEvent.type != RendezvousEventType::None) continue;
-
-        std::string type;
-        std::vector<std::string> fields;
-        if (!ParseControlMessage(buffer.data(), n, &type, &fields)) {
-            Log(LogLevel::Debug, "Ignored non-control UDP packet during NAT traversal "
-                "from " + FormatUdpEndpoint(source) + ", bytes=" + std::to_string(n));
-            continue;
-        }
-        Log(LogLevel::Debug, "Received peer control type=" + type
-            + " from " + FormatUdpEndpoint(source)
-            + ", fields=" + std::to_string(fields.size()));
-        if (havePeer && SameIpv4Address(source, *peer) && fields.size() >= 2
-            && fields[0] == cfg.room_id && fields[1] == expectedPeerId
-            && (type == "PUNCH" || type == "PUNCH_ACK")) {
-            if (!SameUdpEndpoint(source, *peer)) {
-                Log(LogLevel::Info, "NAT port prediction matched peer "
-                    + FormatUdpEndpoint(source));
-                *peer = source;
-            }
-            if (type == "PUNCH") {
-                const std::string ack = MakeControlMessage(
-                    "PUNCH_ACK", {cfg.room_id, cfg.peer_id});
-                int sentCount = 0;
-                for (int repeat = 0; repeat < 5; ++repeat) {
-                    if (Send(*sock, *peer, ack)) ++sentCount;
-                }
-                Log(LogLevel::Debug, "Sent PUNCH_ACK "
-                    + std::to_string(sentCount) + "/5 times to "
-                    + FormatUdpEndpoint(*peer));
-            }
-            Log(LogLevel::Info, "NAT hole punching confirmed with " + FormatUdpEndpoint(*peer));
+            *matchedPeerId = rendezvousEvent.peerId;
+            Log(LogLevel::Info, "Rendezvous selected peer id="
+                + *matchedPeerId + ", endpoint=" + FormatUdpEndpoint(*peer));
             return true;
         }
-        Log(LogLevel::Debug, "Ignored peer control type=" + type
-            + ": have_peer=" + (havePeer ? "true" : "false")
-            + ", same_ip=" + (havePeer && SameIpv4Address(source, *peer) ? "true" : "false")
-            + ", room_match="
-            + (fields.size() >= 1 && fields[0] == cfg.room_id ? "true" : "false")
-            + ", peer_id_match="
-            + (fields.size() >= 2 && fields[1] == expectedPeerId ? "true" : "false"));
     }
-    if (!running.load()) {
-        *error = "NAT traversal stopped by request";
-    } else {
-        *error = havePeer ? "NAT punch timed out" : "Timed out waiting for selected peer";
-    }
+    *error = running.load() ? "Timed out waiting for selected peer"
+                            : "Peer discovery stopped by request";
     Log(running.load() ? LogLevel::Error : LogLevel::Debug,
-        "NAT traversal finished without a connection: " + *error
-        + ", have_peer=" + (havePeer ? "true" : "false"));
+        "Peer discovery finished without a peer: " + *error);
+    return false;
+}
+
+bool PunchPeer(socket_t* sock, const Config& cfg,
+               const UdpEndpoint& server, const std::atomic<bool>& running,
+               const std::string& matchedPeerId,
+               UdpEndpoint* peer,
+               std::string* error) {
+    if (matchedPeerId.empty()) {
+        *error = "Normal NAT traversal requires a selected peer";
+        return false;
+    }
+    if (*sock == kInvalidSocket) {
+        UdpEndpoint reopenedServer{};
+        if (!OpenRendezvousSocket(cfg, 1000, sock, &reopenedServer, error)) return false;
+    }
+    RendezvousClient rendezvous(cfg, server);
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(cfg.punch_timeout);
+    auto nextProbe = std::chrono::steady_clock::time_point{};
+    bool havePeerEndpoint = peer->family == AF_INET;
+    std::vector<uint8_t> buffer(2048);
+    while (running.load() && std::chrono::steady_clock::now() < deadline) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextProbe) {
+            rendezvous.SendProbe(*sock);
+            if (havePeerEndpoint) {
+                Send(*sock, *peer,
+                     MakeControlMessage("PUNCH", {cfg.room_id, cfg.peer_id}));
+            }
+            nextProbe = now + std::chrono::milliseconds(500);
+        }
+        sockaddr_storage sourceAddress{};
+        socket_len_t sourceLen = static_cast<socket_len_t>(sizeof(sourceAddress));
+        const int n = recvfrom(*sock, reinterpret_cast<char*>(buffer.data()),
+            static_cast<int>(buffer.size()), 0,
+            reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
+        if (n < 0) {
+            const int socketError = GetSocketError();
+            if (IsRecvTimeout(socketError) || IsUdpDestinationUnreachable(socketError)) continue;
+            *error = "UDP receive failed during normal NAT traversal. err="
+                + std::to_string(socketError);
+            return false;
+        }
+        const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
+        const RendezvousEvent event = rendezvous.HandlePacket(
+            source, buffer.data(), static_cast<size_t>(n));
+        if (event.type == RendezvousEventType::Error) {
+            *error = event.error;
+            return false;
+        }
+        if (event.type == RendezvousEventType::Peer
+            && event.peerId == matchedPeerId) {
+            *peer = event.peer;
+            havePeerEndpoint = true;
+            continue;
+        }
+        if (event.type != RendezvousEventType::None) continue;
+        std::string type;
+        std::vector<std::string> fields;
+        if (!ParseControlMessage(buffer.data(), static_cast<size_t>(n),
+                                 &type, &fields)) continue;
+        if (!havePeerEndpoint || !SameIpv4Address(source, *peer) || fields.size() < 2
+            || fields[0] != cfg.room_id || fields[1] != matchedPeerId
+            || (type != "PUNCH" && type != "PUNCH_ACK")) continue;
+        *peer = source;
+        if (type == "PUNCH") {
+            const std::string ack = MakeControlMessage(
+                "PUNCH_ACK", {cfg.room_id, cfg.peer_id});
+            for (int repeat = 0; repeat < 5; ++repeat) Send(*sock, *peer, ack);
+        }
+        Log(LogLevel::Info, "Normal NAT traversal confirmed with "
+            + FormatUdpEndpoint(*peer));
+        return true;
+    }
+    *error = running.load() ? "Normal NAT traversal timed out"
+                            : "Normal NAT traversal stopped";
     return false;
 }
 

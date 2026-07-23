@@ -228,7 +228,16 @@ bool GuiApp::ValidateCommonFields(std::string* error) const {
     if (!ParseIpv4(localTunIpv4_, &tunAddress)) {
         *error = "Invalid local TUN IPv4"; return false;
     }
-    if (ipv6FallbackEnabled_ && ipv6ProbeHost_[0] == '\0') {
+    if (std::none_of(traversalModes_.begin(), traversalModes_.end(),
+                     [](const auto& setting) { return setting.enabled; })) {
+        *error = "Enable at least one traversal mode"; return false;
+    }
+    const auto ipv6Mode = std::find_if(
+        traversalModes_.begin(), traversalModes_.end(), [](const auto& setting) {
+            return setting.mode == TraversalMode::Ipv6;
+        });
+    if (ipv6Mode != traversalModes_.end() && ipv6Mode->enabled
+        && ipv6ProbeHost_[0] == '\0') {
         *error = "IPv6 probe host is required"; return false;
     }
     return true;
@@ -260,17 +269,16 @@ bool GuiApp::StartConnection(const std::string& targetPeerId) {
     cfg.peer_timeout = static_cast<uint16_t>(peerTimeout_);
     cfg.dummy_traffic_enabled = dummyTrafficEnabled_;
     cfg.punch_timeout = static_cast<uint16_t>(punchTimeout_);
+    cfg.traversal_modes = traversalModes_;
     cfg.nat4_source_port_start = static_cast<uint16_t>(nat4SourcePortStart_);
     cfg.nat4_source_port_count = static_cast<uint16_t>(nat4SourcePortCount_);
     cfg.nat4_peer_port_offset = static_cast<uint16_t>(nat4PeerPortOffset_);
     cfg.nat4_round_timeout = static_cast<uint16_t>(nat4RoundTimeout_);
-    cfg.ipv6_fallback_enabled = ipv6FallbackEnabled_;
     cfg.ipv6_accept_inbound = ipv6AcceptInbound_;
     cfg.ipv6_listen_port = static_cast<uint16_t>(ipv6ListenPort_);
     cfg.ipv6_probe_host = ipv6ProbeHost_;
     cfg.ipv6_probe_port = static_cast<uint16_t>(ipv6ProbePort_);
     cfg.ipv6_fallback_timeout = static_cast<uint16_t>(ipv6FallbackTimeout_);
-    cfg.ipv4_relay_fallback_enabled = ipv4RelayFallbackEnabled_;
     TryParseLogLevel(kLogLevels[logLevelIdx_], &cfg.log_level);
     const bool started = engine_.Start(cfg);
     if (started) waitingForPeer_.store(targetPeerId.empty());
