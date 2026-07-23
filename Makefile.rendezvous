@@ -14,7 +14,7 @@ LDLIBS ?= -pthread
 
 CORE_SOURCES := rendezvous/server.cpp rendezvous/registry.cpp \
                 rendezvous/ipv4_relay_app.cpp rendezvous/config.cpp \
-                nat_protocol.cpp util.cpp easy_log.cpp
+                nat_protocol.cpp util.cpp config.cpp easy_log.cpp
 SOURCES := rendezvous/main.cpp $(CORE_SOURCES)
 OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 TUI_SOURCES := rendezvous/tui_main.cpp rendezvous/tui_app.cpp \
