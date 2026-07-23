@@ -11,6 +11,9 @@ struct RendezvousConfig {
     std::string authToken;
     uint16_t clientTimeoutSeconds = 60;
     uint16_t maxClientsPerRoom = 32;
+    bool ipv4RelayEnabled = false;
+    uint16_t ipv4RelayPortStart = 40000;
+    uint16_t ipv4RelayPortEnd = 40100;
     LogLevel logLevel = LogLevel::Info;
     std::string logFile = "EasyTunnel_rendezvous.log";
 };

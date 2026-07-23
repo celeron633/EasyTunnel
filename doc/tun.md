@@ -37,7 +37,7 @@ EasyTunnel 使用三层 TUN，而不是二层 TAP。TUN 每次读写的是一个
        └──────────────────────── 对端 TunnelEngine / TUN
 ```
 
-隧道 payload 没有额外的数据帧头。当前也没有加密、压缩、重传、排序或 UDP relay；可靠性由被承载的上层协议自行处理。
+隧道 payload 没有额外的数据帧头。当前没有加密、压缩、重传或排序；启用 IPv4 Relay Fallback 时，会合服务器只原样转发同一 UDP payload。可靠性仍由被承载的上层协议自行处理。
 
 ## 启动与关闭顺序
 
@@ -46,7 +46,7 @@ EasyTunnel 使用三层 TUN，而不是二层 TAP。TUN 每次读写的是一个
 ```text
 创建 UDP socket
   → 向会合服务器登记并选择 Peer
-  → 完成 PUNCH/PUNCH_ACK、NAT4 打洞，或在二者失败后完成 IPv6 Fallback
+  → 完成 PUNCH/PUNCH_ACK、NAT4、IPv6 Fallback 或 IPv4 Relay Fallback
   → 打开并配置 TUN
   → 状态切换为 Connected
   → 启动 TUN→UDP 和 UDP→TUN 两个转发线程
@@ -65,7 +65,7 @@ TUN 读取循环最长阻塞约 500 ms，便于及时响应 Stop：
 1. 读取一个完整包；
 2. 空读取表示超时，继续检查运行状态；
 3. 非 IPv4 包记录 Debug 日志并丢弃；
-4. IPv4 包通过打洞成功的 UDP socket 发往最终 Peer 端点；
+4. IPv4 包通过最终 UDP socket 发往直连 Peer 或已确认的 relay 端点；
 5. 成功发送后更新 TX 包数和字节数。
 
 致命 TUN 读取错误会停止引擎。单次 UDP `sendto` 失败只记录错误，不立即拆除隧道。

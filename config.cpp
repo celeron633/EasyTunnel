@@ -179,6 +179,10 @@ bool LoadConfig(const std::string& file, Config* out) {
         Log(LogLevel::Error, "ipv6_fallback_timeout must be between 1 and 120");
         return false;
     }
+    if (!get("ipv4_relay_fallback_enabled").empty()) {
+        out->ipv4_relay_fallback_enabled = ParseBool(
+            get("ipv4_relay_fallback_enabled"));
+    }
     if (out->nat4_source_port_count > 0
         && static_cast<uint32_t>(out->nat4_source_port_start)
             + out->nat4_source_port_count - 1 > 65535) {

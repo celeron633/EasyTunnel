@@ -87,6 +87,7 @@ private:
     char ipv6ProbeHost_[256] = "2400:3200::1";
     int ipv6ProbePort_ = 53;
     int ipv6FallbackTimeout_ = 15;
+    bool ipv4RelayFallbackEnabled_ = false;
     int logLevelIdx_ = 1;
     int rendezvousRetryDelaySeconds_ = 5;
     bool autoWaitForPeer_ = false;

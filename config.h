@@ -26,6 +26,7 @@ struct Config {
     std::string ipv6_probe_host = "2400:3200::1";
     uint16_t ipv6_probe_port = 53;
     uint16_t ipv6_fallback_timeout = 15;
+    bool ipv4_relay_fallback_enabled = false;
     std::string adapter_name = "EasyTunnel";
     std::string local_tun_ipv4;
     uint8_t tun_prefix = 24;

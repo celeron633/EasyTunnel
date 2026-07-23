@@ -31,14 +31,19 @@ ftxui::Component RendezvousTuiApp::BuildConfigTab() {
     auto token = Input(&config_.authToken, "optional shared secret", password);
     auto timeout = Input(&timeoutText_, "60");
     auto capacity = Input(&capacityText_, "32");
+    auto relayEnabled = Checkbox("Enable IPv4 relay", &config_.ipv4RelayEnabled);
+    auto relayPortStart = Input(&relayPortStartText_, "40000");
+    auto relayPortEnd = Input(&relayPortEndText_, "40100");
     auto logLevel = Radiobox(&logLevels_, &logLevelIndex_);
     auto logFile = Input(&config_.logFile, "EasyTunnel_rendezvous.log");
     auto save = Button("Save", [this] { SaveConfig(false); });
     auto apply = Button("Save & restart", [this] { SaveConfig(true); });
     auto controls = Container::Vertical({bindAddress, port, token, timeout, capacity,
+                                         relayEnabled, relayPortStart, relayPortEnd,
                                          logLevel, logFile,
                                          Container::Horizontal({save, apply})});
     return Renderer(controls, [this, bindAddress, port, token, timeout, capacity,
+                               relayEnabled, relayPortStart, relayPortEnd,
                                logLevel, logFile, save, apply] {
         auto row = [](const std::string& label, Component component) {
             return hbox({text(label) | size(WIDTH, EQUAL, 28),
@@ -52,6 +57,11 @@ ftxui::Component RendezvousTuiApp::BuildConfigTab() {
             row("Authentication token", token),
             row("Client timeout (5..3600s)", timeout),
             row("Clients per room (2..32)", capacity),
+            separator(),
+            text("IPv4 relay") | bold,
+            relayEnabled->Render(),
+            row("Relay UDP port start", relayPortStart),
+            row("Relay UDP port end", relayPortEnd),
             separator(),
             row("Log level", logLevel),
             row("Log file", logFile),
@@ -79,6 +89,11 @@ bool RendezvousTuiApp::ReadConfigEditor(RendezvousConfig* config,
         *error = "max_clients_per_room must be 2..32";
         return false;
     }
+    if (!ParseUInt16(relayPortStartText_, &config->ipv4RelayPortStart)
+        || !ParseUInt16(relayPortEndText_, &config->ipv4RelayPortEnd)) {
+        *error = "ipv4_relay_port_start/end must be valid UDP ports";
+        return false;
+    }
     config->logLevel = static_cast<LogLevel>(logLevelIndex_);
     return ValidateRendezvousConfig(*config, error);
 }
@@ -87,6 +102,8 @@ void RendezvousTuiApp::SyncConfigEditor() {
     portText_ = std::to_string(config_.port);
     timeoutText_ = std::to_string(config_.clientTimeoutSeconds);
     capacityText_ = std::to_string(config_.maxClientsPerRoom);
+    relayPortStartText_ = std::to_string(config_.ipv4RelayPortStart);
+    relayPortEndText_ = std::to_string(config_.ipv4RelayPortEnd);
     logLevelIndex_ = static_cast<int>(config_.logLevel);
 }
 

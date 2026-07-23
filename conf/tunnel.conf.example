@@ -39,6 +39,10 @@ ipv6_probe_host=2400:3200::1
 ipv6_probe_port=53
 ipv6_fallback_timeout=15
 
+# Optional final fallback through the rendezvous server's IPv4 UDP relay.
+# Both peers and the rendezvous server must enable relay support.
+ipv4_relay_fallback_enabled=false
+
 adapter_name=EasyTunnel
 local_tun_ipv4=10.66.0.1
 tun_prefix=24

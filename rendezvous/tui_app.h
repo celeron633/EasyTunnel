@@ -43,6 +43,8 @@ private:
     std::string portText_;
     std::string timeoutText_;
     std::string capacityText_;
+    std::string relayPortStartText_;
+    std::string relayPortEndText_;
     std::vector<std::string> logLevels_{"Debug", "Info", "Warn", "Error"};
     int logLevelIndex_ = 1;
     std::string configMessage_;

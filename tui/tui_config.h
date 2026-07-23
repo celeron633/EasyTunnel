@@ -27,6 +27,7 @@ struct TuiConfig {
     std::string ipv6ProbeHost = "2400:3200::1";
     int ipv6ProbePort = 53;
     int ipv6FallbackTimeout = 15;
+    bool ipv4RelayFallbackEnabled = false;
     int logLevel = 1;
     int rendezvousRetryDelaySeconds = 5;
     bool autoWaitForPeer = false;

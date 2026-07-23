@@ -15,6 +15,7 @@ struct RendezvousServerSnapshot {
     std::string lastError;
     uint64_t receivedDatagrams = 0;
     uint64_t controlMessages = 0;
+    RendezvousRelaySnapshot relay;
     std::vector<RendezvousRoomSnapshot> rooms;
 };
 

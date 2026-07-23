@@ -120,6 +120,8 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     StringValue(json, "ipv6_probe_host", &config->ipv6ProbeHost);
     IntValue(json, "ipv6_probe_port", &config->ipv6ProbePort);
     IntValue(json, "ipv6_fallback_timeout", &config->ipv6FallbackTimeout);
+    BoolValue(json, "ipv4_relay_fallback_enabled",
+              &config->ipv4RelayFallbackEnabled);
     IntValue(json, "log_level", &config->logLevel);
     IntValue(json, "rendezvous_retry_delay_seconds",
              &config->rendezvousRetryDelaySeconds);
@@ -184,6 +186,8 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "  \"ipv6_probe_host\": \"" << Escape(config.ipv6ProbeHost) << "\",\n"
         << "  \"ipv6_probe_port\": " << config.ipv6ProbePort << ",\n"
         << "  \"ipv6_fallback_timeout\": " << config.ipv6FallbackTimeout << ",\n"
+        << "  \"ipv4_relay_fallback_enabled\": "
+        << (config.ipv4RelayFallbackEnabled ? "true" : "false") << ",\n"
         << "  \"log_level\": " << config.logLevel << ",\n"
         << "  \"rendezvous_retry_delay_seconds\": "
         << config.rendezvousRetryDelaySeconds << ",\n"

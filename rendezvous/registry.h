@@ -24,6 +24,13 @@ struct RendezvousRoomSnapshot {
     std::vector<RendezvousClientSnapshot> clients;
 };
 
+struct RendezvousRelaySnapshot {
+    uint64_t activeSessions = 0;
+    uint64_t receivedDatagrams = 0;
+    uint64_t forwardedDatagrams = 0;
+    uint64_t forwardedBytes = 0;
+};
+
 class RendezvousRegistry {
 public:
     RendezvousRegistry(socket_t sock, const RendezvousConfig& config);
@@ -37,6 +44,7 @@ public:
                 std::chrono::steady_clock::time_point now);
     std::vector<RendezvousRoomSnapshot> Snapshot(
         std::chrono::steady_clock::time_point now);
+    RendezvousRelaySnapshot RelaySnapshot();
 
 private:
     struct Impl;

@@ -83,6 +83,20 @@ bool ReadUInt16(const std::string& json, const std::string& key, uint16_t* value
     }
 }
 
+bool ReadBool(const std::string& json, const std::string& key, bool* value) {
+    const size_t pos = ValueStart(json, key);
+    if (pos == std::string::npos) return false;
+    if (json.compare(pos, 4, "true") == 0) {
+        *value = true;
+        return true;
+    }
+    if (json.compare(pos, 5, "false") == 0) {
+        *value = false;
+        return true;
+    }
+    return false;
+}
+
 bool WriteConfig(const std::string& path, const RendezvousConfig& config,
                  std::string* error) {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -97,6 +111,10 @@ bool WriteConfig(const std::string& path, const RendezvousConfig& config,
         << "  \"auth_token\": \"" << EscapeJson(config.authToken) << "\",\n"
         << "  \"client_timeout_seconds\": " << config.clientTimeoutSeconds << ",\n"
         << "  \"max_clients_per_room\": " << config.maxClientsPerRoom << ",\n"
+        << "  \"ipv4_relay_enabled\": "
+        << (config.ipv4RelayEnabled ? "true" : "false") << ",\n"
+        << "  \"ipv4_relay_port_start\": " << config.ipv4RelayPortStart << ",\n"
+        << "  \"ipv4_relay_port_end\": " << config.ipv4RelayPortEnd << ",\n"
         << "  \"log_level\": \"" << ConfigLogLevel(config.logLevel) << "\",\n"
         << "  \"log_file\": \"" << EscapeJson(config.logFile) << "\"\n"
         << "}\n";
@@ -141,6 +159,13 @@ bool LoadOrCreateRendezvousConfig(const std::string& path, RendezvousConfig* con
     if (ReadUInt16(json, "max_clients_per_room", &number)) {
         config->maxClientsPerRoom = number;
     }
+    ReadBool(json, "ipv4_relay_enabled", &config->ipv4RelayEnabled);
+    if (ReadUInt16(json, "ipv4_relay_port_start", &number)) {
+        config->ipv4RelayPortStart = number;
+    }
+    if (ReadUInt16(json, "ipv4_relay_port_end", &number)) {
+        config->ipv4RelayPortEnd = number;
+    }
     if (ReadString(json, "log_level", &text)
         && !TryParseLogLevel(text, &config->logLevel)) {
         *error = "Invalid log_level in " + path + ": " + text;
@@ -166,6 +191,11 @@ bool ValidateRendezvousConfig(const RendezvousConfig& config, std::string* error
     }
     if (config.maxClientsPerRoom < 2 || config.maxClientsPerRoom > 32) {
         *error = "max_clients_per_room must be 2..32";
+        return false;
+    }
+    if (config.ipv4RelayPortStart == 0 || config.ipv4RelayPortEnd == 0
+        || config.ipv4RelayPortStart > config.ipv4RelayPortEnd) {
+        *error = "ipv4_relay_port_start/end must define a valid UDP port range";
         return false;
     }
     return true;

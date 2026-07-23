@@ -106,10 +106,12 @@ EasyTunnel_tui.json
 - 日志等级
 - 会合重试延迟
 - Auto wait for peer
+- IPv6 Fallback 和 IPv4 Relay Fallback
 
 `auth_token` 为明文，请限制配置文件权限。
 
-默认精确端口打洞和 NAT4 多 socket 回退的完整状态机见 [nat-traversal.md](nat-traversal.md)。
+默认精确端口打洞和 NAT4 多 socket 回退的完整状态机见 [nat-traversal.md](nat-traversal.md)，
+最终服务器代理回退见 [ipv4-relay-fallback.md](ipv4-relay-fallback.md)。
 
 ## 自动等待
 

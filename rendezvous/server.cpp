@@ -24,6 +24,7 @@ void RendezvousServer::UpdateSnapshot(RendezvousRegistry* registry) {
     std::lock_guard<std::mutex> lock(snapshotMutex_);
     if (registry != nullptr) {
         snapshot_.rooms = registry->Snapshot(std::chrono::steady_clock::now());
+        snapshot_.relay = registry->RelaySnapshot();
     }
 }
 
@@ -59,6 +60,10 @@ int RendezvousServer::Run() {
         + config_.bindAddress + ":" + std::to_string(config_.port) + " (IPv4/UDP)");
     Log(LogLevel::Info, "Room capacity=" + std::to_string(config_.maxClientsPerRoom)
         + ", client timeout=" + std::to_string(config_.clientTimeoutSeconds) + "s");
+    Log(LogLevel::Info, "IPv4 relay="
+        + std::string(config_.ipv4RelayEnabled ? "enabled" : "disabled")
+        + ", UDP ports=" + std::to_string(config_.ipv4RelayPortStart)
+        + "-" + std::to_string(config_.ipv4RelayPortEnd));
 
     RendezvousRegistry registry(sock, config_);
     {

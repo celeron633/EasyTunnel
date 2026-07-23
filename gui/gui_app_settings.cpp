@@ -248,6 +248,14 @@ void GuiApp::RenderSettingsTab() {
         EndForm();
     }
     ImGui::Spacing();
+    ImGui::SeparatorText("IPv4 Relay Fallback");
+    if (BeginForm("##Ipv4RelayFallbackSettings")) {
+        FormField("Enable Fallback");
+        configChanged |= ImGui::Checkbox(
+            "##Ipv4RelayFallback", &ipv4RelayFallbackEnabled_);
+        EndForm();
+    }
+    ImGui::Spacing();
     ImGui::SeparatorText("Misc");
     if (BeginForm("##MiscSettings")) {
         FormField("1 KiB/s dummy traffic");
@@ -299,6 +307,8 @@ bool GuiApp::LoadGuiConfig() {
     if (JsonString(json, "ipv6_probe_host", &text)) CopyToBuffer(text, ipv6ProbeHost_);
     JsonInt(json, "ipv6_probe_port", &ipv6ProbePort_);
     JsonInt(json, "ipv6_fallback_timeout", &ipv6FallbackTimeout_);
+    JsonBool(json, "ipv4_relay_fallback_enabled",
+             &ipv4RelayFallbackEnabled_);
     JsonInt(json, "log_level", &logLevelIdx_);
     JsonInt(json, "rendezvous_retry_delay_seconds", &rendezvousRetryDelaySeconds_);
     JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
@@ -364,6 +374,8 @@ bool GuiApp::SaveGuiConfig() {
         << "  \"ipv6_probe_host\": \"" << JsonEscape(ipv6ProbeHost_) << "\",\n"
         << "  \"ipv6_probe_port\": " << ipv6ProbePort_ << ",\n"
         << "  \"ipv6_fallback_timeout\": " << ipv6FallbackTimeout_ << ",\n"
+        << "  \"ipv4_relay_fallback_enabled\": "
+        << (ipv4RelayFallbackEnabled_ ? "true" : "false") << ",\n"
         << "  \"log_level\": " << logLevelIdx_ << ",\n"
         << "  \"rendezvous_retry_delay_seconds\": "
         << rendezvousRetryDelaySeconds_ << ",\n"

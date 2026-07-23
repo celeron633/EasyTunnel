@@ -270,6 +270,7 @@ bool GuiApp::StartConnection(const std::string& targetPeerId) {
     cfg.ipv6_probe_host = ipv6ProbeHost_;
     cfg.ipv6_probe_port = static_cast<uint16_t>(ipv6ProbePort_);
     cfg.ipv6_fallback_timeout = static_cast<uint16_t>(ipv6FallbackTimeout_);
+    cfg.ipv4_relay_fallback_enabled = ipv4RelayFallbackEnabled_;
     TryParseLogLevel(kLogLevels[logLevelIdx_], &cfg.log_level);
     const bool started = engine_.Start(cfg);
     if (started) waitingForPeer_.store(targetPeerId.empty());

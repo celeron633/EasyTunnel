@@ -50,6 +50,8 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto dummyTraffic = Checkbox("1 KiB/s dummy traffic", &config_.dummyTrafficEnabled);
     auto ipv6Fallback = Checkbox("Enable IPv6 fallback", &config_.ipv6FallbackEnabled);
     auto ipv6Inbound = Checkbox("Accept inbound IPv6 UDP", &config_.ipv6AcceptInbound);
+    auto ipv4RelayFallback = Checkbox("Enable IPv4 relay fallback",
+                                      &config_.ipv4RelayFallbackEnabled);
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
     auto logLevel = Radiobox(&logLevels_, &config_.logLevel);
 
@@ -59,7 +61,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
         punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
         nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic,
         ipv6Fallback, ipv6Inbound, ipv6ListenPort, ipv6ProbeHost,
-        ipv6ProbePort, ipv6FallbackTimeout,
+        ipv6ProbePort, ipv6FallbackTimeout, ipv4RelayFallback,
     });
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
@@ -67,7 +69,8 @@ ftxui::Component TuiApp::BuildSettingsTab() {
          nat4PeerPortOffset, nat4RoundTimeout, logLevel, serverAddress,
          serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
          autoWait, ipv6Fallback, ipv6Inbound, ipv6ListenPort,
-         ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout] {
+         ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout,
+         ipv4RelayFallback] {
         auto row = [](const std::string& label, Component component) {
             return hbox({text(label) | size(WIDTH, EQUAL, 26), component->Render() | flex});
         };
@@ -109,6 +112,9 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             row("IPv6 Probe Host", ipv6ProbeHost),
             row("IPv6 Probe TCP Port", ipv6ProbePort),
             row("IPv6 Timeout Seconds", ipv6FallbackTimeout),
+            separator(),
+            text("IPv4 Relay Fallback") | bold,
+            ipv4RelayFallback->Render(),
             separator(),
             text("Misc") | bold,
             dummyTraffic->Render(),
@@ -179,6 +185,7 @@ std::string TuiApp::ConfigSignature() const {
               << config_.ipv6FallbackEnabled << '\n' << config_.ipv6AcceptInbound << '\n'
               << ipv6ListenPortText_ << '\n' << config_.ipv6ProbeHost << '\n'
               << ipv6ProbePortText_ << '\n' << ipv6FallbackTimeoutText_ << '\n'
+              << config_.ipv4RelayFallbackEnabled << '\n'
               << config_.logLevel << '\n' << rendezvousRetryDelayText_ << '\n'
               << config_.dummyTrafficEnabled << '\n'
               << config_.autoWaitForPeer;

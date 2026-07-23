@@ -72,12 +72,18 @@ ftxui::Component RendezvousTuiApp::BuildDashboardTab() {
                 filler(),
                 text("Rooms ") | bold, text(std::to_string(snapshot_.rooms.size())),
                 text("   Clients ") | bold, text(std::to_string(clients)),
+                text("   Relays ") | bold,
+                text(std::to_string(snapshot_.relay.activeSessions)),
             }),
             hbox({
                 text("Datagrams ") | bold,
                 text(std::to_string(snapshot_.receivedDatagrams)),
                 text("   Messages ") | bold,
                 text(std::to_string(snapshot_.controlMessages)),
+                text("   Relay packets ") | bold,
+                text(std::to_string(snapshot_.relay.forwardedDatagrams)),
+                text("   Relay bytes ") | bold,
+                text(std::to_string(snapshot_.relay.forwardedBytes)),
                 filler(), scroll->Render() | size(WIDTH, EQUAL, 32),
             }),
         };

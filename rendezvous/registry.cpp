@@ -8,6 +8,7 @@
 
 #include "../log.h"
 #include "../nat_protocol.h"
+#include "ipv4_relay_app.h"
 
 namespace {
 struct Client {
@@ -97,10 +98,11 @@ bool IsIpv6Gua(const in6_addr& address) {
 
 struct RendezvousRegistry::Impl {
     Impl(socket_t socket, const RendezvousConfig& settings)
-        : sock(socket), config(settings) {}
+        : sock(socket), config(settings), relayApp(socket, settings) {}
 
     socket_t sock;
     RendezvousConfig config;
+    Ipv4RelayApp relayApp;
     std::unordered_map<std::string, Room> rooms;
 
     bool Authorized(const std::string& roomId, const std::string& nodeId,
@@ -272,6 +274,36 @@ struct RendezvousRegistry::Impl {
                      currentRole});
     }
 
+    void HandleIpv4RelayJoin(Room& room, Room::iterator current,
+                             const UdpEndpoint& source,
+                             const std::vector<std::string>& fields,
+                             std::chrono::steady_clock::time_point now) {
+        const auto target = room.find(fields[2]);
+        if (target == current) {
+            SendMessage(sock, source, "ERROR", {"peer-not-found"});
+            return;
+        }
+        if (target == room.end()) {
+            current->second.endpoint = source;
+            current->second.seen = now;
+            current->second.pairedWith = fields[2];
+            SendMessage(sock, source, "RELAY_WAIT");
+            return;
+        }
+        if ((!current->second.pairedWith.empty()
+                && current->second.pairedWith != target->first)
+            || (!target->second.pairedWith.empty()
+                && target->second.pairedWith != current->first)) {
+            SendMessage(sock, source, "ERROR", {"peer-busy"});
+            return;
+        }
+        current->second.endpoint = source;
+        current->second.seen = now;
+        current->second.pairedWith = target->first;
+        target->second.pairedWith = current->first;
+        relayApp.HandleJoin(source, fields[0], current->first, target->first, now);
+    }
+
     void HandleTunIp(const UdpEndpoint& source,
                      const std::vector<std::string>& fields,
                      std::chrono::steady_clock::time_point now) {
@@ -313,9 +345,10 @@ struct RendezvousRegistry::Impl {
         const bool isUnregister = type == "UNREG" && fields.size() == 3;
         const bool isNat4Join = type == "NAT4_JOIN" && fields.size() == 5;
         const bool isIpv6Join = type == "V6_JOIN" && fields.size() == 7;
+        const bool isIpv4RelayJoin = type == "RELAY_JOIN" && fields.size() == 4;
         const bool isTunIp = type == "TUN_IP" && fields.size() == 4;
         if (!isRegister && !isConnect && !isUnregister && !isNat4Join
-            && !isIpv6Join && !isTunIp) return;
+            && !isIpv6Join && !isIpv4RelayJoin && !isTunIp) return;
 
         if (isTunIp) {
             HandleTunIp(source, fields, now);
@@ -324,10 +357,12 @@ struct RendezvousRegistry::Impl {
 
         const std::string& roomId = fields[0];
         const std::string& nodeId = fields[1];
-        const std::string targetId = (isConnect || isNat4Join || isIpv6Join)
+        const std::string targetId = (isConnect || isNat4Join || isIpv6Join
+                                      || isIpv4RelayJoin)
             ? fields[2] : "";
         const std::string& token = fields[isIpv6Join ? 6
-            : (isNat4Join ? 4 : (isConnect ? 3 : 2))];
+            : (isNat4Join ? 4
+                : ((isConnect || isIpv4RelayJoin) ? 3 : 2))];
         if (!Authorized(roomId, nodeId, targetId, token)) {
             Log(LogLevel::Warn, "Rejected " + type + " from " + FormatUdpEndpoint(source));
             SendMessage(sock, source, "ERROR", {"unauthorized"});
@@ -343,6 +378,7 @@ struct RendezvousRegistry::Impl {
         if (isUnregister) {
             const auto existing = room.find(nodeId);
             if (existing != room.end() && SameUdpEndpoint(existing->second.endpoint, source)) {
+                relayApp.RemovePeer(roomId, nodeId);
                 room.erase(existing);
                 for (auto& entry : room) {
                     if (entry.second.pairedWith == nodeId) {
@@ -381,6 +417,8 @@ struct RendezvousRegistry::Impl {
             HandleNat4Join(room, current, source, fields);
         } else if (isIpv6Join) {
             HandleIpv6Join(room, current, source, fields);
+        } else if (isIpv4RelayJoin) {
+            HandleIpv4RelayJoin(room, current, source, fields, now);
         } else {
             HandleConnect(room, current, source, fields);
         }
@@ -400,6 +438,12 @@ void RendezvousRegistry::Handle(const UdpEndpoint& source, const std::string& ty
     } else {
         impl_->HandleSession(source, type, fields, now);
     }
+}
+
+RendezvousRelaySnapshot RendezvousRegistry::RelaySnapshot() {
+    const Ipv4RelayAppSnapshot relay = impl_->relayApp.Snapshot();
+    return {relay.activeSessions, relay.receivedDatagrams,
+            relay.forwardedDatagrams, relay.forwardedBytes};
 }
 
 std::vector<RendezvousRoomSnapshot> RendezvousRegistry::Snapshot(

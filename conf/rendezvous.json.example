@@ -4,6 +4,9 @@
   "auth_token": "change-this-secret",
   "client_timeout_seconds": 60,
   "max_clients_per_room": 32,
+  "ipv4_relay_enabled": false,
+  "ipv4_relay_port_start": 40000,
+  "ipv4_relay_port_end": 40100,
   "log_level": "Info",
   "log_file": "EasyTunnel_rendezvous.log"
 }

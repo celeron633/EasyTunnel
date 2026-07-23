@@ -377,4 +377,5 @@ NAT4 round 屏障依赖 `NAT4_JOIN`、`NAT4_WAIT` 和 `NAT4_PEER`，因此客户
 - 两端进入相同 round 的时间差持续超过单轮超时；
 - NAT 映射在握手或连接期间被主动回收。
 
-当前没有 UDP relay 回退。打洞总超时后连接进入 Error。
+如果启用 IPv4 Relay Fallback，以上直连路径均失败后会继续请求会合服务器代理；否则
+连接进入 Error。Relay 的线程模型和协议见 [ipv4-relay-fallback.md](ipv4-relay-fallback.md)。

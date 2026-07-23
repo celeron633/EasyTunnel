@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "hexdump.h"
+#include "ipv4_relay_fallback.h"
 #include "ipv6_fallback.h"
 #include "log.h"
 #include "nat_traversal.h"
@@ -129,7 +130,9 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ ", ipv6_fallback=" + (cfg.ipv6_fallback_enabled ? "enabled" : "disabled")
 		+ ", ipv6_accept_inbound=" + (cfg.ipv6_accept_inbound ? "true" : "false")
 		+ ", ipv6_probe=" + cfg.ipv6_probe_host + ":"
-		+ std::to_string(cfg.ipv6_probe_port));
+		+ std::to_string(cfg.ipv6_probe_port)
+		+ ", ipv4_relay_fallback="
+		+ (cfg.ipv4_relay_fallback_enabled ? "enabled" : "disabled"));
 
 	socket_t sock = kInvalidSocket;
 	UdpEndpoint server{};
@@ -164,7 +167,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		bool traversalConnected = DiscoverAndPunch(
 			&sock, cfg, server, running_, &peer, &matchedPeerId, &socketError);
 		if (!traversalConnected) {
-			const std::string ipv4Error = socketError;
+			std::string fallbackErrors = socketError;
 			if (running_.load() && cfg.ipv6_fallback_enabled
 				&& !matchedPeerId.empty()) {
 				SetState(TunnelState::Connecting, "IPv4 failed; trying IPv6 fallback");
@@ -172,9 +175,20 @@ void TunnelEngine::WorkerThread(Config cfg) {
 				traversalConnected = DiscoverAndConnectIpv6(
 					&sock, cfg, server, running_, matchedPeerId, &peer, &ipv6Error);
 				if (!traversalConnected) {
-					socketError = ipv4Error + "; " + ipv6Error;
+					fallbackErrors += "; " + ipv6Error;
 				}
 			}
+			if (!traversalConnected && running_.load()
+				&& cfg.ipv4_relay_fallback_enabled
+				&& !matchedPeerId.empty()) {
+				SetState(TunnelState::Connecting,
+					"Direct paths failed; trying IPv4 relay fallback");
+				std::string relayError;
+				traversalConnected = DiscoverAndConnectIpv4Relay(
+					&sock, cfg, server, running_, matchedPeerId, &peer, &relayError);
+				if (!traversalConnected) fallbackErrors += "; " + relayError;
+			}
+			socketError = fallbackErrors;
 			if (!traversalConnected && !running_.load()) {
 				setExitReason("stop requested during NAT traversal");
 				Log(LogLevel::Debug, getExitReason() + ": " + socketError);

@@ -47,6 +47,7 @@ set(COMMON_SOURCES
     nat_traversal.cpp
     nat4_traversal.cpp
     ipv6_fallback.cpp
+    ipv4_relay_fallback.cpp
 )
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,7 @@ add_executable(EasyTunnel_rendezvous
     rendezvous/main.cpp
     rendezvous/server.cpp
     rendezvous/registry.cpp
+    rendezvous/ipv4_relay_app.cpp
     rendezvous/config.cpp
     nat_protocol.cpp util.cpp log.cpp config.cpp)
 if(BUILD_TUI)
@@ -99,6 +101,7 @@ if(BUILD_TUI)
         rendezvous/tui_log_tab.cpp
         rendezvous/server.cpp
         rendezvous/registry.cpp
+        rendezvous/ipv4_relay_app.cpp
         rendezvous/config.cpp
         nat_protocol.cpp util.cpp log.cpp config.cpp)
     target_include_directories(EasyTunnel_rendezvous_tui PRIVATE ${CMAKE_SOURCE_DIR})

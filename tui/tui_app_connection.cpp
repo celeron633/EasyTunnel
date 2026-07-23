@@ -185,6 +185,7 @@ Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
         std::clamp(ParseInt(ipv6ProbePortText_, 53), 1, 65535));
     output.ipv6_fallback_timeout = static_cast<uint16_t>(
         std::clamp(ParseInt(ipv6FallbackTimeoutText_, 15), 1, 120));
+    output.ipv4_relay_fallback_enabled = config_.ipv4RelayFallbackEnabled;
     TryParseLogLevel(logLevels_[std::clamp(config_.logLevel, 0, 3)], &output.log_level);
     return output;
 }
