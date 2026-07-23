@@ -41,6 +41,30 @@ UdpEndpoint WithPort(const UdpEndpoint& endpoint, uint16_t port) {
     reinterpret_cast<sockaddr_in*>(&result.addr)->sin_port = htons(port);
     return result;
 }
+
+std::string RelayServerError(const std::vector<std::string>& fields) {
+    if (fields.empty()) return "IPv4 relay was rejected by the rendezvous server";
+    const std::string& code = fields[0];
+    if (code == "ipv4-relay-disabled") {
+        return "IPv4 relay is disabled on the rendezvous server";
+    }
+    if (code == "ipv4-relay-port-exhausted") {
+        return "No IPv4 relay UDP port is available on the rendezvous server";
+    }
+    if (code == "ipv4-relay-resource-unavailable") {
+        return "The rendezvous server cannot create an IPv4 relay session";
+    }
+    if (code == "peer-not-found") {
+        return "The selected peer is no longer available for IPv4 relay";
+    }
+    if (code == "peer-busy") {
+        return "The selected peer is paired with another client";
+    }
+    if (code == "unauthorized") {
+        return "The rendezvous server rejected IPv4 relay authentication";
+    }
+    return "IPv4 relay was rejected by the rendezvous server: " + code;
+}
 }  // namespace
 
 bool DiscoverAndConnectIpv4Relay(
@@ -113,8 +137,7 @@ bool DiscoverAndConnectIpv4Relay(
 
         if (SameUdpEndpoint(source, rendezvousServer)) {
             if (type == "ERROR") {
-                *error = fields.empty() ? "IPv4 relay rejected by rendezvous"
-                    : "IPv4 relay: " + fields[0];
+                *error = RelayServerError(fields);
                 return false;
             }
             if (type != "RELAY_OFFER" || fields.size() != 4
