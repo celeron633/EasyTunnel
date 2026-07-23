@@ -11,6 +11,7 @@
 #include "log.h"
 #include "nat4_traversal.h"
 #include "nat_traversal.h"
+#include "peer_selection.h"
 #include "rendezvous_client.h"
 
 #ifdef _WIN32
@@ -163,7 +164,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		SetState(TunnelState::Connecting,
 			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
 			                           : "Connecting to " + cfg.target_peer_id);
-		bool traversalConnected = DiscoverPeer(
+		bool traversalConnected = SelectPeer(
 			sock, cfg, server, running_, &peer, &matchedPeerId, &socketError);
 		if (traversalConnected) {
 			traversalConnected = false;
@@ -175,12 +176,12 @@ void TunnelEngine::WorkerThread(Config cfg) {
 				std::string strategyError;
 				switch (strategy.mode) {
 					case TraversalMode::Nat:
-						traversalConnected = PunchPeer(
+						traversalConnected = PunchNat(
 							&sock, cfg, server, running_, matchedPeerId,
 							&peer, &strategyError);
 						break;
 					case TraversalMode::Nat4:
-						traversalConnected = DiscoverAndPunchNat4(
+						traversalConnected = PunchNat4(
 							&sock, cfg, server, running_, matchedPeerId,
 							&peer, &strategyError);
 						break;

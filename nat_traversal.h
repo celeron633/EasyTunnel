@@ -7,18 +7,11 @@
 
 constexpr size_t kPeerDummyTrafficPacketSize = 1024;
 
-// Registers with the rendezvous server and selects a peer without committing
-// to any particular traversal strategy.
-bool DiscoverPeer(socket_t sock, const Config& cfg,
-                  const UdpEndpoint& server, const std::atomic<bool>& running,
-                  UdpEndpoint* peer, std::string* matchedPeerId,
-                  std::string* error);
-
 // Attempts ordinary exact-port IPv4 NAT traversal with an already selected peer.
-bool PunchPeer(socket_t* sock, const Config& cfg,
-               const UdpEndpoint& server, const std::atomic<bool>& running,
-               const std::string& matchedPeerId,
-               UdpEndpoint* peer, std::string* error);
+bool PunchNat(socket_t* sock, const Config& cfg,
+              const UdpEndpoint& server, const std::atomic<bool>& running,
+              const std::string& matchedPeerId,
+              UdpEndpoint* peer, std::string* error);
 
 // Describes how an incoming UDP packet was handled by HandlePeerControl.
 struct PeerControlResult {

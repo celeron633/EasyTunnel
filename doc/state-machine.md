@@ -7,6 +7,7 @@
 相关实现：
 
 - 客户端总控：[tunnel_engine.cpp](../tunnel_engine.cpp)
+- Peer 选择：[peer_selection.cpp](../peer_selection.cpp)
 - IPv4/NAT4：[nat_traversal.cpp](../nat_traversal.cpp)、[nat4_traversal.cpp](../nat4_traversal.cpp)
 - IPv6 Fallback：[ipv6_fallback.cpp](../ipv6_fallback.cpp)
 - IPv4 Relay Fallback：[ipv4_relay_fallback.cpp](../ipv4_relay_fallback.cpp)

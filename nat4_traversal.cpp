@@ -114,11 +114,11 @@ int WaitReadable(const std::vector<socket_t>& pool, fd_set* readable) {
 }
 }  // namespace
 
-bool DiscoverAndPunchNat4(socket_t* sock, const Config& cfg,
-                          const UdpEndpoint& rendezvousServer,
-                          const std::atomic<bool>& running,
-                          const std::string& expectedPeerId,
-                          UdpEndpoint* peer, std::string* error) {
+bool PunchNat4(socket_t* sock, const Config& cfg,
+               const UdpEndpoint& rendezvousServer,
+               const std::atomic<bool>& running,
+               const std::string& expectedPeerId,
+               UdpEndpoint* peer, std::string* error) {
     if (expectedPeerId.empty()) {
         *error = "NAT4 traversal requires a selected peer";
         return false;

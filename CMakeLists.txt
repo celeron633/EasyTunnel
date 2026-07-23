@@ -57,6 +57,7 @@ set(COMMON_SOURCES
     tunnel_engine.cpp
     nat_protocol.cpp
     rendezvous_client.cpp
+    peer_selection.cpp
     nat_traversal.cpp
     nat4_traversal.cpp
     ipv6_fallback.cpp

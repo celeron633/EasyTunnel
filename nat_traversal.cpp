@@ -1,8 +1,6 @@
 #include "nat_traversal.h"
 
 #include <chrono>
-#include <cstring>
-#include <thread>
 #include <vector>
 
 #include "log.h"
@@ -32,138 +30,13 @@ bool SameIpv4Address(const UdpEndpoint& a, const UdpEndpoint& b) {
     return aa->sin_addr.s_addr == ba->sin_addr.s_addr;
 }
 
-const char* RendezvousEventName(RendezvousEventType type) {
-    switch (type) {
-        case RendezvousEventType::None: return "None";
-        case RendezvousEventType::Registered: return "Registered";
-        case RendezvousEventType::PeerUnavailable: return "PeerUnavailable";
-        case RendezvousEventType::Peer: return "Peer";
-        case RendezvousEventType::Nat4Wait: return "Nat4Wait";
-        case RendezvousEventType::Nat4Peer: return "Nat4Peer";
-        case RendezvousEventType::Error: return "Error";
-        default: return "Unknown";
-    }
-}
-
-std::string LocalSocketEndpoint(socket_t sock) {
-    sockaddr_storage address{};
-    socket_len_t len = static_cast<socket_len_t>(sizeof(address));
-    if (getsockname(sock, reinterpret_cast<sockaddr*>(&address), &len) != 0) {
-        return "unknown (getsockname err=" + std::to_string(GetSocketError()) + ")";
-    }
-    return FormatUdpEndpoint(FromSockaddr(address, len));
-}
-
-long long MillisecondsRemaining(std::chrono::steady_clock::time_point deadline) {
-    if (deadline == (std::chrono::steady_clock::time_point::max)()) return -1;
-    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-        deadline - std::chrono::steady_clock::now()).count();
-    return remaining > 0 ? static_cast<long long>(remaining) : 0LL;
-}
-
 }  // namespace
 
-bool DiscoverPeer(socket_t sock, const Config& cfg,
-                  const UdpEndpoint& server, const std::atomic<bool>& running,
-                  UdpEndpoint* peer, std::string* matchedPeerId,
-                  std::string* error) {
-    if (!ValidateRendezvousSession(cfg, error)) return false;
-    RendezvousClient rendezvous(cfg, server);
-    const auto selectionDeadline = std::chrono::steady_clock::now()
-        + (cfg.target_peer_id.empty() ? std::chrono::hours(24 * 365)
-                                      : std::chrono::seconds(cfg.punch_timeout));
-    auto nextProbe = std::chrono::steady_clock::time_point{};
-    std::vector<uint8_t> buffer(2048);
-    Log(LogLevel::Debug, "Peer discovery started: mode="
-        + std::string(cfg.target_peer_id.empty() ? "wait" : "connect")
-        + ", peer_id=" + cfg.peer_id
-        + (cfg.target_peer_id.empty() ? "" : ", target_peer_id=" + cfg.target_peer_id)
-        + ", selection_timeout_ms="
-        + std::to_string(static_cast<unsigned long long>(cfg.punch_timeout) * 1000ULL));
-    while (running.load()) {
-        const auto now = std::chrono::steady_clock::now();
-        if (rendezvous.ResponseTimedOut(now, error)) {
-            Log(LogLevel::Error, "Peer discovery aborted: " + *error);
-            return false;
-        }
-        if (rendezvous.HasResponded() && now >= selectionDeadline) break;
-        if (now >= nextProbe) {
-            if (!rendezvous.SendProbe(sock)) {
-                Log(LogLevel::Warn, "Failed to send rendezvous probe to "
-                    + FormatUdpEndpoint(server) + ". err="
-                    + std::to_string(GetSocketError()));
-            } else {
-                Log(LogLevel::Debug, "Sent rendezvous probe; local="
-                    + LocalSocketEndpoint(sock) + ", server="
-                    + FormatUdpEndpoint(server));
-            }
-            nextProbe = now + std::chrono::milliseconds(500);
-        }
-        sockaddr_storage sourceAddress{};
-        socket_len_t sourceLen = static_cast<socket_len_t>(sizeof(sourceAddress));
-        const int n = recvfrom(sock, reinterpret_cast<char*>(buffer.data()),
-            static_cast<int>(buffer.size()), 0,
-            reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
-        if (n < 0) {
-            const int socketError = GetSocketError();
-            if (IsRecvTimeout(socketError)) continue;
-            if (rendezvous.HandleUnreachableError(socketError, error)) {
-                Log(LogLevel::Error, "NAT traversal receive failed before rendezvous response: "
-                    + *error + ". err=" + std::to_string(socketError));
-                return false;
-            }
-            if (IsUdpDestinationUnreachable(socketError)) {
-                // ICMP port-unreachable is expected while the remote NAT mapping is
-                // still being created. Windows reports it through the next recvfrom
-                // as WSAECONNRESET (10054); retry instead of aborting the punch.
-                Log(LogLevel::Debug, "Transient UDP unreachable during NAT traversal; "
-                    "continuing. err=" + std::to_string(socketError)
-                    + ", deadline_ms="
-                    + std::to_string(MillisecondsRemaining(selectionDeadline)));
-                continue;
-            }
-            *error = "UDP receive failed during NAT traversal. err="
-                + std::to_string(socketError);
-            Log(LogLevel::Error, *error);
-            return false;
-        }
-        const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
-        const RendezvousEvent rendezvousEvent = rendezvous.HandlePacket(
-            source, buffer.data(), static_cast<size_t>(n));
-        Log(LogLevel::Debug, "Peer discovery RX: source="
-            + FormatUdpEndpoint(source) + ", bytes=" + std::to_string(n)
-            + ", rendezvous_event=" + RendezvousEventName(rendezvousEvent.type));
-        if (rendezvousEvent.type == RendezvousEventType::Error) {
-            *error = rendezvousEvent.error;
-            Log(LogLevel::Error, "Rendezvous packet rejected: " + *error);
-            return false;
-        }
-        if (rendezvousEvent.type == RendezvousEventType::Registered
-            || rendezvousEvent.type == RendezvousEventType::PeerUnavailable) {
-            continue;
-        }
-        if (rendezvousEvent.type == RendezvousEventType::Peer) {
-            if (!cfg.target_peer_id.empty()
-                && rendezvousEvent.peerId != cfg.target_peer_id) continue;
-            *peer = rendezvousEvent.peer;
-            *matchedPeerId = rendezvousEvent.peerId;
-            Log(LogLevel::Info, "Rendezvous selected peer id="
-                + *matchedPeerId + ", endpoint=" + FormatUdpEndpoint(*peer));
-            return true;
-        }
-    }
-    *error = running.load() ? "Timed out waiting for selected peer"
-                            : "Peer discovery stopped by request";
-    Log(running.load() ? LogLevel::Error : LogLevel::Debug,
-        "Peer discovery finished without a peer: " + *error);
-    return false;
-}
-
-bool PunchPeer(socket_t* sock, const Config& cfg,
-               const UdpEndpoint& server, const std::atomic<bool>& running,
-               const std::string& matchedPeerId,
-               UdpEndpoint* peer,
-               std::string* error) {
+bool PunchNat(socket_t* sock, const Config& cfg,
+              const UdpEndpoint& server, const std::atomic<bool>& running,
+              const std::string& matchedPeerId,
+              UdpEndpoint* peer,
+              std::string* error) {
     if (matchedPeerId.empty()) {
         *error = "Normal NAT traversal requires a selected peer";
         return false;

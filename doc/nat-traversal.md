@@ -7,6 +7,7 @@ NAT4 是两个可独立开关、可自由排序的策略。相关代码主要位
 
 ```text
 rendezvous_client.cpp      客户端会合协议、响应解析、超时、列表与注销
+peer_selection.cpp         注册、等待/选择目标 Peer 和初始 IPv4 端点
 nat_traversal.cpp          精确端口打洞、Peer 控制包与保活
 nat4_traversal.cpp         NAT4 socket 池和多轮重试
 rendezvous/server.cpp      会合服务器 UDP 接收循环
@@ -18,7 +19,10 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 
 `RendezvousClient` 只处理会合服务器方向的控制逻辑，包括发送 `REG`、`CONNECT`、`NAT4_JOIN`、`UNREG`，以及穿透成功后发送一次 `TUN_IP`；同时负责识别服务器来源，解析 `REGISTERED`、`PEER`、`ERROR` 和 NAT4 响应，以及判断首次响应超时。在线客户端的 `LIST` 查询和会合 UDP socket 的创建也由该模块负责。
 
-`nat_traversal.cpp` 和 `nat4_traversal.cpp` 保留 UDP 收包循环与 Peer 打洞状态机。同一个 socket 需要同时接收会合服务器控制包和 Peer 的 `PUNCH`，因此 NAT 模块按数据来源把服务器包交给 `RendezvousClient`，把 Peer 包留在打洞流程中处理。
+`peer_selection.cpp` 在所有策略之前完成注册和目标选择。`nat_traversal.cpp` 和
+`nat4_traversal.cpp` 只保留各自的 UDP 收包循环与 Peer 打洞状态机。同一个 socket
+需要同时接收会合服务器控制包和 Peer 的 `PUNCH`，因此打洞模块按数据来源把服务器包
+交给 `RendezvousClient`，把 Peer 包留在打洞流程中处理。
 
 ## 术语和适用范围
 
