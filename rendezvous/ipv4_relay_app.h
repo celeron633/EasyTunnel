@@ -4,15 +4,31 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "../util.h"
 #include "config.h"
+
+struct Ipv4RelayPeerSnapshot {
+    std::string nodeId;
+    std::string endpoint;
+    uint64_t idleSeconds = 0;
+    bool connected = false;
+};
+
+struct Ipv4RelaySessionSnapshot {
+    std::string roomId;
+    uint16_t port = 0;
+    bool ready = false;
+    Ipv4RelayPeerSnapshot peers[2];
+};
 
 struct Ipv4RelayAppSnapshot {
     uint64_t activeSessions = 0;
     uint64_t receivedDatagrams = 0;
     uint64_t forwardedDatagrams = 0;
     uint64_t forwardedBytes = 0;
+    std::vector<Ipv4RelaySessionSnapshot> sessions;
 };
 
 // Owns the rendezvous server's IPv4 UDP relay data plane. Each Peer pair gets

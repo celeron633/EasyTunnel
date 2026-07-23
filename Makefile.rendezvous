@@ -18,7 +18,8 @@ CORE_SOURCES := rendezvous/server.cpp rendezvous/registry.cpp \
 SOURCES := rendezvous/main.cpp $(CORE_SOURCES)
 OBJECTS := $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 TUI_SOURCES := rendezvous/tui_main.cpp rendezvous/tui_app.cpp \
-               rendezvous/tui_dashboard.cpp rendezvous/tui_config_tab.cpp \
+               rendezvous/tui_dashboard.cpp rendezvous/tui_relay_tab.cpp \
+               rendezvous/tui_config_tab.cpp \
                rendezvous/tui_log_tab.cpp $(CORE_SOURCES)
 TUI_OBJECTS := $(TUI_SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 DEPFILES := $(sort $(OBJECTS:.o=.d) $(TUI_OBJECTS:.o=.d))

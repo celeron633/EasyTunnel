@@ -1,9 +1,11 @@
 #include "ipv4_relay_app.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iomanip>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <thread>
@@ -85,6 +87,8 @@ struct RelaySession {
     uint16_t timeoutSeconds = 60;
     std::atomic<bool> running{true};
     std::atomic<bool> finished{false};
+    std::atomic<bool> ready{false};
+    mutable std::mutex stateMutex;
     std::thread worker;
     RelayCounters* counters = nullptr;
 };
@@ -103,7 +107,6 @@ void SendReady(RelaySession* session, int side) {
 
 void RelayWorker(RelaySession* session) {
     std::vector<uint8_t> buffer(kRelayBufferSize);
-    bool ready = false;
     Log(LogLevel::Info, "IPv4 relay worker started room=" + session->roomId
         + " peer=" + session->sides[0].nodeId
         + " target=" + session->sides[1].nodeId
@@ -135,12 +138,18 @@ void RelayWorker(RelaySession* session) {
                 && fields[0] == session->sessionId) {
                 const int side = SideIndex(*session, fields[1]);
                 if (side >= 0 && fields[2] == session->sides[side].accessKey) {
-                    session->sides[side].endpoint = source;
-                    session->sides[side].bound = true;
-                    session->sides[side].lastSeen = now;
-                    if (session->sides[0].bound && session->sides[1].bound) {
-                        if (!ready) {
-                            ready = true;
+                    bool becameReady = false;
+                    {
+                        std::lock_guard<std::mutex> lock(session->stateMutex);
+                        session->sides[side].endpoint = source;
+                        session->sides[side].bound = true;
+                        session->sides[side].lastSeen = now;
+                        if (session->sides[0].bound && session->sides[1].bound) {
+                            becameReady = !session->ready.exchange(true);
+                        }
+                    }
+                    if (session->ready.load()) {
+                        if (becameReady) {
                             Log(LogLevel::Info, "IPv4 relay ready room="
                                 + session->roomId + " peer="
                                 + session->sides[0].nodeId + " endpoint="
@@ -154,12 +163,15 @@ void RelayWorker(RelaySession* session) {
                         SendReady(session, 1 - side);
                     }
                 }
-            } else if (ready) {
+            } else if (session->ready.load()) {
                 int side = -1;
                 if (SameUdpEndpoint(source, session->sides[0].endpoint)) side = 0;
                 else if (SameUdpEndpoint(source, session->sides[1].endpoint)) side = 1;
                 if (side >= 0) {
-                    session->sides[side].lastSeen = now;
+                    {
+                        std::lock_guard<std::mutex> lock(session->stateMutex);
+                        session->sides[side].lastSeen = now;
+                    }
                     const int other = 1 - side;
                     if (Send(session->sock, session->sides[other].endpoint,
                              buffer.data(), static_cast<size_t>(received))) {
@@ -171,14 +183,17 @@ void RelayWorker(RelaySession* session) {
             }
         }
 
-        if (!ready) {
+        if (!session->ready.load()) {
             if (now - session->created
                 > std::chrono::seconds(session->timeoutSeconds)) break;
-        } else if (now - session->sides[0].lastSeen
-                       > std::chrono::seconds(session->timeoutSeconds)
-                   || now - session->sides[1].lastSeen
-                       > std::chrono::seconds(session->timeoutSeconds)) {
-            break;
+        } else {
+            std::lock_guard<std::mutex> lock(session->stateMutex);
+            if (now - session->sides[0].lastSeen
+                    > std::chrono::seconds(session->timeoutSeconds)
+                || now - session->sides[1].lastSeen
+                    > std::chrono::seconds(session->timeoutSeconds)) {
+                break;
+            }
         }
     }
 
@@ -359,5 +374,32 @@ Ipv4RelayAppSnapshot Ipv4RelayApp::Snapshot() {
     snapshot.receivedDatagrams = impl_->counters.receivedDatagrams.load();
     snapshot.forwardedDatagrams = impl_->counters.forwardedDatagrams.load();
     snapshot.forwardedBytes = impl_->counters.forwardedBytes.load();
+    const auto now = std::chrono::steady_clock::now();
+    snapshot.sessions.reserve(impl_->sessions.size());
+    for (const auto& entry : impl_->sessions) {
+        const RelaySession& session = *entry.second;
+        Ipv4RelaySessionSnapshot item;
+        item.roomId = session.roomId;
+        item.port = session.port;
+        item.ready = session.ready.load();
+        std::lock_guard<std::mutex> lock(session.stateMutex);
+        for (int side = 0; side < 2; ++side) {
+            item.peers[side].nodeId = session.sides[side].nodeId;
+            item.peers[side].connected = session.sides[side].bound;
+            if (!session.sides[side].bound) continue;
+            item.peers[side].endpoint =
+                FormatUdpEndpoint(session.sides[side].endpoint);
+            const auto idle = std::chrono::duration_cast<std::chrono::seconds>(
+                now - session.sides[side].lastSeen).count();
+            item.peers[side].idleSeconds =
+                static_cast<uint64_t>((std::max)(int64_t{0}, idle));
+        }
+        snapshot.sessions.push_back(std::move(item));
+    }
+    std::sort(snapshot.sessions.begin(), snapshot.sessions.end(),
+        [](const auto& left, const auto& right) {
+            if (left.roomId != right.roomId) return left.roomId < right.roomId;
+            return left.peers[0].nodeId < right.peers[0].nodeId;
+        });
     return snapshot;
 }

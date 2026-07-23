@@ -29,6 +29,19 @@ struct RendezvousRelaySnapshot {
     uint64_t receivedDatagrams = 0;
     uint64_t forwardedDatagrams = 0;
     uint64_t forwardedBytes = 0;
+    struct Peer {
+        std::string nodeId;
+        std::string endpoint;
+        uint64_t idleSeconds = 0;
+        bool connected = false;
+    };
+    struct Session {
+        std::string roomId;
+        uint16_t port = 0;
+        bool ready = false;
+        Peer peers[2];
+    };
+    std::vector<Session> sessions;
 };
 
 class RendezvousRegistry {

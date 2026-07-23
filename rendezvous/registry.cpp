@@ -442,8 +442,28 @@ void RendezvousRegistry::Handle(const UdpEndpoint& source, const std::string& ty
 
 RendezvousRelaySnapshot RendezvousRegistry::RelaySnapshot() {
     const Ipv4RelayAppSnapshot relay = impl_->relayApp.Snapshot();
-    return {relay.activeSessions, relay.receivedDatagrams,
-            relay.forwardedDatagrams, relay.forwardedBytes};
+    RendezvousRelaySnapshot snapshot;
+    snapshot.activeSessions = relay.activeSessions;
+    snapshot.receivedDatagrams = relay.receivedDatagrams;
+    snapshot.forwardedDatagrams = relay.forwardedDatagrams;
+    snapshot.forwardedBytes = relay.forwardedBytes;
+    snapshot.sessions.reserve(relay.sessions.size());
+    for (const auto& relaySession : relay.sessions) {
+        RendezvousRelaySnapshot::Session session;
+        session.roomId = relaySession.roomId;
+        session.port = relaySession.port;
+        session.ready = relaySession.ready;
+        for (int side = 0; side < 2; ++side) {
+            session.peers[side].nodeId = relaySession.peers[side].nodeId;
+            session.peers[side].endpoint = relaySession.peers[side].endpoint;
+            session.peers[side].idleSeconds =
+                relaySession.peers[side].idleSeconds;
+            session.peers[side].connected =
+                relaySession.peers[side].connected;
+        }
+        snapshot.sessions.push_back(std::move(session));
+    }
+    return snapshot;
 }
 
 std::vector<RendezvousRoomSnapshot> RendezvousRegistry::Snapshot(

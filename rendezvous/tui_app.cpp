@@ -37,10 +37,11 @@ bool RendezvousTuiApp::Init(std::string* error) {
 int RendezvousTuiApp::Run() {
     using namespace ftxui;
     auto dashboard = BuildDashboardTab();
+    auto relay = BuildRelayTab();
     auto config = BuildConfigTab();
     auto logs = BuildLogTab();
     auto tabs = Toggle(&tabs_, &selectedTab_);
-    auto content = Container::Tab({dashboard, config, logs}, &selectedTab_);
+    auto content = Container::Tab({dashboard, relay, config, logs}, &selectedTab_);
     auto restart = Button("Restart", [this] { RestartServer(); });
     auto quit = Button("Quit", screen_.ExitLoopClosure());
     auto controls = Container::Horizontal({tabs, restart, quit});

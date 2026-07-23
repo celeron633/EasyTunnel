@@ -24,6 +24,7 @@ public:
 
 private:
     ftxui::Component BuildDashboardTab();
+    ftxui::Component BuildRelayTab();
     ftxui::Component BuildConfigTab();
     ftxui::Component BuildLogTab();
     void StartServer();
@@ -50,9 +51,10 @@ private:
     std::string configMessage_;
     bool configMessageOk_ = true;
 
-    std::vector<std::string> tabs_{"Dashboard", "Config", "Logs"};
+    std::vector<std::string> tabs_{"Dashboard", "Relay", "Config", "Logs"};
     int selectedTab_ = 0;
     int dashboardScroll_ = 0;
+    int relayScroll_ = 0;
     RendezvousServerSnapshot snapshot_;
     std::chrono::steady_clock::time_point serverStarted_{};
 

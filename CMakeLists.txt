@@ -111,6 +111,7 @@ if(BUILD_TUI)
         rendezvous/tui_main.cpp
         rendezvous/tui_app.cpp
         rendezvous/tui_dashboard.cpp
+        rendezvous/tui_relay_tab.cpp
         rendezvous/tui_config_tab.cpp
         rendezvous/tui_log_tab.cpp
         rendezvous/server.cpp
