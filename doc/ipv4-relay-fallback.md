@@ -4,6 +4,9 @@ IPv4 Relay Fallback 是 IPv4 精确端口打洞、NAT4 socket 池和可选 IPv6 
 均未建立直连时的最终数据面。会合服务器为一对 Peer 分配一个公网 UDP 端口，并在
 独立线程中双向透传数据报。
 
+客户端、会合控制面和 Relay App 的统一状态图见
+[state-machine.md](state-machine.md)。
+
 Relay 不改变 TUN 内层协议，也不增加逐包封装。IPv4 TUN 包、`KEEPALIVE`、
 `KEEPALIVE_ACK` 和 `PADDING` 仍使用原有格式，只是网络端点由另一个 Peer 改为
 会合服务器的 relay 端口。

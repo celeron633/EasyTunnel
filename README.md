@@ -96,6 +96,7 @@ make -f Makefile.rendezvous rendezvous_tui
 
 实现文档：
 
+- [客户端与会合服务器状态机、UML 风格协商时序](doc/state-machine.md)
 - [TUN 数据面与 Windows/Linux 适配器](doc/tun.md)
 - [NAT 会合、精确端口打洞、NAT4 socket 池与故障排查](doc/nat-traversal.md)
 - [IPv6 Fallback：启用条件、角色协商、协议与故障排查](doc/ipv6-fallback.md)

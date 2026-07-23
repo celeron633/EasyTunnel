@@ -1,5 +1,8 @@
 # IPv6 Fallback
 
+跨 IPv4、IPv6 和 Relay 的客户端、服务端状态切换见
+[state-machine.md](state-machine.md)。
+
 IPv6 Fallback 是 IPv4 精确端口打洞和 NAT4 socket 池均失败后的可选数据面。
 它不改变 TUN 内层协议：TUN 中仍只转发 IPv4 包，只是把这些包封装在 Peer 之间的
 公网 IPv6 UDP 数据报中发送。

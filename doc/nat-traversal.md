@@ -2,6 +2,8 @@
 
 本文描述当前实现中的 IPv4/UDP 会合、默认精确端口打洞和 NAT4 多 socket 回退流程。相关代码主要位于：
 
+跨 IPv4、IPv6 和 Relay 的统一状态切换见 [state-machine.md](state-machine.md)。
+
 ```text
 rendezvous_client.cpp      客户端会合协议、响应解析、超时、列表与注销
 nat_traversal.cpp          精确端口打洞、Peer 控制包与保活
