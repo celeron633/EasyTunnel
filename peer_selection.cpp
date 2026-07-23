@@ -49,8 +49,10 @@ bool SelectPeer(socket_t sock, const Config& config,
                 const UdpEndpoint& server,
                 const std::atomic<bool>& running,
                 UdpEndpoint* peer, std::string* matchedPeerId,
+                std::vector<TraversalMode>* traversalModes,
                 std::string* error) {
     if (!ValidateRendezvousSession(config, error)) return false;
+    traversalModes->clear();
 
     RendezvousClient rendezvous(config, server);
     const auto selectionDeadline = std::chrono::steady_clock::now()
@@ -139,8 +141,13 @@ bool SelectPeer(socket_t sock, const Config& config,
                 || event.peerId == config.target_peer_id)) {
             *peer = event.peer;
             *matchedPeerId = event.peerId;
+            *traversalModes = event.traversalModes;
             Log(LogLevel::Info, "Rendezvous selected peer id="
-                + *matchedPeerId + ", endpoint=" + FormatUdpEndpoint(*peer));
+                + *matchedPeerId + ", endpoint=" + FormatUdpEndpoint(*peer)
+                + ", peer_capabilities="
+                + SerializeTraversalModeSequence(event.peerCapabilities)
+                + ", traversal_modes="
+                + SerializeTraversalModeSequence(*traversalModes));
             return true;
         }
     }

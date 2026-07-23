@@ -22,7 +22,8 @@ dummy_traffic_enabled=false
 punch_timeout=30
 
 # Ordered traversal strategy. Every mode must appear exactly once; use true or
-# false to enable or disable it. Both peers should use the same enabled order.
+# false to enable or disable it. Peers exchange enabled capabilities through
+# rendezvous and use their intersection in the initiator's configured order.
 # Available modes: nat, nat4, ipv6, ipv4_relay.
 traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:false
 

@@ -1,5 +1,6 @@
 #include "rendezvous_client.h"
 
+#include <algorithm>
 #include <chrono>
 #include <limits>
 #include <utility>
@@ -72,12 +73,15 @@ RendezvousClient::RendezvousClient(const Config& config,
                         + kRendezvousResponseTimeout) {}
 
 bool RendezvousClient::SendProbe(socket_t sock) const {
+    const std::string capabilities = SerializeTraversalModeSequence(
+        EnabledTraversalModes(config_.traversal_modes));
     bool sent = Send(sock, server_, MakeControlMessage("REG",
-        {config_.room_id, config_.peer_id, config_.auth_token}));
+        {config_.room_id, config_.peer_id, capabilities, config_.auth_token}));
     if (!config_.target_peer_id.empty()) {
         sent = Send(sock, server_, MakeControlMessage("CONNECT",
             {config_.room_id, config_.peer_id,
-             config_.target_peer_id, config_.auth_token})) && sent;
+             config_.target_peer_id, capabilities,
+             config_.auth_token})) && sent;
     }
     return sent;
 }
@@ -111,6 +115,19 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
     if (type == "ERROR") {
         if (!fields.empty() && fields[0] == "peer-not-found") {
             event.type = RendezvousEventType::PeerUnavailable;
+        } else if (fields.size() == 2
+                   && fields[0] == "no-common-traversal-mode") {
+            std::vector<TraversalMode> peerCapabilities;
+            std::string parseError;
+            if (!ParseTraversalModeSequence(
+                    fields[1], &peerCapabilities, &parseError)) {
+                return InvalidResponse();
+            }
+            event.type = RendezvousEventType::Error;
+            event.peerCapabilities = std::move(peerCapabilities);
+            event.error = "Peer " + config_.target_peer_id
+                + " does not support any enabled traversal mode"
+                + " (peer supports: " + fields[1] + ")";
         } else {
             event.type = RendezvousEventType::Error;
             event.error = fields.empty()
@@ -120,9 +137,26 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
         return event;
     }
     if (type == "PEER") {
-        if (fields.size() != 3
-            || !ParsePeer(fields, &event.peer, &event.peerId)) {
+        std::string parseError;
+        if (fields.size() != 5
+            || !ParsePeer(fields, &event.peer, &event.peerId)
+            || !ParseTraversalModeSequence(
+                fields[3], &event.peerCapabilities, &parseError)
+            || !ParseTraversalModeSequence(
+                fields[4], &event.traversalModes, &parseError)
+            || event.traversalModes.empty()) {
             return InvalidResponse();
+        }
+        const std::vector<TraversalMode> localCapabilities =
+            EnabledTraversalModes(config_.traversal_modes);
+        for (const TraversalMode mode : event.traversalModes) {
+            if (std::find(localCapabilities.begin(), localCapabilities.end(), mode)
+                    == localCapabilities.end()
+                || std::find(event.peerCapabilities.begin(),
+                             event.peerCapabilities.end(), mode)
+                    == event.peerCapabilities.end()) {
+                return InvalidResponse();
+            }
         }
         event.type = RendezvousEventType::Peer;
         return event;

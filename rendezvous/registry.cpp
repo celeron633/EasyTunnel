@@ -23,8 +23,19 @@ struct Client {
     uint16_t ipv6Port = 0;
     bool ipv6AcceptInbound = false;
     bool ipv6Joined = false;
+    std::vector<TraversalMode> capabilities;
+    std::vector<TraversalMode> negotiatedModes;
+    std::string pairInitiator;
 };
 using Room = std::unordered_map<std::string, Client>;
+
+void ResetPairing(Client* client) {
+    client->pairedWith.clear();
+    client->negotiatedModes.clear();
+    client->pairInitiator.clear();
+    client->nat4Joined = false;
+    client->ipv6Joined = false;
+}
 
 bool Send(socket_t sock, const UdpEndpoint& endpoint, const std::string& data) {
     return sendto(sock, data.data(), static_cast<int>(data.size()), 0,
@@ -56,11 +67,9 @@ size_t RemoveExpired(Room* room, std::chrono::steady_clock::time_point now,
         }
     }
     for (auto& entry : *room) {
-            if (!entry.second.pairedWith.empty()
+        if (!entry.second.pairedWith.empty()
             && room->find(entry.second.pairedWith) == room->end()) {
-            entry.second.pairedWith.clear();
-            entry.second.nat4Joined = false;
-            entry.second.ipv6Joined = false;
+            ResetPairing(&entry.second);
         }
     }
     return removed;
@@ -196,17 +205,69 @@ struct RendezvousRegistry::Impl {
             SendMessage(sock, source, "ERROR", {"peer-busy"});
             return;
         }
-        current->second.pairedWith = target->first;
-        target->second.pairedWith = current->first;
-        Log(LogLevel::Info, "Paired room=" + fields[0] + " peer=" + current->first
-            + " endpoint=" + FormatUdpEndpoint(source) + " target=" + target->first
-            + " endpoint=" + FormatUdpEndpoint(target->second.endpoint));
+
+        std::vector<TraversalMode> negotiatedModes;
+        std::string initiator;
+        const bool alreadyPaired =
+            current->second.pairedWith == target->first
+            && target->second.pairedWith == current->first
+            && !current->second.negotiatedModes.empty()
+            && current->second.negotiatedModes
+                == target->second.negotiatedModes;
+        if (alreadyPaired) {
+            negotiatedModes = current->second.negotiatedModes;
+            initiator = current->second.pairInitiator;
+        } else {
+            negotiatedModes = IntersectTraversalModes(
+                current->second.capabilities, target->second.capabilities);
+            if (negotiatedModes.empty()) {
+                const std::string targetCapabilities =
+                    SerializeTraversalModeSequence(target->second.capabilities);
+                Log(LogLevel::Warn, "No common traversal mode room=" + fields[0]
+                    + " peer=" + current->first
+                    + " capabilities="
+                    + SerializeTraversalModeSequence(
+                        current->second.capabilities)
+                    + " target=" + target->first
+                    + " capabilities=" + targetCapabilities);
+                SendMessage(sock, source, "ERROR",
+                    {"no-common-traversal-mode", targetCapabilities});
+                return;
+            }
+            initiator = current->first;
+            current->second.pairedWith = target->first;
+            current->second.negotiatedModes = negotiatedModes;
+            current->second.pairInitiator = initiator;
+            target->second.pairedWith = current->first;
+            target->second.negotiatedModes = negotiatedModes;
+            target->second.pairInitiator = initiator;
+        }
+
+        const std::string negotiated =
+            SerializeTraversalModeSequence(negotiatedModes);
+        Log(LogLevel::Info, "Paired room=" + fields[0]
+            + " initiator=" + initiator
+            + " peer=" + current->first
+            + " endpoint=" + FormatUdpEndpoint(source)
+            + " capabilities="
+            + SerializeTraversalModeSequence(current->second.capabilities)
+            + " target=" + target->first
+            + " endpoint=" + FormatUdpEndpoint(target->second.endpoint)
+            + " capabilities="
+            + SerializeTraversalModeSequence(target->second.capabilities)
+            + " traversal_modes=" + negotiated);
         const auto currentAddress = IpAndPort(source);
         const auto targetAddress = IpAndPort(target->second.endpoint);
         SendMessage(sock, target->second.endpoint, "PEER",
-                    {currentAddress.first, currentAddress.second, current->first});
+                    {currentAddress.first, currentAddress.second, current->first,
+                     SerializeTraversalModeSequence(
+                         current->second.capabilities),
+                     negotiated});
         SendMessage(sock, source, "PEER",
-                    {targetAddress.first, targetAddress.second, target->first});
+                    {targetAddress.first, targetAddress.second, target->first,
+                     SerializeTraversalModeSequence(
+                         target->second.capabilities),
+                     negotiated});
     }
 
     void HandleIpv6Join(Room& room, Room::iterator current,
@@ -340,8 +401,8 @@ struct RendezvousRegistry::Impl {
     void HandleSession(const UdpEndpoint& source, const std::string& type,
                        const std::vector<std::string>& fields,
                        std::chrono::steady_clock::time_point now) {
-        const bool isRegister = type == "REG" && fields.size() == 3;
-        const bool isConnect = type == "CONNECT" && fields.size() == 4;
+        const bool isRegister = type == "REG" && fields.size() == 4;
+        const bool isConnect = type == "CONNECT" && fields.size() == 5;
         const bool isUnregister = type == "UNREG" && fields.size() == 3;
         const bool isNat4Join = type == "NAT4_JOIN" && fields.size() == 5;
         const bool isIpv6Join = type == "V6_JOIN" && fields.size() == 7;
@@ -360,13 +421,32 @@ struct RendezvousRegistry::Impl {
         const std::string targetId = (isConnect || isNat4Join || isIpv6Join
                                       || isIpv4RelayJoin)
             ? fields[2] : "";
-        const std::string& token = fields[isIpv6Join ? 6
+        const size_t tokenIndex = isIpv6Join ? 6
             : (isNat4Join ? 4
-                : ((isConnect || isIpv4RelayJoin) ? 3 : 2))];
+                : (isConnect ? 4
+                    : (isIpv4RelayJoin ? 3
+                        : (isRegister ? 3 : 2))));
+        const std::string& token = fields[tokenIndex];
         if (!Authorized(roomId, nodeId, targetId, token)) {
             Log(LogLevel::Warn, "Rejected " + type + " from " + FormatUdpEndpoint(source));
             SendMessage(sock, source, "ERROR", {"unauthorized"});
             return;
+        }
+
+        std::vector<TraversalMode> capabilities;
+        if (isRegister || isConnect) {
+            const std::string& capabilityText =
+                fields[isRegister ? 2 : 3];
+            std::string capabilityError;
+            if (!IsSafeControlField(capabilityText)
+                || !ParseTraversalModeSequence(
+                    capabilityText, &capabilities, &capabilityError)) {
+                Log(LogLevel::Warn, "Rejected invalid traversal capabilities from "
+                    + FormatUdpEndpoint(source));
+                SendMessage(sock, source, "ERROR",
+                            {"invalid-traversal-capabilities"});
+                return;
+            }
         }
 
         auto& room = rooms[roomId];
@@ -382,9 +462,7 @@ struct RendezvousRegistry::Impl {
                 room.erase(existing);
                 for (auto& entry : room) {
                     if (entry.second.pairedWith == nodeId) {
-                        entry.second.pairedWith.clear();
-                        entry.second.nat4Joined = false;
-                        entry.second.ipv6Joined = false;
+                        ResetPairing(&entry.second);
                     }
                 }
                 Log(LogLevel::Info, "Unregistered peer=" + nodeId + " room=" + roomId
@@ -408,6 +486,18 @@ struct RendezvousRegistry::Impl {
         } else {
             current->second.endpoint = source;
             current->second.seen = now;
+        }
+        if (isRegister || isConnect) {
+            if (current->second.capabilities != capabilities
+                && !current->second.pairedWith.empty()) {
+                const auto peer = room.find(current->second.pairedWith);
+                if (peer != room.end()
+                    && peer->second.pairedWith == current->first) {
+                    ResetPairing(&peer->second);
+                }
+                ResetPairing(&current->second);
+            }
+            current->second.capabilities = std::move(capabilities);
         }
         if (isRegister) {
             current->second.nat4Joined = false;

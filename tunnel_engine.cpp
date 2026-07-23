@@ -151,6 +151,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 
 	do {
 		std::string matchedPeerId;
+		std::vector<TraversalMode> traversalModes;
 		std::string socketError;
 		if (!OpenRendezvousSocket(cfg, kSocketRecvTimeoutMs, &sock, &server, &socketError)) {
 			setExitReason("failed to open rendezvous socket");
@@ -165,16 +166,17 @@ void TunnelEngine::WorkerThread(Config cfg) {
 			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
 			                           : "Connecting to " + cfg.target_peer_id);
 		bool traversalConnected = SelectPeer(
-			sock, cfg, server, running_, &peer, &matchedPeerId, &socketError);
+			sock, cfg, server, running_, &peer, &matchedPeerId,
+			&traversalModes, &socketError);
 		if (traversalConnected) {
 			traversalConnected = false;
 			std::string traversalErrors;
-			for (const auto& strategy : cfg.traversal_modes) {
-				if (!running_.load() || !strategy.enabled) continue;
-				const std::string displayName = TraversalModeDisplayName(strategy.mode);
+			for (const TraversalMode mode : traversalModes) {
+				if (!running_.load()) continue;
+				const std::string displayName = TraversalModeDisplayName(mode);
 				SetState(TunnelState::Connecting, "Trying " + displayName);
 				std::string strategyError;
-				switch (strategy.mode) {
+				switch (mode) {
 					case TraversalMode::Nat:
 						traversalConnected = PunchNat(
 							&sock, cfg, server, running_, matchedPeerId,

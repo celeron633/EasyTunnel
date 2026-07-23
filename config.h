@@ -29,6 +29,16 @@ bool ParseTraversalModes(const std::string& text,
 std::string SerializeTraversalModes(
     const std::vector<TraversalModeSetting>& modes);
 bool IsTraversalModeEnabled(const Config& config, TraversalMode mode);
+std::vector<TraversalMode> EnabledTraversalModes(
+    const std::vector<TraversalModeSetting>& modes);
+std::string SerializeTraversalModeSequence(
+    const std::vector<TraversalMode>& modes);
+bool ParseTraversalModeSequence(const std::string& text,
+                                std::vector<TraversalMode>* modes,
+                                std::string* error);
+std::vector<TraversalMode> IntersectTraversalModes(
+    const std::vector<TraversalMode>& preferred,
+    const std::vector<TraversalMode>& supported);
 
 struct Config {
     std::string rendezvous_addr;

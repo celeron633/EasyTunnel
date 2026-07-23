@@ -289,7 +289,7 @@ B: Adapter Name = EasyTunnel-B, Local TUN IPv4 = 10.66.0.2
 
 典型 port-restricted cone NAT 同时具备 endpoint-independent mapping 时，双方持续发送 PUNCH 后通常可以建立直连。
 
-客户端先通过会合服务器选定对端，再按 `traversal_modes` 中的顺序尝试所有已启用模式。四个模式名分别是 `nat`（普通 NAT）、`nat4`（增强 NAT4）、`ipv6`（IPv6 直连）和 `ipv4_relay`（IPv4 流量中继）。每个模式必须恰好出现一次，`true/false` 控制开关；双方应使用相同的启用项和顺序。默认配置为：
+客户端先向会合服务器上报 `traversal_modes` 中已启用的模式，再选定对端。四个模式名分别是 `nat`（普通 NAT）、`nat4`（增强 NAT4）、`ipv6`（IPv6 直连）和 `ipv4_relay`（IPv4 流量中继）。每个模式必须恰好出现一次，`true/false` 控制开关。双方配置可以不同：服务器取双方能力交集，并严格保留连接发起方的顺序；没有共同模式时，发起方立即收到对端不支持错误。默认配置为：
 
 ```ini
 traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:false

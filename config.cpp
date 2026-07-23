@@ -160,6 +160,73 @@ bool IsTraversalModeEnabled(const Config& config, TraversalMode mode) {
     return found != config.traversal_modes.end() && found->enabled;
 }
 
+std::vector<TraversalMode> EnabledTraversalModes(
+    const std::vector<TraversalModeSetting>& modes) {
+    std::vector<TraversalMode> enabled;
+    for (const auto& setting : modes) {
+        if (setting.enabled) enabled.push_back(setting.mode);
+    }
+    return enabled;
+}
+
+std::string SerializeTraversalModeSequence(
+    const std::vector<TraversalMode>& modes) {
+    if (modes.empty()) return "none";
+    std::string output;
+    for (const TraversalMode mode : modes) {
+        if (!output.empty()) output += ',';
+        output += TraversalModeName(mode);
+    }
+    return output;
+}
+
+bool ParseTraversalModeSequence(const std::string& text,
+                                std::vector<TraversalMode>* modes,
+                                std::string* error) {
+    if (modes == nullptr) return false;
+    modes->clear();
+    if (text == "none") return true;
+
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t comma = text.find(',', start);
+        const std::string name = Trim(text.substr(
+            start, comma == std::string::npos ? std::string::npos : comma - start));
+        TraversalMode mode;
+        if (name == "nat") mode = TraversalMode::Nat;
+        else if (name == "nat4") mode = TraversalMode::Nat4;
+        else if (name == "ipv6") mode = TraversalMode::Ipv6;
+        else if (name == "ipv4_relay") mode = TraversalMode::Ipv4Relay;
+        else {
+            if (error) *error = "Unknown traversal mode: " + name;
+            modes->clear();
+            return false;
+        }
+        if (std::find(modes->begin(), modes->end(), mode) != modes->end()) {
+            if (error) *error = "Duplicate traversal mode: " + name;
+            modes->clear();
+            return false;
+        }
+        modes->push_back(mode);
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return true;
+}
+
+std::vector<TraversalMode> IntersectTraversalModes(
+    const std::vector<TraversalMode>& preferred,
+    const std::vector<TraversalMode>& supported) {
+    std::vector<TraversalMode> intersection;
+    for (const TraversalMode mode : preferred) {
+        if (std::find(supported.begin(), supported.end(), mode)
+            != supported.end()) {
+            intersection.push_back(mode);
+        }
+    }
+    return intersection;
+}
+
 bool LoadConfig(const std::string& file, Config* out) {
     std::ifstream in(file);
     if (!in.is_open()) {

@@ -44,6 +44,26 @@ if(BUILD_TESTING)
     target_link_libraries(EasyTunnel_config_tests PRIVATE spdlog::spdlog_header_only)
     add_test(NAME config_traversal_modes COMMAND EasyTunnel_config_tests
         ${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example)
+
+    add_executable(EasyTunnel_rendezvous_capabilities_tests
+        tests/rendezvous_capabilities_test.cpp
+        rendezvous/registry.cpp
+        rendezvous/ipv4_relay_app.cpp
+        rendezvous/config.cpp
+        nat_protocol.cpp
+        util.cpp
+        config.cpp
+        log.cpp)
+    target_include_directories(
+        EasyTunnel_rendezvous_capabilities_tests PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(EasyTunnel_rendezvous_capabilities_tests PRIVATE
+        Threads::Threads spdlog::spdlog_header_only)
+    if(WIN32)
+        target_link_libraries(
+            EasyTunnel_rendezvous_capabilities_tests PRIVATE ws2_32)
+    endif()
+    add_test(NAME rendezvous_capabilities
+        COMMAND EasyTunnel_rendezvous_capabilities_tests)
 endif()
 
 # ---------------------------------------------------------------------------

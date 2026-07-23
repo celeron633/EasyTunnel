@@ -40,6 +40,43 @@ int main(int argc, char** argv) {
     Expect(!IsTraversalModeEnabled(config, TraversalMode::Nat4),
            "disabled mode lookup");
 
+    const auto enabled = EnabledTraversalModes(config.traversal_modes);
+    Expect(SerializeTraversalModeSequence(enabled) == "ipv6,ipv4_relay",
+           "enabled capabilities retain configured order");
+    Expect(SerializeTraversalModeSequence({}) == "none",
+           "empty capabilities use explicit wire value");
+
+    std::vector<TraversalMode> capabilities;
+    Expect(ParseTraversalModeSequence(
+               "nat4,nat,ipv4_relay", &capabilities, &error),
+           "wire capability sequence parses");
+    Expect(capabilities.size() == 3
+               && capabilities[0] == TraversalMode::Nat4
+               && capabilities[2] == TraversalMode::Ipv4Relay,
+           "wire capability order is retained");
+    Expect(ParseTraversalModeSequence("none", &capabilities, &error)
+               && capabilities.empty(),
+           "empty wire capability sequence parses");
+    Expect(!ParseTraversalModeSequence(
+               "nat,nat", &capabilities, &error),
+           "duplicate wire capability is rejected");
+
+    const std::vector<TraversalMode> initiator{
+        TraversalMode::Ipv4Relay,
+        TraversalMode::Nat4,
+        TraversalMode::Nat,
+    };
+    const std::vector<TraversalMode> peer{
+        TraversalMode::Nat,
+        TraversalMode::Nat4,
+    };
+    const auto negotiated = IntersectTraversalModes(initiator, peer);
+    Expect(SerializeTraversalModeSequence(negotiated) == "nat4,nat",
+           "negotiated modes follow initiator order");
+    Expect(IntersectTraversalModes(
+               {TraversalMode::Ipv6}, {TraversalMode::Ipv4Relay}).empty(),
+           "incompatible capabilities have no negotiated mode");
+
     Expect(!ParseTraversalModes(
                "nat:true,nat:true,ipv6:false,ipv4_relay:false",
                &parsed, &error),

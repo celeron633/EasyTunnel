@@ -40,10 +40,10 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 等待或选择 Peer
        │
        ▼
-会合服务器交换公网端点
+会合服务器交换公网端点与模式能力
        │
        ▼
-按 traversal_modes 选择下一项
+按发起方 traversal_modes 中的共同项选择下一项
        │
        ├── nat  ──► 普通精确端口打洞
        ├── nat4 ──► NAT4 socket 池多轮打洞
@@ -54,7 +54,9 @@ tunnel_engine.cpp          成功 socket 的数据面接管
               └── 失败 ──► 继续下一项；无剩余项则 Error
 ```
 
-收到第一个有效 `PEER` 后才开始策略循环。普通 NAT 与 NAT4 各自使用一次完整的
+双方在会合阶段上报已启用模式。服务端按连接发起方的顺序取双方能力交集，并把对端能力
+及最终顺序随 `PEER` 返回双方；收到第一个有效 `PEER` 后才开始策略循环。没有共同模式
+时发起方立即进入 Error，等待方保持在线。普通 NAT 与 NAT4 各自使用一次完整的
 `punch_timeout`。
 
 ## 会合阶段
@@ -66,7 +68,7 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 `target_peer_id` 为空时，客户端周期性发送：
 
 ```text
-REG(room_id, peer_id, auth_token)
+REG(room_id, peer_id, enabled_modes, auth_token)
 ```
 
 会合服务器从 UDP 数据报的真实来源获得该客户端的公网 `IPv4:port`，注册成功后返回：
@@ -82,17 +84,22 @@ REGISTERED
 主动端周期性发送：
 
 ```text
-REG(room_id, peer_id, auth_token)
-CONNECT(room_id, peer_id, target_peer_id, auth_token)
+REG(room_id, peer_id, enabled_modes, auth_token)
+CONNECT(room_id, peer_id, target_peer_id, enabled_modes, auth_token)
 ```
 
 服务器找到目标后，向双方发送：
 
 ```text
-PEER(peer_public_ip, peer_public_port, peer_id)
+PEER(peer_public_ip, peer_public_port, peer_id,
+     peer_enabled_modes, negotiated_modes)
 ```
 
-服务器只交换端点，不转发隧道数据。打洞成功后的 TUN IPv4 数据直接在两个客户端之间传输。
+`enabled_modes` 是只包含已启用模式的逗号分隔序列，空集合编码为 `none`。服务端以首个
+有效 `CONNECT` 的发送方为连接发起方，`negotiated_modes` 等于发起方序列与等待方能力
+的交集，因此双方配置顺序不同时仍执行同一顺序。交集为空时，服务端只向发起方返回
+`ERROR(no-common-traversal-mode, peer_enabled_modes)`。服务器只交换端点，不转发隧道
+数据。打洞成功后的 TUN IPv4 数据直接在两个客户端之间传输。
 
 双方各自在收到合法 `PUNCH` 或 `PUNCH_ACK`、确认穿透成功后，使用最终承载隧道的 socket 发送一次可选信息：
 

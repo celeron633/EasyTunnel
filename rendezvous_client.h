@@ -23,6 +23,8 @@ struct RendezvousEvent {
     RendezvousEventType type = RendezvousEventType::None;
     UdpEndpoint peer{};
     std::string peerId;
+    std::vector<TraversalMode> peerCapabilities;
+    std::vector<TraversalMode> traversalModes;
     uint32_t round = 0;
     std::string error;
 };
