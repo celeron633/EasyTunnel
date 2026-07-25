@@ -21,11 +21,27 @@ float NiceScaleMaximum(float maximum) {
     return nice * magnitude;
 }
 
-std::string ScaleLabel(float maximum, const char* unit) {
+// Always uses fixed notation so large speeds stay readable as plain integers
+// instead of switching to the exponent form printf's %g would produce.
+std::string ValueLabel(float value, const char* unit) {
     std::ostringstream output;
-    output << std::fixed << std::setprecision(maximum >= 1.0f ? 0
-        : maximum >= 0.1f ? 1 : 2) << maximum << ' ' << unit;
+    output << std::fixed << std::setprecision(value >= 1.0f ? 0
+        : value >= 0.1f ? 1 : 2) << value << ' ' << unit;
     return output.str();
+}
+
+// Mirrors the hovered-column math of ImGui's PlotEx so a replacement tooltip
+// describes the same bar that ImGui highlights.
+bool HoveredPlotColumn(std::size_t columnCount, std::size_t* column) {
+    if (!ImGui::IsItemHovered() || columnCount == 0) return false;
+    const float left = ImGui::GetItemRectMin().x + ImGui::GetStyle().FramePadding.x;
+    const float right = ImGui::GetItemRectMax().x - ImGui::GetStyle().FramePadding.x;
+    if (right <= left) return false;
+    const float position = (ImGui::GetIO().MousePos.x - left) / (right - left);
+    const float clamped = (std::min)((std::max)(position, 0.0f), 0.9999f);
+    *column = (std::min)(columnCount - 1,
+        static_cast<std::size_t>(clamped * static_cast<float>(columnCount)));
+    return true;
 }
 
 void RenderChartHeader(const char* title, const std::string& scaleLabel) {
@@ -69,12 +85,26 @@ void RenderHistogram(const char* id, const char* title,
     }
     const float scaleMaximum = NiceScaleMaximum(
         *std::max_element(values.begin(), values.end()));
-    RenderChartHeader(title, ScaleLabel(scaleMaximum, unit));
+    RenderChartHeader(title, ValueLabel(scaleMaximum, unit));
     ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
     ImGui::PushStyleColor(ImGuiCol_PlotHistogramHovered, hoveredColor);
     ImGui::PlotHistogram(id, values.data(), static_cast<int>(values.size()), 0,
                          nullptr, 0.0f, scaleMaximum, ImVec2(-FLT_MIN, plotHeight));
     ImGui::PopStyleColor(2);
+    // Replaces the built-in tooltip, which prints the raw column index and
+    // formats values with %g.
+    std::size_t hoveredColumn = 0;
+    if (HoveredPlotColumn(renderedColumns, &hoveredColumn)) {
+        const std::size_t slot = hoveredColumn * (StatisticsHistory::kMaxSamples - 1)
+            / (renderedColumns - 1);
+        const std::size_t secondsAgo = StatisticsHistory::kMaxSamples - 1 - slot;
+        if (slot < firstSlot) {
+            ImGui::SetTooltip("-%zu s: no sample", secondsAgo);
+        } else {
+            ImGui::SetTooltip("-%zu s: %s", secondsAgo,
+                              ValueLabel(values[hoveredColumn], unit).c_str());
+        }
+    }
     RenderTimeAxis(id);
 }
 }  // namespace
