@@ -103,6 +103,14 @@ bool ParsePort(const std::string& text, uint16_t* port) {
 bool IsIpv6Gua(const in6_addr& address) {
     return (address.s6_addr[0] & 0xe0) == 0x20;
 }
+
+// Fields per client in a CLIENTS reply: node, endpoint, capabilities,
+// TUN IP and idle seconds.
+constexpr size_t kClientFields = 5;
+// Keeps a CLIENTS datagram below the 8192-byte control message limit even
+// when a room holds the maximum number of clients with long node IDs.
+constexpr size_t kMaxClientListBytes = 7168;
+constexpr const char* kUnknownField = "-";
 }  // namespace
 
 struct RendezvousRegistry::Impl {
@@ -122,6 +130,31 @@ struct RendezvousRegistry::Impl {
             && (config.authToken.empty() || token == config.authToken);
     }
 
+    // Returns the clients of a room that are not paired yet, sorted by node ID.
+    std::vector<const Client*> AvailableClients(
+        const std::string& roomId, std::chrono::steady_clock::time_point now) {
+        std::vector<const Client*> available;
+        const auto roomIt = rooms.find(roomId);
+        if (roomIt == rooms.end()) return available;
+        const size_t expired = RemoveExpired(&roomIt->second, now,
+            config.clientTimeoutSeconds);
+        if (expired > 0) {
+            Log(LogLevel::Info, "Expired " + std::to_string(expired)
+                + " client(s) from room=" + roomId);
+        }
+        for (const auto& entry : roomIt->second) {
+            if (entry.second.pairedWith.empty()) available.push_back(&entry.second);
+        }
+        std::sort(available.begin(), available.end(),
+                  [](const Client* left, const Client* right) {
+                      return left->node < right->node;
+                  });
+        return available;
+    }
+
+    // Every client is described by kClientFields consecutive fields so
+    // the UI can show its public endpoint, negotiable capabilities, TUN IP and
+    // idle time next to the node ID.
     void HandleList(const UdpEndpoint& source, const std::vector<std::string>& fields,
                     std::chrono::steady_clock::time_point now) {
         if (fields.size() != 2 || !IsSafeControlField(fields[0])
@@ -131,22 +164,36 @@ struct RendezvousRegistry::Impl {
             SendMessage(sock, source, "ERROR", {"unauthorized"});
             return;
         }
-        std::vector<std::string> clients;
-        auto roomIt = rooms.find(fields[0]);
-        if (roomIt != rooms.end()) {
-            const size_t expired = RemoveExpired(&roomIt->second, now,
-                config.clientTimeoutSeconds);
-            if (expired > 0) {
-                Log(LogLevel::Info, "Expired " + std::to_string(expired)
-                    + " client(s) from room=" + fields[0]);
-            }
-            for (const auto& entry : roomIt->second) {
-                if (entry.second.pairedWith.empty()) clients.push_back(entry.first);
-            }
+        const std::vector<const Client*> available =
+            AvailableClients(fields[0], now);
+        std::vector<std::string> entries;
+        size_t used = std::string("ETN1\tCLIENTS").size();
+        size_t reported = 0;
+        for (const Client* client : available) {
+            const auto idle = std::chrono::duration_cast<std::chrono::seconds>(
+                now - client->seen).count();
+            const std::string record[kClientFields] = {
+                client->node,
+                FormatUdpEndpoint(client->endpoint),
+                SerializeTraversalModeSequence(client->capabilities),
+                client->tunIp.empty() ? kUnknownField : client->tunIp,
+                std::to_string(static_cast<uint64_t>((std::max)(int64_t{0}, idle))),
+            };
+            size_t needed = 0;
+            for (const auto& field : record) needed += 1 + field.size();
+            if (used + needed > kMaxClientListBytes) break;
+            used += needed;
+            entries.insert(entries.end(), std::begin(record), std::end(record));
+            ++reported;
+        }
+        if (reported < available.size()) {
+            Log(LogLevel::Warn, "Truncated LIST room=" + fields[0] + " reported="
+                + std::to_string(reported) + " available="
+                + std::to_string(available.size()));
         }
         Log(LogLevel::Debug, "LIST room=" + fields[0] + " clients="
-            + std::to_string(clients.size()) + " source=" + FormatUdpEndpoint(source));
-        SendMessage(sock, source, "CLIENTS", clients);
+            + std::to_string(reported) + " source=" + FormatUdpEndpoint(source));
+        SendMessage(sock, source, "CLIENTS", entries);
     }
 
     void HandleNat4Join(Room& room, Room::iterator current,

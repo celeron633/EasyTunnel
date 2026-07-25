@@ -17,7 +17,8 @@ tunnel_engine.cpp          成功 socket 的数据面接管
 
 ### 客户端模块边界
 
-`RendezvousClient` 只处理会合服务器方向的控制逻辑，包括发送 `REG`、`CONNECT`、`NAT4_JOIN`、`UNREG`，以及穿透成功后发送一次 `TUN_IP`；同时负责识别服务器来源，解析 `REGISTERED`、`PEER`、`ERROR` 和 NAT4 响应，以及判断首次响应超时。在线客户端的 `LIST` 查询和会合 UDP socket 的创建也由该模块负责。
+`RendezvousClient` 只处理会合服务器方向的控制逻辑，包括发送 `REG`、`CONNECT`、`NAT4_JOIN`、`UNREG`，以及穿透成功后发送一次 `TUN_IP`；同时负责识别服务器来源，解析 `REGISTERED`、`PEER`、`ERROR` 和 NAT4 响应，以及判断首次响应超时。在线客户端的 `LIST` 查询和会合 UDP socket 的创建也由该模块负责，`CLIENTS` 应答被解析为
+`RendezvousPeerInfo`（Peer ID、公网端点、能力、TUN IP、空闲秒数）供 GUI 与 TUI 展示。
 
 `peer_selection.cpp` 在所有策略之前完成注册和目标选择。`nat_traversal.cpp` 和
 `nat4_traversal.cpp` 只保留各自的 UDP 收包循环与 Peer 打洞状态机。同一个 socket

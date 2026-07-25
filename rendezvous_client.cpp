@@ -10,6 +10,10 @@
 namespace {
 constexpr auto kRendezvousResponseTimeout = std::chrono::seconds(5);
 constexpr const char* kNoResponseError = "Rendezvous server did not respond";
+// Fields per client in a CLIENTS reply, mirroring the rendezvous registry.
+constexpr size_t kClientFields = 5;
+constexpr size_t kMaxControlMessageBytes = 8192;
+constexpr const char* kUnknownField = "-";
 
 bool Send(socket_t sock, const UdpEndpoint& endpoint, const std::string& data) {
     return sendto(sock, data.data(), static_cast<int>(data.size()), 0,
@@ -55,6 +59,18 @@ bool ParsePeer(const std::vector<std::string>& fields, UdpEndpoint* peer,
     }
     *peerId = fields[2];
     return true;
+}
+
+bool ParseIdleSeconds(const std::string& text, uint64_t* seconds) {
+    try {
+        size_t consumed = 0;
+        const unsigned long long value = std::stoull(text, &consumed);
+        if (consumed != text.size()) return false;
+        *seconds = static_cast<uint64_t>(value);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
 RendezvousEvent InvalidResponse() {
@@ -251,7 +267,8 @@ bool ReportRendezvousTunIp(socket_t sock, const Config& config,
 
 bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort,
                            const std::string& roomId, const std::string& authToken,
-                           std::vector<std::string>* clients, std::string* error) {
+                           std::vector<RendezvousPeerInfo>* clients,
+                           std::string* error) {
     clients->clear();
     if (!IsSafeControlField(roomId)
         || (!authToken.empty() && !IsSafeControlField(authToken))) {
@@ -272,7 +289,7 @@ bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort
         CloseSocket(sock);
         return false;
     }
-    std::vector<uint8_t> buffer(4096);
+    std::vector<uint8_t> buffer(kMaxControlMessageBytes);
     sockaddr_storage sourceAddress{};
     socket_len_t sourceLen = static_cast<socket_len_t>(sizeof(sourceAddress));
     const int n = recvfrom(sock, reinterpret_cast<char*>(buffer.data()),
@@ -295,10 +312,29 @@ bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort
         *error = fields.empty() ? "Rendezvous rejected request" : fields[0];
         return false;
     }
-    if (type != "CLIENTS") {
+    if (type != "CLIENTS" || fields.size() % kClientFields != 0) {
         *error = "Unexpected rendezvous response";
         return false;
     }
-    *clients = std::move(fields);
+    for (size_t i = 0; i < fields.size(); i += kClientFields) {
+        RendezvousPeerInfo info;
+        info.peerId = fields[i];
+        info.endpoint = fields[i + 1];
+        std::string capabilityError;
+        ParseTraversalModeSequence(fields[i + 2], &info.capabilities, &capabilityError);
+        if (fields[i + 3] != kUnknownField) info.tunIp = fields[i + 3];
+        ParseIdleSeconds(fields[i + 4], &info.idleSeconds);
+        clients->push_back(std::move(info));
+    }
     return true;
+}
+
+std::string FormatPeerCapabilities(const std::vector<TraversalMode>& capabilities) {
+    if (capabilities.empty()) return "none";
+    std::string output;
+    for (const TraversalMode mode : capabilities) {
+        if (!output.empty()) output += ", ";
+        output += TraversalModeDisplayName(mode);
+    }
+    return output;
 }

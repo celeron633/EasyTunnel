@@ -39,7 +39,8 @@ ftxui::screen
 
 ### Connection
 
-- 在线客户端刷新和选择
+- 在线客户端刷新和选择，列表按列显示 Peer ID、公网端点、能力、TUN IP 和空闲时间
+- 选中项下方额外显示该客户端能力的完整名称
 - Wait for peer、Connect selected、Disconnect
 - TX/RX 包数、累计字节和每秒速度
 - 每 1 秒采样的最近 60 秒 TX/RX 速度与延迟柱形历史图

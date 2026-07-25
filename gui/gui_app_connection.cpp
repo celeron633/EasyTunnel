@@ -52,6 +52,21 @@ bool RenderByteValueButton(const char* id, double bytes, int unit, bool perSecon
     }
     return clicked;
 }
+
+std::string FormatIdleTime(uint64_t seconds) {
+    if (seconds < 60) return std::to_string(seconds) + "s";
+    if (seconds < 3600) {
+        return std::to_string(seconds / 60) + "m " + std::to_string(seconds % 60) + "s";
+    }
+    return std::to_string(seconds / 3600) + "h " + std::to_string((seconds % 3600) / 60) + "m";
+}
+
+// Shows a value in a table cell, greying out the placeholder used when the
+// rendezvous server did not report the field.
+void RenderPeerCell(const std::string& value) {
+    if (value.empty()) ImGui::TextDisabled("--");
+    else ImGui::TextUnformatted(value.c_str());
+}
 }  // namespace
 
 void GuiApp::RenderConnectionTab() {
@@ -65,17 +80,46 @@ void GuiApp::RenderConnectionTab() {
     ImGui::SameLine();
     ImGui::TextDisabled("Only clients currently waiting/connecting are listed");
 
-    if (ImGui::BeginListBox("##ClientList", ImVec2(-FLT_MIN, 160.0f))) {
-        if (clients_.empty()) ImGui::TextDisabled("No online clients");
+    const ImGuiTableFlags clientTableFlags = ImGuiTableFlags_Borders
+        | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+        | ImGuiTableFlags_SizingStretchProp;
+    if (ImGui::BeginTable("##ClientList", 5, clientTableFlags,
+                          ImVec2(-FLT_MIN, 160.0f))) {
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableSetupColumn("Peer ID", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+        ImGui::TableSetupColumn("Public endpoint", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+        ImGui::TableSetupColumn("Capabilities", ImGuiTableColumnFlags_WidthStretch, 1.8f);
+        ImGui::TableSetupColumn("TUN IP", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Idle", ImGuiTableColumnFlags_WidthStretch, 0.6f);
+        ImGui::TableHeadersRow();
         for (int i = 0; i < static_cast<int>(clients_.size()); ++i) {
+            const RendezvousPeerInfo& client = clients_[i];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushID(i);
             const bool selected = selectedClient_ == i;
-            if (ImGui::Selectable(clients_[i].c_str(), selected) && canBrowseClients) {
+            if (ImGui::Selectable(client.peerId.c_str(), selected,
+                                  ImGuiSelectableFlags_SpanAllColumns)
+                && canBrowseClients) {
                 selectedClient_ = i;
             }
             if (selected) ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
+            ImGui::TableSetColumnIndex(1);
+            RenderPeerCell(client.endpoint);
+            ImGui::TableSetColumnIndex(2);
+            RenderPeerCell(SerializeTraversalModeSequence(client.capabilities));
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", FormatPeerCapabilities(client.capabilities).c_str());
+            }
+            ImGui::TableSetColumnIndex(3);
+            RenderPeerCell(client.tunIp);
+            ImGui::TableSetColumnIndex(4);
+            RenderPeerCell(FormatIdleTime(client.idleSeconds));
         }
-        ImGui::EndListBox();
+        ImGui::EndTable();
     }
+    if (clients_.empty()) ImGui::TextDisabled("No online clients");
 
     ImGui::Spacing();
     const bool canConnect = selectedClient_ >= 0
@@ -287,7 +331,7 @@ bool GuiApp::StartConnection(const std::string& targetPeerId) {
 
 void GuiApp::ConnectSelectedClient() {
     if (selectedClient_ < 0 || selectedClient_ >= static_cast<int>(clients_.size())) return;
-    const std::string target = clients_[selectedClient_];
+    const std::string target = clients_[selectedClient_].peerId;
     suppressAutoWait_.store(true);
     autoWaitPending_.store(false);
     engine_.Stop();
@@ -304,14 +348,22 @@ void GuiApp::RefreshClients() {
         SetStatusMessage(error);
         return;
     }
-    std::vector<std::string> clients;
+    std::vector<RendezvousPeerInfo> clients;
     if (!ListRendezvousClients(serverAddress_, static_cast<uint16_t>(serverPort_),
                                roomId_, authToken_, &clients, &error)) {
         SetStatusMessage(error);
         return;
     }
-    clients.erase(std::remove(clients.begin(), clients.end(), std::string(peerId_)), clients.end());
-    std::sort(clients.begin(), clients.end());
+    const std::string self(peerId_);
+    clients.erase(std::remove_if(clients.begin(), clients.end(),
+                                 [&self](const RendezvousPeerInfo& client) {
+                                     return client.peerId == self;
+                                 }),
+                  clients.end());
+    std::sort(clients.begin(), clients.end(),
+              [](const RendezvousPeerInfo& left, const RendezvousPeerInfo& right) {
+                  return left.peerId < right.peerId;
+              });
     clients_ = std::move(clients);
     selectedClient_ = clients_.empty() ? -1 : 0;
     SetStatusMessage(clients_.empty() ? "No online clients" : "Client list refreshed");

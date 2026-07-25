@@ -131,6 +131,23 @@ int main() {
     Expect(!ReceiveControl(d, &type, &fields),
            "waiting peer remains waiting when capabilities are incompatible");
 
+    registry.Handle(cEndpoint, "LIST", {"incompatible", ""},
+                    std::chrono::steady_clock::now());
+    Expect(ReceiveControl(c, &type, &fields) && type == "CLIENTS"
+               && fields.size() == 10
+               && fields[0] == "c" && fields[2] == "ipv6" && fields[3] == "-"
+               && fields[5] == "d" && fields[7] == "ipv4_relay",
+           "LIST reports each client with capabilities and TUN IP");
+    const bool endpointsMatch = fields.size() == 10
+        && fields[1] == FormatUdpEndpoint(cEndpoint)
+        && fields[6] == FormatUdpEndpoint(dEndpoint);
+    Expect(endpointsMatch, "LIST reports the public endpoint seen by the server");
+
+    registry.Handle(cEndpoint, "LIST", {"common", ""},
+                    std::chrono::steady_clock::now());
+    Expect(ReceiveControl(c, &type, &fields) && type == "CLIENTS" && fields.empty(),
+           "LIST keeps hiding paired clients");
+
     const auto snapshot = registry.Snapshot(std::chrono::steady_clock::now());
     bool incompatiblePeersRemainAvailable = false;
     for (const auto& room : snapshot) {

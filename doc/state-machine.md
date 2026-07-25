@@ -234,7 +234,9 @@ stateDiagram-v2
 
 关键规则：
 
-- `LIST` 只返回 `pairedWith` 为空的客户端。
+- `LIST` 只返回 `pairedWith` 为空的客户端；`CLIENTS` 中每个客户端占 5 个连续字段：
+  节点 ID、公网端点、能力序列、TUN IP（未上报为 `-`）和空闲秒数，按节点 ID 排序，
+  超过控制报文长度上限的部分会被截断并记录警告。
 - `REG` 和 `CONNECT` 都携带本端已启用模式；首个有效 `CONNECT` 决定协商顺序。
 - 双方能力没有交集时只向发起方返回 `no-common-traversal-mode`，不占用等待方。
 - `CONNECT`、`NAT4_JOIN`、`V6_JOIN` 和 `RELAY_JOIN` 都会校验 room、Peer ID 和 token。

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "../rendezvous_client.h"
 #include "../tunnel_engine.h"
 #include "../statistics_history.h"
 
@@ -65,7 +66,7 @@ private:
     char roomId_[128] = "default-room";
     char peerId_[128] = "node-a";
     char authToken_[128] = {};
-    std::vector<std::string> clients_;
+    std::vector<RendezvousPeerInfo> clients_;
     int selectedClient_ = -1;
 
     char adapterName_[128] = "EasyTunnel";

@@ -1,6 +1,7 @@
 #include "tui_app.h"
 
 #include <algorithm>
+#include <array>
 #include <iomanip>
 #include <sstream>
 #include <utility>
@@ -48,6 +49,49 @@ int64_t SteadyMilliseconds() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+
+constexpr size_t kClientColumnCount = 5;
+constexpr size_t kMaxClientColumnWidth = 28;
+constexpr const char* kMissingField = "--";
+const std::array<std::string, kClientColumnCount> kClientColumnTitles{
+    "Peer ID", "Public endpoint", "Capabilities", "TUN IP", "Idle"};
+
+struct ClientColumns {
+    std::array<size_t, kClientColumnCount> widths{};
+
+    ClientColumns() {
+        for (size_t i = 0; i < kClientColumnCount; ++i) {
+            widths[i] = kClientColumnTitles[i].size();
+        }
+    }
+};
+
+std::string JoinClientColumns(const ClientColumns& columns,
+                              const std::array<std::string, kClientColumnCount>& row) {
+    std::string line;
+    for (size_t i = 0; i < kClientColumnCount; ++i) {
+        if (i > 0) line += "  ";
+        line += row[i];
+        if (i + 1 == kClientColumnCount) break;
+        if (row[i].size() < columns.widths[i]) {
+            line.append(columns.widths[i] - row[i].size(), ' ');
+        }
+    }
+    return line;
+}
+
+std::string PeerField(const std::string& value) {
+    return value.empty() ? kMissingField : value;
+}
+
+std::string FormatIdleTime(uint64_t seconds) {
+    if (seconds < 60) return std::to_string(seconds) + "s";
+    if (seconds < 3600) {
+        return std::to_string(seconds / 60) + "m" + std::to_string(seconds % 60) + "s";
+    }
+    return std::to_string(seconds / 3600) + "h"
+        + std::to_string((seconds % 3600) / 60) + "m";
+}
 }  // namespace
 
 ftxui::Component TuiApp::BuildConnectionTab() {
@@ -88,9 +132,24 @@ ftxui::Component TuiApp::BuildConnectionTab() {
         const bool rxActive = std::chrono::steady_clock::now() - lastRxActivity_
             < std::chrono::milliseconds(350);
         const int64_t rttMilliseconds = stats.rttMilliseconds.load();
-        return vbox({
+        Elements clientRows{
             hbox({refresh->Render(), text("  Online clients:")}),
-            clientList->Render() | frame | size(HEIGHT, LESS_THAN, 7),
+        };
+        if (clients_.empty()) {
+            clientRows.push_back(text("  No online clients") | dim);
+        } else {
+            clientRows.push_back(text("  " + clientHeader_) | bold | dim);
+            clientRows.push_back(
+                clientList->Render() | frame | size(HEIGHT, LESS_THAN, 7));
+            if (selectedClient_ >= 0
+                && selectedClient_ < static_cast<int>(clientDetails_.size())) {
+                const RendezvousPeerInfo& selected = clientDetails_[selectedClient_];
+                clientRows.push_back(text("  " + selected.peerId + ": "
+                    + FormatPeerCapabilities(selected.capabilities)) | dim);
+            }
+        }
+        return vbox({
+            vbox(std::move(clientRows)),
             hbox({wait->Render(), connect->Render(), disconnect->Render()}),
             separator(),
             text("Packet statistics") | bold,
@@ -210,12 +269,12 @@ bool TuiApp::StartConnection(const std::string& targetPeerId) {
 }
 
 void TuiApp::ConnectSelectedClient() {
-    if (clients_.empty() || selectedClient_ < 0
-        || selectedClient_ >= static_cast<int>(clients_.size())) {
+    if (selectedClient_ < 0
+        || selectedClient_ >= static_cast<int>(clientDetails_.size())) {
         SetStatus("Select an online client first");
         return;
     }
-    const std::string target = clients_[selectedClient_];
+    const std::string target = clientDetails_[selectedClient_].peerId;
     engine_.Stop();
     StartConnection(target);
 }
@@ -228,18 +287,53 @@ void TuiApp::Disconnect() {
 void TuiApp::RefreshClients() {
     std::string error;
     if (!Validate(&error)) { SetStatus(error); return; }
-    std::vector<std::string> clients;
+    std::vector<RendezvousPeerInfo> clients;
     if (!ListRendezvousClients(config_.rendezvousAddress,
                                static_cast<uint16_t>(ParseInt(serverPortText_, 3478)),
                                config_.roomId, config_.authToken, &clients, &error)) {
         SetStatus(error);
         return;
     }
-    clients.erase(std::remove(clients.begin(), clients.end(), config_.peerId), clients.end());
-    std::sort(clients.begin(), clients.end());
-    clients_ = std::move(clients);
+    clients.erase(std::remove_if(clients.begin(), clients.end(),
+                                 [this](const RendezvousPeerInfo& client) {
+                                     return client.peerId == config_.peerId;
+                                 }),
+                  clients.end());
+    std::sort(clients.begin(), clients.end(),
+              [](const RendezvousPeerInfo& left, const RendezvousPeerInfo& right) {
+                  return left.peerId < right.peerId;
+              });
+    clientDetails_ = std::move(clients);
+    UpdateClientLabels();
     selectedClient_ = 0;
     SetStatus(clients_.empty() ? "No online clients" : "Client list refreshed");
+}
+
+// Renders every client as one aligned row so the radiobox shows the peer ID
+// together with the details reported by the rendezvous server.
+void TuiApp::UpdateClientLabels() {
+    ClientColumns columns;
+    std::vector<std::array<std::string, kClientColumnCount>> rows;
+    rows.reserve(clientDetails_.size());
+    for (const RendezvousPeerInfo& client : clientDetails_) {
+        std::array<std::string, kClientColumnCount> row{
+            client.peerId,
+            PeerField(client.endpoint),
+            SerializeTraversalModeSequence(client.capabilities),
+            PeerField(client.tunIp),
+            FormatIdleTime(client.idleSeconds),
+        };
+        for (size_t i = 0; i < kClientColumnCount; ++i) {
+            columns.widths[i] = (std::max)(columns.widths[i],
+                (std::min)(row[i].size(), kMaxClientColumnWidth));
+        }
+        rows.push_back(std::move(row));
+    }
+
+    clientHeader_ = JoinClientColumns(columns, kClientColumnTitles);
+    clients_.clear();
+    clients_.reserve(rows.size());
+    for (const auto& row : rows) clients_.push_back(JoinClientColumns(columns, row));
 }
 
 void TuiApp::OnStateChanged(TunnelState state, const std::string& message) {

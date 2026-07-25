@@ -29,6 +29,17 @@ struct RendezvousEvent {
     std::string error;
 };
 
+// One entry of the online client list published by the rendezvous server.
+// `endpoint` is the public address the server sees, `tunIp` stays empty until
+// the peer has reported its tunnel address.
+struct RendezvousPeerInfo {
+    std::string peerId;
+    std::string endpoint;
+    std::vector<TraversalMode> capabilities;
+    std::string tunIp;
+    uint64_t idleSeconds = 0;
+};
+
 // Handles control traffic exchanged with one configured rendezvous endpoint.
 // The caller retains the UDP receive loop so peer punch packets can share the socket.
 class RendezvousClient {
@@ -64,4 +75,6 @@ bool ReportRendezvousTunIp(socket_t sock, const Config& config,
                            const UdpEndpoint& server);
 bool ListRendezvousClients(const std::string& serverAddress, uint16_t serverPort,
                            const std::string& roomId, const std::string& authToken,
-                           std::vector<std::string>* clients, std::string* error);
+                           std::vector<RendezvousPeerInfo>* clients,
+                           std::string* error);
+std::string FormatPeerCapabilities(const std::vector<TraversalMode>& capabilities);

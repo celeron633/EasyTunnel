@@ -11,6 +11,7 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include "../rendezvous_client.h"
 #include "../tunnel_engine.h"
 #include "../statistics_history.h"
 #include "tui_config.h"
@@ -31,6 +32,7 @@ private:
     void ConnectSelectedClient();
     void Disconnect();
     void RefreshClients();
+    void UpdateClientLabels();
     bool Validate(std::string* error) const;
     Config BuildEngineConfig(const std::string& targetPeerId) const;
     void OnStateChanged(TunnelState state, const std::string& message);
@@ -72,7 +74,9 @@ private:
     std::string ipv6FallbackTimeoutText_;
     std::string rendezvousRetryDelayText_;
 
+    std::vector<RendezvousPeerInfo> clientDetails_;
     std::vector<std::string> clients_;
+    std::string clientHeader_;
     int selectedClient_ = 0;
     std::vector<std::string> tabs_{"Connection", "Settings", "Log"};
     int selectedTab_ = 0;
