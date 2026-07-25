@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure (CMake + MSVC)
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -66,7 +66,7 @@ jobs:
           Compress-Archive -Path "dist/EasyTunnel/*" -DestinationPath "dist/EasyTunnel.zip"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: EasyTunnel-release
           path: dist/EasyTunnel.zip
@@ -76,7 +76,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Linux build dependencies
         run: |
@@ -132,7 +132,7 @@ jobs:
             --format=zip EasyTunnel-linux-amd64
 
       - name: Upload Linux amd64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: EasyTunnel-linux-amd64
           path: dist/EasyTunnel-linux-amd64.zip
@@ -146,19 +146,19 @@ jobs:
 
     steps:
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: EasyTunnel-release
           path: dist/windows
 
       - name: Download Linux amd64 artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: EasyTunnel-linux-amd64
           path: dist/linux-amd64
 
       - name: Upload tag build to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/windows/EasyTunnel.zip
