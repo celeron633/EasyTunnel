@@ -82,14 +82,18 @@ cmake -S . -B build -DBUILD_GUI=OFF -DBUILD_TUI=ON
 cmake --build build --target EasyTunnel_rendezvous_tui
 ```
 
-不使用 CMake 时，普通 Makefile 构建会合服务器；需要预先安装 JsonCpp 开发包
-（`pkg-config jsoncpp` 可用，例如 Debian/Ubuntu 的 `libjsoncpp-dev`），否则会在
-编译前给出安装提示并退出。如果系统已安装 FTXUI（`pkg-config ftxui` 可用），可
-显式构建 TUI：
+不使用 CMake 时，普通 Makefile 默认同时构建会合服务器和 FTXUI TUI。JsonCpp（`pkg-config jsoncpp`
+可用，例如 Debian/Ubuntu 的 `libjsoncpp-dev`）是两者共同的硬依赖，缺失时直接报错退出；FTXUI
+大多数发行版没有现成的包，缺失时会打印源码构建安装的命令，且只影响 TUI 部分，普通服务端仍会正常构建：
 
 ```bash
 make -f Makefile.rendezvous
-make -f Makefile.rendezvous rendezvous_tui
+```
+
+只需要普通服务端、不想处理 FTXUI 依赖时：
+
+```bash
+make -f Makefile.rendezvous rendezvous
 ```
 
 会合服务器使用 POSIX UDP socket，不创建 TUN，默认端口大于 `1024` 时不需要 root。

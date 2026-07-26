@@ -1,5 +1,7 @@
 # Offline Linux build for the EasyTunnel rendezvous server.
 # Usage: make -f Makefile.rendezvous
+# Builds both the plain server and its FTXUI TUI by default; `make rendezvous`
+# builds only the former if FTXUI is not available.
 
 CXX ?= g++
 TARGET ?= EasyTunnel_rendezvous
@@ -34,11 +36,13 @@ JSONCPP_LIBS := $(shell pkg-config --libs jsoncpp 2>/dev/null)
 CPPFLAGS += $(JSONCPP_CFLAGS)
 LDLIBS += $(JSONCPP_LIBS)
 
-.PHONY: all clean rendezvous rendezvous_tui check-jsoncpp
+.PHONY: all clean rendezvous rendezvous_tui check-jsoncpp check-ftxui
 
-all: $(TARGET)
+all: $(TARGET) $(TUI_TARGET)
 
 rendezvous: $(TARGET)
+
+rendezvous_tui: $(TUI_TARGET)
 
 check-jsoncpp:
 	@pkg-config --exists jsoncpp || { \
@@ -49,17 +53,19 @@ check-jsoncpp:
 		exit 1; \
 	}
 
-rendezvous_tui: check-jsoncpp
+check-ftxui:
 	@pkg-config --exists ftxui || { \
-		echo "FTXUI was not found. Install its development package (ftxui.pc) first."; \
+		echo "FTXUI was not found. It is rarely packaged by distros, so build and install it from source first:"; \
+		echo "  git clone --branch v6.1.9 https://github.com/ArthurSonzogni/FTXUI.git"; \
+		echo "  cmake -S FTXUI -B FTXUI/build -DCMAKE_BUILD_TYPE=Release -DFTXUI_ENABLE_INSTALL=ON"; \
+		echo "  cmake --build FTXUI/build --target install"; \
 		exit 1; \
 	}
-	$(MAKE) -f $(firstword $(MAKEFILE_LIST)) $(TUI_TARGET)
 
 $(TARGET): check-jsoncpp $(OBJECTS)
 	$(CXX) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
 
-$(TUI_TARGET): check-jsoncpp $(TUI_OBJECTS)
+$(TUI_TARGET): check-jsoncpp check-ftxui $(TUI_OBJECTS)
 	$(CXX) $(LDFLAGS) $(TUI_OBJECTS) $(FTXUI_LIBS) $(LDLIBS) -o $@
 
 $(TUI_OBJECTS): CPPFLAGS += $(FTXUI_CFLAGS)
