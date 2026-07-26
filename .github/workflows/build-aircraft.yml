@@ -47,8 +47,8 @@ jobs:
             Copy-Item "build/Release/wintun.dll" "dist/EasyTunnel/wintun.dll" -Force
           }
 
-          if (Test-Path "conf/tunnel.conf.example") {
-            Copy-Item "conf/tunnel.conf.example" "dist/EasyTunnel/tunnel.conf.example" -Force
+          if (Test-Path "conf/EasyTunnel.json.example") {
+            Copy-Item "conf/EasyTunnel.json.example" "dist/EasyTunnel/EasyTunnel.json.example" -Force
           }
 
           if (Test-Path "conf/rendezvous.json.example") {
@@ -123,7 +123,7 @@ jobs:
           install -m 755 build/EasyTunnel_rendezvous "$package_dir/EasyTunnel_rendezvous"
           install -m 755 build/EasyTunnel_rendezvous_tui "$package_dir/EasyTunnel_rendezvous_tui"
 
-          cp conf/tunnel.conf.example "$package_dir/tunnel.conf.example"
+          cp conf/EasyTunnel.json.example "$package_dir/EasyTunnel.json.example"
           cp conf/rendezvous.json.example "$package_dir/EasyTunnel_rendezvous.json.example"
           cp README.md LICENSE "$package_dir/"
 
