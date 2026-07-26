@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -16,6 +17,10 @@
 #include "../tunnel_engine.h"
 #include "../statistics_history.h"
 #include "tui_config.h"
+
+#ifdef _WIN32
+class TuiWindowsTray;
+#endif
 
 class TuiApp {
 public:
@@ -54,6 +59,9 @@ private:
     void StopTicker();
 
     ftxui::ScreenInteractive screen_;
+#ifdef _WIN32
+    std::unique_ptr<TuiWindowsTray> windowsTray_;
+#endif
     TunnelEngine engine_;
     TuiConfig config_;
     std::string configPath_;

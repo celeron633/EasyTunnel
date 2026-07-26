@@ -9,6 +9,10 @@
 #include "../log.h"
 #include "tui_theme.h"
 
+#ifdef _WIN32
+#include "windows_tray.h"
+#endif
+
 TuiApp::TuiApp() : screen_(ftxui::ScreenInteractive::Fullscreen()) {}
 
 TuiApp::~TuiApp() {
@@ -113,8 +117,16 @@ int TuiApp::Run() {
             if (tickerRunning_.load()) screen_.PostEvent(Event::Custom);
         }
     });
+#ifdef _WIN32
+    // The tray is optional; without it the TUI simply lacks the icon.
+    windowsTray_ = std::make_unique<TuiWindowsTray>();
+    if (!windowsTray_->Init(screen_.ExitLoopClosure())) windowsTray_.reset();
+#endif
     screen_.Loop(root);
     exiting_.store(true);
+#ifdef _WIN32
+    windowsTray_.reset();
+#endif
     StopTicker();
     engine_.Stop();
     SaveIfChanged();

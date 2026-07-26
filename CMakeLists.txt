@@ -114,7 +114,7 @@ add_executable(EasyTunnel_rendezvous
     rendezvous/config.cpp
     nat_protocol.cpp util.cpp log.cpp config.cpp)
 if(BUILD_TUI)
-    add_executable(EasyTunnel_tui
+    set(TUI_SOURCES
         tui/tui_main.cpp
         tui/tui_app.cpp
         tui/tui_app_connection.cpp
@@ -122,7 +122,12 @@ if(BUILD_TUI)
         tui/tui_app_settings.cpp
         tui/tui_app_log.cpp
         tui/tui_config.cpp
-        statistics_history.cpp
+        statistics_history.cpp)
+    if(WIN32)
+        list(APPEND TUI_SOURCES tui/windows_tray.cpp)
+    endif()
+    add_executable(EasyTunnel_tui
+        ${TUI_SOURCES}
         ${COMMON_SOURCES}
         ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_tui PRIVATE ${CMAKE_SOURCE_DIR})
@@ -188,7 +193,7 @@ if(BUILD_TUI)
         ftxui::component ftxui::dom ftxui::screen
         Threads::Threads)
     if(WIN32)
-        target_link_libraries(EasyTunnel_tui PRIVATE ws2_32 iphlpapi)
+        target_link_libraries(EasyTunnel_tui PRIVATE ws2_32 iphlpapi shell32)
         target_link_libraries(EasyTunnel_rendezvous_tui PRIVATE ws2_32)
     endif()
 endif()

@@ -271,6 +271,7 @@ sudo ./build/EasyTunnel_tui
 - `Enter` / `Space` 执行按钮、复选框和统计单位切换
 - 支持 FTXUI 终端中的鼠标点击
 - 配置自动保存到当前工作目录的 `EasyTunnel_tui.json`
+- Windows 下提供托盘图标：单击切换终端窗口显示/隐藏，右键菜单可退出
 - Connection 页面提供与 GUI 一致的最近 60 秒速度和延迟历史图
 - 日志写入可执行文件目录的 `EasyTunnel_tui.log`
 - Quit 会安全停止隧道并退出

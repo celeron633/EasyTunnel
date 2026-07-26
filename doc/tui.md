@@ -16,7 +16,9 @@ tui/
 ├── tui_app_log.cpp        # Log 页和剪贴板操作
 ├── tui_theme.h       # 共用的按钮样式、区块标题和标签行
 ├── tui_config.h      # TUI JSON 配置模型
-└── tui_config.cpp    # JSON 加载、校验和保存
+├── tui_config.cpp    # JSON 加载、校验和保存
+├── windows_tray.h    # Windows 托盘图标（仅 Windows 编译）
+└── windows_tray.cpp
 ```
 
 ## 技术选型
@@ -114,6 +116,16 @@ TunnelEngine 工作线程
 ```
 
 引擎回调和日志回调不直接修改 FTXUI Component，只更新互斥量/原子状态并发送 `Event::Custom`，所有组件渲染和可变 UI 数据操作均在主线程完成。
+
+## Windows 托盘图标
+
+Windows 构建在进入 FTXUI 主循环前创建托盘图标，复用 exe 内嵌的应用图标资源。控制台窗口属于终端宿主进程（conhost 或 Windows Terminal），无法像 GUI 那样子类化窗口过程拦截最小化/关闭，因此托盘由独立线程驱动一个隐藏窗口接收消息：
+
+- 左键单击 / 双击：切换终端窗口显示与隐藏
+- 右键菜单：Show/Hide window 和 Exit（通过 `ExitLoopClosure` 安全退出）
+- Explorer 重启（`TaskbarCreated` 广播）后自动重新注册图标
+
+终端窗口的定位：conhost 下直接使用 `GetConsoleWindow()`；Windows Terminal 下该句柄是隐藏的 ConPTY 伪窗口，退回启动时的前台窗口。注意 Windows Terminal 的隐藏会作用于整个终端窗口（包括其他标签页）。托盘创建失败只记录日志，不影响 TUI 运行。
 
 ## 刷新频率与闪烁
 
