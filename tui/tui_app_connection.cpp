@@ -15,6 +15,7 @@
 #include "../nat_protocol.h"
 #include "../rendezvous_client.h"
 #include "../util.h"
+#include "tui_theme.h"
 
 namespace {
 const char* UnitName(int unit) {
@@ -98,87 +99,112 @@ ftxui::Component TuiApp::BuildConnectionTab() {
     using namespace ftxui;
 
     auto clientList = Radiobox(&clients_, &selectedClient_);
-    auto refresh = Button("Refresh clients", [this] { RefreshClients(); });
-    auto wait = Button("Wait for peer", [this] { StartConnection(""); });
-    auto connect = Button("Connect selected", [this] { ConnectSelectedClient(); });
-    auto disconnect = Button("Disconnect", [this] { Disconnect(); });
-    auto txTotal = Button(&txTotalLabel_, [this] { txTotalUnit_ = (txTotalUnit_ + 1) % 3; });
-    auto rxTotal = Button(&rxTotalLabel_, [this] { rxTotalUnit_ = (rxTotalUnit_ + 1) % 3; });
-    auto txSpeed = Button(&txSpeedLabel_, [this] { txSpeedUnit_ = (txSpeedUnit_ + 1) % 3; });
-    auto rxSpeed = Button(&rxSpeedLabel_, [this] { rxSpeedUnit_ = (rxSpeedUnit_ + 1) % 3; });
-    ButtonOption compactStatusButton = ButtonOption::Simple();
-    compactStatusButton.transform = [](const EntryState& entry) {
-        Element output = text(entry.label);
-        if (entry.focused) output = output | inverted;
-        return output;
-    };
-    auto statusTx = Button(&statusTxLabel_,
-        [this] { statusUnit_ = (statusUnit_ + 1) % 3; }, compactStatusButton);
-    auto statusRx = Button(&statusRxLabel_,
-        [this] { statusUnit_ = (statusUnit_ + 1) % 3; }, compactStatusButton);
+    auto refresh = Button("Refresh", [this] { RefreshClients(); },
+                          tui_theme::FlatButton());
+    auto wait = Button("Wait for peer", [this] { StartConnection(""); },
+                       tui_theme::FlatButton());
+    auto connect = Button("Connect selected", [this] { ConnectSelectedClient(); },
+                          tui_theme::FlatButton());
+    auto disconnect = Button("Disconnect", [this] { Disconnect(); },
+                             tui_theme::FlatButton());
+    const ButtonOption valueButton = tui_theme::ValueButton();
+    auto txTotal = Button(&txTotalLabel_,
+        [this] { txTotalUnit_ = (txTotalUnit_ + 1) % 3; }, valueButton);
+    auto rxTotal = Button(&rxTotalLabel_,
+        [this] { rxTotalUnit_ = (rxTotalUnit_ + 1) % 3; }, valueButton);
+    auto txSpeed = Button(&txSpeedLabel_,
+        [this] { txSpeedUnit_ = (txSpeedUnit_ + 1) % 3; }, valueButton);
+    auto rxSpeed = Button(&rxSpeedLabel_,
+        [this] { rxSpeedUnit_ = (rxSpeedUnit_ + 1) % 3; }, valueButton);
 
     auto controls = Container::Vertical({
-        refresh, clientList, wait, connect, disconnect, txTotal, rxTotal,
-        txSpeed, rxSpeed, statusTx, statusRx,
+        Container::Horizontal({refresh, wait, connect, disconnect}),
+        clientList,
+        Container::Horizontal({txTotal, txSpeed}),
+        Container::Horizontal({rxTotal, rxSpeed}),
     });
     return Renderer(controls,
         [this, refresh, clientList, wait, connect, disconnect, txTotal,
-         rxTotal, txSpeed, rxSpeed, statusTx, statusRx] {
+         rxTotal, txSpeed, rxSpeed] {
         const auto& stats = engine_.GetStats();
-        std::string status;
-        { std::lock_guard<std::mutex> lock(statusMutex_); status = status_; }
-        const bool txActive = std::chrono::steady_clock::now() - lastTxActivity_
-            < std::chrono::milliseconds(350);
-        const bool rxActive = std::chrono::steady_clock::now() - lastRxActivity_
-            < std::chrono::milliseconds(350);
+        // One tick is the resolution of the counters that feed the indicator,
+        // so anything newer than a tick and a half counts as live traffic.
+        const auto now = std::chrono::steady_clock::now();
+        const bool txActive = now - lastTxActivity_ < std::chrono::milliseconds(1500);
+        const bool rxActive = now - lastRxActivity_ < std::chrono::milliseconds(1500);
         const int64_t rttMilliseconds = stats.rttMilliseconds.load();
-        Elements clientRows{
-            hbox({refresh->Render(), text("  Online clients:")}),
+
+        Elements peerRows{
+            hbox({refresh->Render(), text("  "), wait->Render(), text("  "),
+                  connect->Render(), text("  "), disconnect->Render(), filler(),
+                  text(std::to_string(clients_.size()) + " online") | dim}),
+            separator(),
         };
         if (clients_.empty()) {
-            clientRows.push_back(text("  No online clients") | dim);
+            peerRows.push_back(vbox({
+                filler(),
+                hbox({filler(), text("No online peers. Press Refresh.") | dim,
+                      filler()}),
+                filler(),
+            }) | flex);
         } else {
-            clientRows.push_back(text("  " + clientHeader_) | bold | dim);
-            clientRows.push_back(
-                clientList->Render() | frame | size(HEIGHT, LESS_THAN, 7));
+            peerRows.push_back(text("  " + clientHeader_) | bold);
+            peerRows.push_back(clientList->Render()
+                | vscroll_indicator | frame | flex);
             if (selectedClient_ >= 0
                 && selectedClient_ < static_cast<int>(clientDetails_.size())) {
                 const RendezvousPeerInfo& selected = clientDetails_[selectedClient_];
-                clientRows.push_back(text("  " + selected.peerId + ": "
+                peerRows.push_back(text("  " + selected.peerId + ": "
                     + FormatPeerCapabilities(selected.capabilities)) | dim);
             }
         }
+
+        auto trafficRow = [](const std::string& name, bool active,
+                             const std::string& packets, Element bytes,
+                             Element speed) {
+            return hbox({
+                text(active ? " * " : " . ")
+                    | color(active ? Color::GreenLight : Color::GrayDark),
+                text(name) | bold | size(WIDTH, EQUAL, 4),
+                text(packets) | size(WIDTH, EQUAL, 12),
+                bytes | size(WIDTH, EQUAL, 16),
+                speed | flex,
+            });
+        };
+        Element traffic = vbox({
+            hbox({
+                // Skips the activity dot and the TX/RX name column so the
+                // headers sit exactly above their values.
+                text("") | size(WIDTH, EQUAL, 7),
+                text("Packets") | bold | size(WIDTH, EQUAL, 12),
+                text("Total") | bold | size(WIDTH, EQUAL, 16),
+                text("Speed") | bold | flex,
+            }),
+            trafficRow("TX", txActive, std::to_string(stats.txPackets.load()),
+                       txTotal->Render(), txSpeed->Render()),
+            trafficRow("RX", rxActive, std::to_string(stats.rxPackets.load()),
+                       rxTotal->Render(), rxSpeed->Render()),
+            separator(),
+            hbox({text(" Latency ") | bold,
+                  text(rttMilliseconds < 0
+                       ? "-- ms"
+                       : std::to_string(rttMilliseconds) + " ms")}),
+            filler(),
+        });
+
+        // The peer list only needs as much room as a realistic room holds;
+        // whatever is left goes to the charts, which read better when tall.
         return vbox({
-            vbox(std::move(clientRows)),
-            hbox({wait->Render(), connect->Render(), disconnect->Render()}),
-            separator(),
-            text("Packet statistics") | bold,
+            window(tui_theme::WindowTitle("Online peers"),
+                   vbox(std::move(peerRows)))
+                | size(HEIGHT, LESS_THAN, 13) | flex,
             hbox({
-                vbox({
-                    text("TX Packets: " + std::to_string(stats.txPackets.load())),
-                    txTotal->Render(), txSpeed->Render(),
-                }) | flex,
-                vbox({
-                    text("RX Packets: " + std::to_string(stats.rxPackets.load())),
-                    rxTotal->Render(), rxSpeed->Render(),
-                }) | flex,
-            }),
-            text(rttMilliseconds < 0
-                ? "Latency: -- ms"
-                : "Latency: " + std::to_string(rttMilliseconds) + " ms"),
-            RenderStatisticsCharts(),
-            separator(),
-            hbox({
-                text(txActive ? "* " : ". ")
-                    | color(txActive ? Color::GreenLight : Color::GrayDark),
-                text("TX "), statusTx->Render(), text("   "),
-                text(rxActive ? "* " : ". ")
-                    | color(rxActive ? Color::GreenLight : Color::GrayDark),
-                text("RX "), statusRx->Render(),
-            }),
-            separator(),
-            hbox({text("Status: ") | bold, text(status) | flex}),
-        }) | vscroll_indicator | frame | border | flex;
+                window(tui_theme::WindowTitle("Traffic"), std::move(traffic))
+                    | size(WIDTH, EQUAL, 46),
+                window(tui_theme::WindowTitle("Last 60 seconds"),
+                       RenderStatisticsCharts()) | flex,
+            }) | size(HEIGHT, GREATER_THAN, 8) | flex,
+        });
     });
 }
 
@@ -392,12 +418,12 @@ void TuiApp::UpdateStats() {
     lastSpeedSample_ = now;
 }
 
+// The traffic table carries the column headers, so the cells only hold the
+// value and its currently selected unit.
 void TuiApp::UpdateDisplayLabels() {
     const auto& stats = engine_.GetStats();
-    txTotalLabel_ = "TX Bytes: " + ByteText(static_cast<double>(stats.txBytes.load()), txTotalUnit_, false);
-    rxTotalLabel_ = "RX Bytes: " + ByteText(static_cast<double>(stats.rxBytes.load()), rxTotalUnit_, false);
-    txSpeedLabel_ = "TX Speed: " + ByteText(txBytesPerSecond_, txSpeedUnit_, true);
-    rxSpeedLabel_ = "RX Speed: " + ByteText(rxBytesPerSecond_, rxSpeedUnit_, true);
-    statusTxLabel_ = ByteText(static_cast<double>(stats.txBytes.load()), statusUnit_, false);
-    statusRxLabel_ = ByteText(static_cast<double>(stats.rxBytes.load()), statusUnit_, false);
+    txTotalLabel_ = ByteText(static_cast<double>(stats.txBytes.load()), txTotalUnit_, false);
+    rxTotalLabel_ = ByteText(static_cast<double>(stats.rxBytes.load()), rxTotalUnit_, false);
+    txSpeedLabel_ = ByteText(txBytesPerSecond_, txSpeedUnit_, true);
+    rxSpeedLabel_ = ByteText(rxBytesPerSecond_, rxSpeedUnit_, true);
 }

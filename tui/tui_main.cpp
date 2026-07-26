@@ -14,41 +14,13 @@
 #include "../log.h"
 #include "tui_app.h"
 
+// The TUI used to force the console window to 110x40 on startup. Windows
+// Terminal honours that request asynchronously and reflows its buffer while
+// FTXUI is already rendering into the alternate screen, which is what made the
+// UI flicker at the default window size. The layout now fits a default-sized
+// terminal, so the console is left exactly as the user configured it, the same
+// way EasyTunnel_rendezvous_tui does.
 namespace {
-#ifdef _WIN32
-// Grow the console window (and its buffer) so the whole TUI is visible without
-// scrolling. Only ever enlarges; a console that is already big enough is left
-// untouched, and the request is clamped to the largest size the font/monitor
-// allows.
-void EnlargeConsole(SHORT columns, SHORT rows) {
-    HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (handle == nullptr || handle == INVALID_HANDLE_VALUE) return;
-
-    CONSOLE_SCREEN_BUFFER_INFO info{};
-    if (!GetConsoleScreenBufferInfo(handle, &info)) return;
-
-    const COORD largest = GetLargestConsoleWindowSize(handle);
-    if (largest.X > 0 && columns > largest.X) columns = largest.X;
-    if (largest.Y > 0 && rows > largest.Y) rows = largest.Y;
-
-    const SHORT currentCols = info.srWindow.Right - info.srWindow.Left + 1;
-    const SHORT currentRows = info.srWindow.Bottom - info.srWindow.Top + 1;
-    if (columns < currentCols) columns = currentCols;
-    if (rows < currentRows) rows = currentRows;
-    if (columns == currentCols && rows == currentRows) return;
-
-    // The window can never be larger than the buffer, so grow the buffer first.
-    COORD buffer = info.dwSize;
-    if (buffer.X < columns) buffer.X = columns;
-    if (buffer.Y < rows) buffer.Y = rows;
-    SetConsoleScreenBufferSize(handle, buffer);
-
-    SMALL_RECT window{0, 0, static_cast<SHORT>(columns - 1),
-                      static_cast<SHORT>(rows - 1)};
-    SetConsoleWindowInfo(handle, TRUE, &window);
-}
-#endif
-
 std::string TuiLogPath() {
 #ifdef _WIN32
     char executable[MAX_PATH]{};
@@ -69,7 +41,6 @@ int main() {
 #ifdef _WIN32
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-    EnlargeConsole(110, 40);
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         Log(LogLevel::Error, "WSAStartup failed");

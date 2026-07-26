@@ -14,6 +14,7 @@ tui/
 ├── tui_app_connection.cpp # Connection 页、连接流程和统计
 ├── tui_app_settings.cpp   # Settings 页和配置同步
 ├── tui_app_log.cpp        # Log 页和剪贴板操作
+├── tui_theme.h       # 共用的按钮样式、区块标题和标签行
 ├── tui_config.h      # TUI JSON 配置模型
 └── tui_config.cpp    # JSON 加载、校验和保存
 ```
@@ -35,41 +36,63 @@ ftxui::screen
 - 不依赖 curses/ncurses
 - Component/Renderer 模型适合复用 GUI 的状态和操作
 
+## 整体框架
+
+界面与 `EasyTunnel_rendezvous_tui` 保持一致的外壳，全部页面共用同一套边框和留白：
+
+```text
+ EasyTunnel Client  [ CONNECTED ]                              [Quit]
+                     Connection  Settings  Log
+─────────────────────────────────────────────────────────────────────
+ 当前页面内容（flex）
+─────────────────────────────────────────────────────────────────────
+ 当前连接状态                                        按键提示（dim）
+```
+
+- 标题行右侧只保留 Quit，Tab 切换条独占一行并居中
+- 状态徽标按 `TunnelState` 着色：Connected 绿、Connecting 黄、Error 红、Disconnected 灰
+- 连接状态移到全局底栏，任何页面都能看到，不再占用 Connection 页空间
+- 底栏右侧的按键提示随当前页面变化
+- 按钮统一渲染为 `[Label]`，聚焦时反色，替换 FTXUI 默认的动画色块
+
+页面布局按默认大小的终端窗口（约 120x30）设计，无需滚动即可看完；窗口更小时各滚动区域会跟随焦点滚动。
+
 ## 页面结构
 
 ### Connection
 
-- 在线客户端刷新和选择，列表按列显示 Peer ID、公网端点、能力、TUN IP 和空闲时间
-- 选中项下方额外显示该客户端能力的完整名称
-- Wait for peer、Connect selected、Disconnect
-- TX/RX 包数、累计字节和每秒速度
-- 每 1 秒采样的最近 60 秒 TX/RX 速度与延迟柱形历史图
-- Bytes/KB/MB 单位切换按钮
-- 红色 TX、绿色 RX 活动指示
-- 当前连接状态
+- `Online peers` 面板：Refresh / Wait for peer / Connect selected / Disconnect 与在线数量同处工具栏
+- 列表按列显示 Peer ID、公网端点、能力、TUN IP 和空闲时间，选中项下方显示该客户端能力的完整名称
+- 无在线客户端时面板居中显示提示，不再留下空白列表
+- `Traffic` 面板：TX/RX 两行对齐显示包数、累计字节和每秒速度，行首圆点表示最近一个采样周期内是否有流量，末行显示延迟
+- 累计字节和速度单元格可回车切换 Bytes/KB/MB，聚焦时反色
+- `Last 60 seconds` 面板：TX 速度、RX 速度和 RTT 三张柱形图并排，随窗口高度拉伸
 
 ### Settings
 
-- Rendezvous Server Addr/Port
-- Room ID、My Peer ID、Auth Token
-- Adapter Name、Local TUN IPv4、Prefix、MTU
-- Auto configure IPv4
-- Traversal strategy 表格：普通 NAT、增强 NAT4、IPv6、IPv4 Relay 逐项开关、优先级和 Up/Down 排序
-- NAT4 Source Port Start/Count、Peer Port Offset、Round Timeout
-- Keepalive、Peer Timeout、Punch Timeout
-- NAT4 Source Port Start/Count、Peer Port Offset、Round Timeout
-- IPv6 主动入站声明、监听端口、TCP 探针主机/端口和超时（位于 Misc 之前）
-- 日志级别
-- Rendezvous Retry Delay Seconds
-- Auto wait for peer
-- JSON 配置保存结果
+两列布局，左列是会合与时序参数，右列是数据面参数，两列各自独立滚动：
+
+左列
+
+- Rendezvous：Server address/port、Room ID、My peer ID、Auth token、Retry delay、Auto wait for peer
+- NAT liveness：Keepalive、Peer timeout、Punch timeout、NAT4 端口起始/数量/偏移/轮次超时
+- Log and misc：日志级别（横向 Toggle，占一行）、1 KiB/s dummy traffic
+
+右列
+
+- TUN adapter：Adapter name、Local TUN IPv4、Prefix、MTU、Auto configure IPv4
+- Traversal strategy 表格：普通 NAT、增强 NAT4、IPv6、IPv4 Relay 逐项开关、优先级和 `[^]` / `[v]` 排序
+- IPv6 direct connection：主动入站声明、监听端口、TCP 探针主机/端口和超时
+
+底部单独一行显示 JSON 配置保存结果。
 
 ### Log
 
-- 显示最近 24 行实时日志
+- 视口保留最近 500 行并固定贴在底部，新日志不会让页面跳动
+- 按日志级别着色：Debug 灰、Info 白、Warn 黄、Error 红
+- 标题行显示当前行数，右侧为 Copy selection / Copy all / Clear
 - 内存最多保留 2000 行，超过后批量清理旧记录
-- Clear log 按钮
-- 完整文件日志写入 `EasyTunnel_tui.log`
+- 底部显示完整日志文件路径，复制结果就地反馈
 
 ## 线程模型
 
@@ -80,7 +103,7 @@ FTXUI 主线程
 ├── 启动/停止 TunnelEngine
 └── 处理自动等待状态机
 
-200ms Ticker 线程
+1s Ticker 线程
 └── PostEvent(Event::Custom)，驱动统计和页面刷新
 
 TunnelEngine 工作线程
@@ -92,6 +115,16 @@ TunnelEngine 工作线程
 
 引擎回调和日志回调不直接修改 FTXUI Component，只更新互斥量/原子状态并发送 `Event::Custom`，所有组件渲染和可变 UI 数据操作均在主线程完成。
 
+## 刷新频率与闪烁
+
+页面上所有统计量的精度都是 1 秒，因此刷新策略按这个精度收敛，避免整屏重绘造成撕裂：
+
+- Ticker 由 200ms 放宽到 1 秒，与 `EasyTunnel_rendezvous_tui` 一致
+- 日志回调的 `PostEvent` 限流到最多每 200ms 一次，突发日志不再触发几十次整屏重绘；被限流掉的内容由下一次 Ticker 补上
+- TX/RX 活动指示的判定窗口相应放宽到 1500ms，保证一个采样周期内的流量仍会点亮
+
+启动时不再调用 `SetConsoleScreenBufferSize` / `SetConsoleWindowInfo` 强行把控制台放大到 110x40。Windows Terminal 会异步响应该请求并在 FTXUI 已经开始向备用屏幕缓冲区渲染时重排缓冲区，这是默认窗口大小下闪烁的直接原因。现在布局本身适配默认窗口，控制台尺寸完全交给用户。
+
 ## 配置持久化
 
 TUI 在当前工作目录读写：
@@ -100,7 +133,7 @@ TUI 在当前工作目录读写：
 EasyTunnel_tui.json
 ```
 
-首次运行自动创建默认配置。之后每 200ms 比较一次配置签名，仅在内容变化时写入 JSON。配置字段与 GUI 对齐：
+首次运行自动创建默认配置。之后每次 Ticker 比较一次配置签名，仅在内容变化时写入 JSON。配置字段与 GUI 对齐：
 
 - 会合服务器、房间、Peer 和 Token
 - TUN 适配器及 IPv4
@@ -160,7 +193,8 @@ cmake --build build --target EasyTunnel_rendezvous
 ## 操作提示
 
 - `Tab` / `Shift+Tab`：在控件间移动
-- 方向键：切换 Tab、日志等级和客户端列表
+- 方向键：切换 Tab、日志等级和客户端列表；Settings 页左右方向键在两列之间切换
 - `Enter` / `Space`：按钮、复选框和单位切换
+- `Ctrl+C`：在 Log 页复制（有选区复制选区，无选区复制全部），其他页面退出程序
 - 鼠标：FTXUI 支持的终端中可直接点击
 - Quit：安全停止隧道并退出

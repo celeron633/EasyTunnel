@@ -8,6 +8,8 @@
 #include <ftxui/component/component_options.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include "tui_theme.h"
+
 namespace {
 int ParseInt(const std::string& text, int fallback) {
     try {
@@ -50,41 +52,49 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto dummyTraffic = Checkbox("1 KiB/s dummy traffic", &config_.dummyTrafficEnabled);
     auto ipv6Inbound = Checkbox("Accept inbound IPv6 UDP", &config_.ipv6AcceptInbound);
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
-    auto logLevel = Radiobox(&logLevels_, &config_.logLevel);
+    // A horizontal toggle keeps the log level on a single row, which is what
+    // lets the whole page fit a default-sized terminal window.
+    auto logLevel = Toggle(&logLevels_, &config_.logLevel);
 
+    const ButtonOption flatButton = tui_theme::FlatButton();
     Components modeCheckboxes;
     Components modeUpButtons;
     Components modeDownButtons;
     Components modeRows;
     for (size_t i = 0; i < config_.traversalModes.size(); ++i) {
         auto checkbox = Checkbox("", &config_.traversalModes[i].enabled);
-        auto up = Button("Up", [this, i] {
+        auto up = Button("^", [this, i] {
             if (i > 0) std::swap(config_.traversalModes[i], config_.traversalModes[i - 1]);
-        });
-        auto down = Button("Down", [this, i] {
+        }, flatButton);
+        auto down = Button("v", [this, i] {
             if (i + 1 < config_.traversalModes.size()) {
                 std::swap(config_.traversalModes[i], config_.traversalModes[i + 1]);
             }
-        });
+        }, flatButton);
         modeCheckboxes.push_back(checkbox);
         modeUpButtons.push_back(up);
         modeDownButtons.push_back(down);
         modeRows.push_back(Container::Horizontal({checkbox, up, down}));
     }
 
-    Components controlList = {
-        serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay, autoWait,
-        adapter, tunIp, tunPrefix, tunMtu, autoConfig,
-    };
-    controlList.insert(controlList.end(), modeRows.begin(), modeRows.end());
-    controlList.insert(controlList.end(), {
-        keepalive, peerTimeout, punchTimeout,
+    // The two columns are balanced so the whole page fits a default-sized
+    // terminal window without scrolling: session settings on the left, the
+    // data path on the right.
+    auto leftColumn = Container::Vertical({
+        serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay,
+        autoWait, keepalive, peerTimeout, punchTimeout,
         nat4SourcePortStart, nat4SourcePortCount,
-        nat4PeerPortOffset, nat4RoundTimeout, logLevel, dummyTraffic,
+        nat4PeerPortOffset, nat4RoundTimeout,
+        logLevel, dummyTraffic,
+    });
+    Components rightControls = {adapter, tunIp, tunPrefix, tunMtu, autoConfig};
+    rightControls.insert(rightControls.end(), modeRows.begin(), modeRows.end());
+    rightControls.insert(rightControls.end(), {
         ipv6Inbound, ipv6ListenPort, ipv6ProbeHost,
         ipv6ProbePort, ipv6FallbackTimeout,
     });
-    auto controls = Container::Vertical(controlList);
+    auto rightColumn = Container::Vertical(rightControls);
+    auto controls = Container::Horizontal({leftColumn, rightColumn});
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
          peerTimeout, punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
@@ -93,69 +103,76 @@ ftxui::Component TuiApp::BuildSettingsTab() {
          autoWait, ipv6Inbound, ipv6ListenPort,
          ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout,
          modeCheckboxes, modeUpButtons, modeDownButtons] {
-        auto row = [](const std::string& label, Component component) {
-            return hbox({text(label) | size(WIDTH, EQUAL, 26), component->Render() | flex});
-        };
-        Elements content = {
-            text("Rendezvous") | bold,
-            separator(),
-            row("Rendezvous Server Addr", serverAddress),
-            row("Rendezvous Server Port", serverPort),
+        const auto row = tui_theme::LabeledRow;
+        Elements left = {
+            tui_theme::SectionTitle("Rendezvous"),
+            row("Server address", serverAddress),
+            row("Server port", serverPort),
             row("Room ID", roomId),
-            row("My Peer ID", peerId),
-            row("Auth Token", token),
-            row("Retry Delay Seconds", rendezvousRetryDelay),
+            row("My peer ID", peerId),
+            row("Auth token", token),
+            row("Retry delay (s)", rendezvousRetryDelay),
             autoWait->Render(),
-            separator(),
-            text("TUN adapter") | bold,
-            separator(),
-            row("Adapter Name", adapter),
+            separatorEmpty(),
+            tui_theme::SectionTitle("NAT liveness"),
+            row("Keepalive (s)", keepalive),
+            row("Peer timeout (s)", peerTimeout),
+            row("Punch timeout (s)", punchTimeout),
+            row("NAT4 port start", nat4SourcePortStart),
+            row("NAT4 port count", nat4SourcePortCount),
+            row("NAT4 peer offset", nat4PeerPortOffset),
+            row("NAT4 round timeout (s)", nat4RoundTimeout),
+            separatorEmpty(),
+            tui_theme::SectionTitle("Log and misc"),
+            row("Log level", logLevel),
+            dummyTraffic->Render(),
+            filler(),
+        };
+
+        Elements right = {
+            tui_theme::SectionTitle("TUN adapter"),
+            row("Adapter name", adapter),
             row("Local TUN IPv4", tunIp),
-            row("TUN Prefix", tunPrefix),
+            row("TUN prefix", tunPrefix),
             row("TUN MTU", tunMtu),
             autoConfig->Render(),
-            separator(),
-            text("Traversal strategy") | bold,
-            hbox({text("On") | size(WIDTH, EQUAL, 5),
-                  text("Priority") | size(WIDTH, EQUAL, 9),
-                  text("Mode") | flex, text("Order") | size(WIDTH, EQUAL, 18)}),
+            separatorEmpty(),
+            tui_theme::SectionTitle("Traversal strategy"),
+            hbox({text("On") | size(WIDTH, EQUAL, 4),
+                  text("#") | size(WIDTH, EQUAL, 3),
+                  text("Mode") | flex,
+                  text("Order")}),
         };
         for (size_t i = 0; i < config_.traversalModes.size(); ++i) {
-            content.push_back(hbox({
-                modeCheckboxes[i]->Render() | size(WIDTH, EQUAL, 5),
-                text(std::to_string(i + 1)) | size(WIDTH, EQUAL, 9),
+            right.push_back(hbox({
+                modeCheckboxes[i]->Render() | size(WIDTH, EQUAL, 4),
+                text(std::to_string(i + 1)) | size(WIDTH, EQUAL, 3),
                 text(TraversalModeDisplayName(config_.traversalModes[i].mode)) | flex,
                 modeUpButtons[i]->Render(), text(" "), modeDownButtons[i]->Render(),
             }));
         }
-        Elements remainder = {
-            separator(),
-            text("NAT liveness") | bold,
-            row("Keepalive Seconds", keepalive),
-            row("Peer Timeout Seconds", peerTimeout),
-            row("Punch Timeout Seconds", punchTimeout),
-            row("NAT4 Source Port Start", nat4SourcePortStart),
-            row("NAT4 Source Port Count", nat4SourcePortCount),
-            row("NAT4 Peer Port Offset", nat4PeerPortOffset),
-            row("NAT4 Round Timeout", nat4RoundTimeout),
-            separator(),
-            text("Log") | bold,
-            row("Log Level", logLevel),
-            separator(),
-            text("IPv6 direct connection") | bold,
+        const Elements ipv6 = {
+            separatorEmpty(),
+            tui_theme::SectionTitle("IPv6 direct connection"),
             ipv6Inbound->Render(),
-            row("IPv6 Listen Port (0=auto)", ipv6ListenPort),
-            row("IPv6 Probe Host", ipv6ProbeHost),
-            row("IPv6 Probe TCP Port", ipv6ProbePort),
-            row("IPv6 Timeout Seconds", ipv6FallbackTimeout),
-            separator(),
-            text("Misc") | bold,
-            dummyTraffic->Render(),
-            separator(),
-            text(configMessage_) | color(configSaveOk_ ? Color::Green : Color::Red),
+            row("Listen port (0=auto)", ipv6ListenPort),
+            row("Probe host", ipv6ProbeHost),
+            row("Probe TCP port", ipv6ProbePort),
+            row("Probe timeout (s)", ipv6FallbackTimeout),
+            filler(),
         };
-        content.insert(content.end(), remainder.begin(), remainder.end());
-        return vbox(std::move(content)) | vscroll_indicator | frame | border | flex;
+        right.insert(right.end(), ipv6.begin(), ipv6.end());
+
+        return vbox({
+            hbox({
+                vbox(std::move(left)) | vscroll_indicator | yframe | flex,
+                separator(),
+                vbox(std::move(right)) | vscroll_indicator | yframe | flex,
+            }) | flex,
+            separator(),
+            text(configMessage_)
+                | color(configSaveOk_ ? Color::Green : Color::Red),
+        }) | border | flex;
     });
 }
 

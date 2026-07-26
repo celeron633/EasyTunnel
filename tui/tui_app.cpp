@@ -7,6 +7,7 @@
 #include <ftxui/dom/elements.hpp>
 
 #include "../log.h"
+#include "tui_theme.h"
 
 TuiApp::TuiApp() : screen_(ftxui::ScreenInteractive::Fullscreen()) {}
 
@@ -65,14 +66,24 @@ int TuiApp::Run() {
     auto logs = BuildLogTab();
     auto tabs = Toggle(&tabs_, &selectedTab_);
     auto tabContent = Container::Tab({connection, settings, logs}, &selectedTab_);
-    auto quit = Button("Quit", screen_.ExitLoopClosure());
-    auto rootContainer = Container::Vertical({tabs, tabContent, quit});
-    auto root = Renderer(rootContainer, [tabs, tabContent, quit] {
+    auto quit = Button("Quit", screen_.ExitLoopClosure(), tui_theme::FlatButton());
+    auto rootContainer = Container::Vertical({
+        Container::Horizontal({tabs, quit}), tabContent});
+    auto root = Renderer(rootContainer, [this, tabs, tabContent, quit] {
+        std::string status;
+        { std::lock_guard<std::mutex> lock(statusMutex_); status = status_; }
         return vbox({
-            hbox({text(" EasyTunnel TUI ") | bold, filler(), tabs->Render(),
-                  filler(), quit->Render()}),
+            hbox({text(" EasyTunnel Client ") | bold, RenderStateBadge(),
+                  filler(), quit->Render(), text(" ")}),
+            hbox({filler(), tabs->Render(), filler()}),
             separator(),
             tabContent->Render() | flex,
+            separator(),
+            hbox({text(" " + status) | flex,
+                  text(selectedTab_ == 2
+                       ? "Tab: focus  |  Ctrl+C: copy log  |  Quit: exit "
+                       : "Tab: focus  |  Arrows: select  |  Enter: activate ")
+                      | dim}),
         });
     });
     root |= CatchEvent([this](Event event) {
@@ -95,7 +106,10 @@ int TuiApp::Run() {
     tickerRunning_.store(true);
     tickerThread_ = std::thread([this] {
         while (tickerRunning_.load()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            // Every statistic on screen has one-second resolution. Redrawing
+            // more often only repaints the whole terminal, which is what made
+            // Windows Terminal flicker.
+            std::this_thread::sleep_for(std::chrono::seconds(1));
             if (tickerRunning_.load()) screen_.PostEvent(Event::Custom);
         }
     });
@@ -105,6 +119,20 @@ int TuiApp::Run() {
     engine_.Stop();
     SaveIfChanged();
     return 0;
+}
+
+ftxui::Element TuiApp::RenderStateBadge() const {
+    using namespace ftxui;
+    switch (state_.load()) {
+        case TunnelState::Connected:
+            return text(" CONNECTED ") | bold | color(Color::Green);
+        case TunnelState::Connecting:
+            return text(" CONNECTING ") | bold | color(Color::Yellow);
+        case TunnelState::Error:
+            return text(" ERROR ") | bold | color(Color::Red);
+        default:
+            return text(" DISCONNECTED ") | bold | color(Color::GrayDark);
+    }
 }
 
 void TuiApp::StopTicker() {

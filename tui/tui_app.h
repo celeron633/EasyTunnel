@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <ftxui/component/screen_interactive.hpp>
@@ -28,6 +29,7 @@ private:
     ftxui::Component BuildConnectionTab();
     ftxui::Component BuildSettingsTab();
     ftxui::Component BuildLogTab();
+    ftxui::Element RenderStateBadge() const;
     bool StartConnection(const std::string& targetPeerId);
     void ConnectSelectedClient();
     void Disconnect();
@@ -86,21 +88,19 @@ private:
     std::string status_ = "Disconnected";
     std::atomic<TunnelState> state_{TunnelState::Disconnected};
     std::mutex logMutex_;
-    std::vector<std::string> logLines_;
+    std::vector<std::pair<LogLevel, std::string>> logLines_;
     std::string logCopyMessage_;
     bool logCopyOk_ = true;
+    std::atomic<int64_t> lastLogRedrawMs_{0};
 
     int txTotalUnit_ = 0;
     int rxTotalUnit_ = 0;
     int txSpeedUnit_ = 0;
     int rxSpeedUnit_ = 0;
-    int statusUnit_ = 0;
     std::string txTotalLabel_;
     std::string rxTotalLabel_;
     std::string txSpeedLabel_;
     std::string rxSpeedLabel_;
-    std::string statusTxLabel_;
-    std::string statusRxLabel_;
     bool speedInitialized_ = false;
     uint64_t previousTxBytes_ = 0;
     uint64_t previousRxBytes_ = 0;

@@ -37,13 +37,13 @@ ftxui::Element BarChart(const std::string& title, ftxui::Color chartColor,
         return output;
     });
     return vbox({
-        text(title) | bold,
+        text(title) | bold | color(chartColor),
         hbox({
-            vbox({text(ValueLabel(maximum)), filler(), text("0")})
+            vbox({text(ValueLabel(maximum)) | dim, filler(), text("0") | dim})
                 | size(WIDTH, EQUAL, 6),
             bars | color(chartColor) | flex,
-        }) | size(HEIGHT, EQUAL, 4),
-        hbox({text("60 s") | dim, filler(), text("0") | dim}),
+        }) | flex,
+        hbox({text("-60s") | dim, filler(), text("now") | dim}),
     }) | flex;
 }
 
@@ -62,12 +62,18 @@ void TuiApp::UpdateStatisticsHistory() {
                               stats.rttMilliseconds.load());
 }
 
+// The three charts share one row so the panel keeps a fixed height whatever
+// the terminal size is.
 ftxui::Element TuiApp::RenderStatisticsCharts() const {
     using namespace ftxui;
     const auto& samples = statisticsHistory_.Samples();
     if (samples.empty()) {
-        return vbox({separator(), text("60-second history") | bold,
-                     text("Collecting the first sample...") | dim});
+        return vbox({
+            filler(),
+            hbox({filler(), text("Collecting the first sample...") | dim,
+                  filler()}),
+            filler(),
+        });
     }
     const auto tx = Values(samples,
         [](const StatisticsSample& sample) { return sample.txKibPerSecond; });
@@ -75,14 +81,11 @@ ftxui::Element TuiApp::RenderStatisticsCharts() const {
         [](const StatisticsSample& sample) { return sample.rxKibPerSecond; });
     const auto latency = Values(samples,
         [](const StatisticsSample& sample) { return sample.latencyMilliseconds; });
-    return vbox({
+    return hbox({
+        BarChart("TX KiB/s", Color::RedLight, tx),
         separator(),
-        text("60-second history") | bold,
-        hbox({
-            BarChart("TX speed (KiB/s)", Color::RedLight, tx),
-            separator(),
-            BarChart("RX speed (KiB/s)", Color::GreenLight, rx),
-        }),
-        BarChart("Latency (ms)", Color::YellowLight, latency),
+        BarChart("RX KiB/s", Color::GreenLight, rx),
+        separator(),
+        BarChart("RTT ms", Color::YellowLight, latency),
     });
 }

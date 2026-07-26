@@ -1,5 +1,6 @@
 #include "tui_app.h"
 
+#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <utility>
@@ -13,7 +14,19 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include "../log.h"
+#include "tui_theme.h"
+
 namespace {
+ftxui::Color LogColor(LogLevel level) {
+    switch (level) {
+        case LogLevel::Debug: return ftxui::Color::GrayDark;
+        case LogLevel::Warn: return ftxui::Color::Yellow;
+        case LogLevel::Error: return ftxui::Color::Red;
+        default: return ftxui::Color::White;
+    }
+}
+
 #ifndef _WIN32
 std::string Base64Encode(const std::string& input) {
     static constexpr char kAlphabet[] =
@@ -98,41 +111,68 @@ bool CopyToClipboard(const std::string& text, std::string* error) {
 ftxui::Component TuiApp::BuildLogTab() {
     using namespace ftxui;
 
-    auto clearLog = Button("Clear log", [this] {
+    const ButtonOption flatButton = tui_theme::FlatButton();
+    auto clearLog = Button("Clear", [this] {
         std::lock_guard<std::mutex> lock(logMutex_);
         logLines_.clear();
-    });
-    auto copySelection = Button("Copy selection", [this] { CopySelectedText(); });
-    auto copyAllLogs = Button("Copy all", [this] { CopyAllLogs(); });
+    }, flatButton);
+    auto copySelection = Button("Copy selection", [this] { CopySelectedText(); },
+                                flatButton);
+    auto copyAllLogs = Button("Copy all", [this] { CopyAllLogs(); }, flatButton);
     auto controls = Container::Horizontal({copySelection, copyAllLogs, clearLog});
     return Renderer(controls, [this, copySelection, copyAllLogs, clearLog] {
         Elements lines;
+        size_t total = 0;
         {
             std::lock_guard<std::mutex> lock(logMutex_);
-            const size_t begin = logLines_.size() > 24 ? logLines_.size() - 24 : 0;
-            for (size_t i = begin; i < logLines_.size(); ++i) {
-                lines.push_back(text(logLines_[i]));
+            total = logLines_.size();
+            // 500 lines is far more than any terminal shows at once, but it is
+            // what the scroll region can reach without redrawing the backlog.
+            const size_t begin = total > 500 ? total - 500 : 0;
+            for (size_t i = begin; i < total; ++i) {
+                lines.push_back(text(logLines_[i].second)
+                                | color(LogColor(logLines_[i].first)));
             }
         }
-        if (lines.empty()) lines.push_back(text("No log messages"));
-        Elements content{
-            hbox({text("Log") | bold, filler(), copySelection->Render(),
-                  copyAllLogs->Render(), clearLog->Render()}),
-            separator(),
-            vbox(std::move(lines)) | frame | flex,
-        };
+        if (lines.empty()) lines.push_back(text("No log messages") | dim);
+
+        Elements footer{text("File: " + GetLogFilePath()) | dim};
         if (!logCopyMessage_.empty()) {
-            content.push_back(text(logCopyMessage_)
-                              | color(logCopyOk_ ? Color::Green : Color::Red));
+            footer.push_back(filler());
+            footer.push_back(text(logCopyMessage_)
+                             | color(logCopyOk_ ? Color::Green : Color::Red));
         }
-        return vbox(std::move(content)) | border | flex;
+        return vbox({
+            hbox({text(" Live log ") | bold,
+                  text(std::to_string(total) + " lines") | dim, filler(),
+                  copySelection->Render(), text(" "), copyAllLogs->Render(),
+                  text(" "), clearLog->Render()}),
+            separator(),
+            // Sticking the viewport to the bottom keeps the newest line
+            // visible without the whole page jumping on every message.
+            vbox(std::move(lines)) | focusPositionRelative(0.0f, 1.0f)
+                | vscroll_indicator | frame | flex,
+            separator(),
+            hbox(std::move(footer)),
+        }) | border | flex;
     });
 }
 
-void TuiApp::OnLog(LogLevel /*level*/, const std::string& message) {
-    std::lock_guard<std::mutex> lock(logMutex_);
-    logLines_.push_back(message);
-    if (logLines_.size() > 2000) logLines_.erase(logLines_.begin(), logLines_.begin() + 500);
+void TuiApp::OnLog(LogLevel level, const std::string& message) {
+    {
+        std::lock_guard<std::mutex> lock(logMutex_);
+        logLines_.emplace_back(level, message);
+        if (logLines_.size() > 2000) {
+            logLines_.erase(logLines_.begin(), logLines_.begin() + 500);
+        }
+    }
+    // Bursts of log lines would otherwise repaint the terminal dozens of times
+    // per second. The one-second ticker still picks up whatever is throttled.
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    int64_t last = lastLogRedrawMs_.load();
+    if (now - last < 200) return;
+    if (!lastLogRedrawMs_.compare_exchange_strong(last, now)) return;
     screen_.PostEvent(ftxui::Event::Custom);
 }
 
@@ -142,7 +182,7 @@ void TuiApp::CopyAllLogs() {
         std::lock_guard<std::mutex> lock(logMutex_);
         for (size_t i = 0; i < logLines_.size(); ++i) {
             if (i != 0) text.push_back('\n');
-            text += logLines_[i];
+            text += logLines_[i].second;
         }
     }
     if (text.empty()) {
