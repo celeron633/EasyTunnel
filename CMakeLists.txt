@@ -20,6 +20,25 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(spdlog)
 
+# JSON config parsing (client_config.cpp, rendezvous/config.cpp). Only the
+# static library is needed, so the rest of JsonCpp's own build surface is
+# disabled before it is pulled in.
+FetchContent_Declare(
+    jsoncpp
+    GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
+    GIT_TAG 1.9.8
+)
+set(JSONCPP_WITH_TESTS OFF CACHE BOOL "" FORCE)
+set(JSONCPP_WITH_POST_BUILD_UNITTEST OFF CACHE BOOL "" FORCE)
+set(JSONCPP_WITH_EXAMPLE OFF CACHE BOOL "" FORCE)
+set(JSONCPP_WITH_CMAKE_PACKAGE OFF CACHE BOOL "" FORCE)
+set(JSONCPP_WITH_PKGCONFIG_SUPPORT OFF CACHE BOOL "" FORCE)
+set(JSONCPP_WITH_INSTALL OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
+set(BUILD_OBJECT_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(jsoncpp)
+
 if(BUILD_TUI)
     FetchContent_Declare(
         ftxui
@@ -45,7 +64,7 @@ if(BUILD_TESTING)
         log.cpp)
     target_include_directories(EasyTunnel_config_tests PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(EasyTunnel_config_tests PRIVATE
-        Threads::Threads spdlog::spdlog_header_only)
+        Threads::Threads spdlog::spdlog_header_only jsoncpp_static)
     if(WIN32)
         target_link_libraries(EasyTunnel_config_tests PRIVATE ws2_32)
     endif()
@@ -64,7 +83,7 @@ if(BUILD_TESTING)
     target_include_directories(
         EasyTunnel_rendezvous_capabilities_tests PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(EasyTunnel_rendezvous_capabilities_tests PRIVATE
-        Threads::Threads spdlog::spdlog_header_only)
+        Threads::Threads spdlog::spdlog_header_only jsoncpp_static)
     if(WIN32)
         target_link_libraries(
             EasyTunnel_rendezvous_capabilities_tests PRIVATE ws2_32)
@@ -183,20 +202,20 @@ endif()
 # Platform-specific link libraries
 # ---------------------------------------------------------------------------
 if(WIN32)
-    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only ws2_32 iphlpapi Threads::Threads)
-    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only ws2_32 Threads::Threads)
+    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only jsoncpp_static ws2_32 iphlpapi Threads::Threads)
+    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only jsoncpp_static ws2_32 Threads::Threads)
 else()
-    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only Threads::Threads)
-    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only Threads::Threads)
+    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only jsoncpp_static Threads::Threads)
+    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only jsoncpp_static Threads::Threads)
 endif()
 
 if(BUILD_TUI)
     target_link_libraries(EasyTunnel_tui PRIVATE
-        spdlog::spdlog_header_only
+        spdlog::spdlog_header_only jsoncpp_static
         ftxui::component ftxui::dom ftxui::screen
         Threads::Threads)
     target_link_libraries(EasyTunnel_rendezvous_tui PRIVATE
-        spdlog::spdlog_header_only
+        spdlog::spdlog_header_only jsoncpp_static
         ftxui::component ftxui::dom ftxui::screen
         Threads::Threads)
     if(WIN32)
@@ -352,7 +371,7 @@ if(BUILD_GUI)
     add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(EasyTunnel_gui PRIVATE
-        spdlog::spdlog_header_only imgui_lib Threads::Threads)
+        spdlog::spdlog_header_only jsoncpp_static imgui_lib Threads::Threads)
 
     if(MSVC)
         target_compile_options(EasyTunnel_gui PRIVATE /W4 /utf-8)

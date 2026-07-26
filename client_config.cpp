@@ -2,85 +2,26 @@
 
 #include <algorithm>
 #include <fstream>
-#include <sstream>
+
+#include <json/json.h>
 
 #include "nat_protocol.h"
 #include "util.h"
 
 namespace {
-std::string Escape(const std::string& value) {
-    std::string output;
-    for (const char c : value) {
-        switch (c) {
-            case '\\': output += "\\\\"; break;
-            case '"': output += "\\\""; break;
-            case '\n': output += "\\n"; break;
-            case '\r': output += "\\r"; break;
-            case '\t': output += "\\t"; break;
-            default: output += c; break;
-        }
-    }
-    return output;
+// Mirrors the previous hand-rolled parser's leniency: a missing key or a key
+// whose JSON type does not match keeps the struct's current value instead of
+// failing the whole file.
+void ReadString(const Json::Value& root, const char* key, std::string* value) {
+    if (root.isMember(key) && root[key].isString()) *value = root[key].asString();
 }
 
-size_t ValueStart(const std::string& json, const std::string& key) {
-    const size_t keyPosition = json.find("\"" + key + "\"");
-    if (keyPosition == std::string::npos) return std::string::npos;
-    const size_t colon = json.find(':', keyPosition + key.size() + 2);
-    if (colon == std::string::npos) return std::string::npos;
-    return json.find_first_not_of(" \t\r\n", colon + 1);
+void ReadInt(const Json::Value& root, const char* key, int* value) {
+    if (root.isMember(key) && root[key].isInt()) *value = root[key].asInt();
 }
 
-bool StringValue(const std::string& json, const std::string& key, std::string* value) {
-    size_t position = ValueStart(json, key);
-    if (position == std::string::npos || json[position] != '"') return false;
-    ++position;
-    std::string output;
-    bool escaped = false;
-    for (; position < json.size(); ++position) {
-        const char c = json[position];
-        if (escaped) {
-            switch (c) {
-                case 'n': output += '\n'; break;
-                case 'r': output += '\r'; break;
-                case 't': output += '\t'; break;
-                case '\\': output += '\\'; break;
-                case '"': output += '"'; break;
-                default: return false;
-            }
-            escaped = false;
-        } else if (c == '\\') {
-            escaped = true;
-        } else if (c == '"') {
-            *value = std::move(output);
-            return true;
-        } else {
-            output += c;
-        }
-    }
-    return false;
-}
-
-bool IntValue(const std::string& json, const std::string& key, int* value) {
-    const size_t position = ValueStart(json, key);
-    if (position == std::string::npos) return false;
-    try {
-        size_t consumed = 0;
-        const int parsed = std::stoi(json.substr(position), &consumed);
-        if (consumed == 0) return false;
-        *value = parsed;
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool BoolValue(const std::string& json, const std::string& key, bool* value) {
-    const size_t position = ValueStart(json, key);
-    if (position == std::string::npos) return false;
-    if (json.compare(position, 4, "true") == 0) { *value = true; return true; }
-    if (json.compare(position, 5, "false") == 0) { *value = false; return true; }
-    return false;
+void ReadBool(const Json::Value& root, const char* key, bool* value) {
+    if (root.isMember(key) && root[key].isBool()) *value = root[key].asBool();
 }
 }  // namespace
 
@@ -92,46 +33,49 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
         return true;
     }
     *existed = true;
-    std::ostringstream contents;
-    contents << input.rdbuf();
-    const std::string json = contents.str();
-    if (json.find('{') == std::string::npos || json.find('}') == std::string::npos) {
+
+    Json::Value root;
+    Json::CharReaderBuilder builder;
+    std::string parseErrors;
+    if (!Json::parseFromStream(builder, input, &root, &parseErrors)
+        || !root.isObject()) {
         *error = "Invalid JSON object: " + path;
         return false;
     }
-    StringValue(json, "rendezvous_address", &config->rendezvousAddress);
-    IntValue(json, "rendezvous_port", &config->rendezvousPort);
-    StringValue(json, "room_id", &config->roomId);
-    StringValue(json, "peer_id", &config->peerId);
-    StringValue(json, "auth_token", &config->authToken);
-    StringValue(json, "adapter_name", &config->adapterName);
-    StringValue(json, "local_tun_ipv4", &config->localTunIpv4);
-    IntValue(json, "tun_prefix", &config->tunPrefix);
-    IntValue(json, "tun_mtu", &config->tunMtu);
-    BoolValue(json, "auto_config_ipv4", &config->autoConfigIpv4);
-    IntValue(json, "keepalive_interval", &config->keepaliveInterval);
-    IntValue(json, "peer_timeout", &config->peerTimeout);
-    BoolValue(json, "dummy_traffic_enabled", &config->dummyTrafficEnabled);
-    IntValue(json, "punch_timeout", &config->punchTimeout);
-    std::string traversalModes;
-    if (StringValue(json, "traversal_modes", &traversalModes)
-        && !ParseTraversalModes(traversalModes, &config->traversalModes, error)) {
+
+    ReadString(root, "rendezvous_address", &config->rendezvousAddress);
+    ReadInt(root, "rendezvous_port", &config->rendezvousPort);
+    ReadString(root, "room_id", &config->roomId);
+    ReadString(root, "peer_id", &config->peerId);
+    ReadString(root, "auth_token", &config->authToken);
+    ReadString(root, "adapter_name", &config->adapterName);
+    ReadString(root, "local_tun_ipv4", &config->localTunIpv4);
+    ReadInt(root, "tun_prefix", &config->tunPrefix);
+    ReadInt(root, "tun_mtu", &config->tunMtu);
+    ReadBool(root, "auto_config_ipv4", &config->autoConfigIpv4);
+    ReadInt(root, "keepalive_interval", &config->keepaliveInterval);
+    ReadInt(root, "peer_timeout", &config->peerTimeout);
+    ReadBool(root, "dummy_traffic_enabled", &config->dummyTrafficEnabled);
+    ReadInt(root, "punch_timeout", &config->punchTimeout);
+    if (root.isMember("traversal_modes") && root["traversal_modes"].isString()
+        && !ParseTraversalModes(root["traversal_modes"].asString(),
+                                &config->traversalModes, error)) {
         *error = "Invalid traversal_modes: " + *error;
         return false;
     }
-    IntValue(json, "nat4_source_port_start", &config->nat4SourcePortStart);
-    IntValue(json, "nat4_source_port_count", &config->nat4SourcePortCount);
-    IntValue(json, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
-    IntValue(json, "nat4_round_timeout", &config->nat4RoundTimeout);
-    BoolValue(json, "ipv6_accept_inbound", &config->ipv6AcceptInbound);
-    IntValue(json, "ipv6_listen_port", &config->ipv6ListenPort);
-    StringValue(json, "ipv6_probe_host", &config->ipv6ProbeHost);
-    IntValue(json, "ipv6_probe_port", &config->ipv6ProbePort);
-    IntValue(json, "ipv6_fallback_timeout", &config->ipv6FallbackTimeout);
-    IntValue(json, "log_level", &config->logLevel);
-    IntValue(json, "rendezvous_retry_delay_seconds",
-             &config->rendezvousRetryDelaySeconds);
-    BoolValue(json, "auto_wait_for_peer", &config->autoWaitForPeer);
+    ReadInt(root, "nat4_source_port_start", &config->nat4SourcePortStart);
+    ReadInt(root, "nat4_source_port_count", &config->nat4SourcePortCount);
+    ReadInt(root, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
+    ReadInt(root, "nat4_round_timeout", &config->nat4RoundTimeout);
+    ReadBool(root, "ipv6_accept_inbound", &config->ipv6AcceptInbound);
+    ReadInt(root, "ipv6_listen_port", &config->ipv6ListenPort);
+    ReadString(root, "ipv6_probe_host", &config->ipv6ProbeHost);
+    ReadInt(root, "ipv6_probe_port", &config->ipv6ProbePort);
+    ReadInt(root, "ipv6_fallback_timeout", &config->ipv6FallbackTimeout);
+    ReadInt(root, "log_level", &config->logLevel);
+    ReadInt(root, "rendezvous_retry_delay_seconds",
+            &config->rendezvousRetryDelaySeconds);
+    ReadBool(root, "auto_wait_for_peer", &config->autoWaitForPeer);
 
     config->rendezvousPort = std::clamp(config->rendezvousPort, 1, 65535);
     config->tunPrefix = std::clamp(config->tunPrefix, 0, 32);
@@ -157,44 +101,43 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
 
 bool SaveClientConfig(const std::string& path, const ClientConfig& config,
                       std::string* error) {
+    Json::Value root;
+    root["rendezvous_address"] = config.rendezvousAddress;
+    root["rendezvous_port"] = config.rendezvousPort;
+    root["room_id"] = config.roomId;
+    root["peer_id"] = config.peerId;
+    root["auth_token"] = config.authToken;
+    root["adapter_name"] = config.adapterName;
+    root["local_tun_ipv4"] = config.localTunIpv4;
+    root["tun_prefix"] = config.tunPrefix;
+    root["tun_mtu"] = config.tunMtu;
+    root["auto_config_ipv4"] = config.autoConfigIpv4;
+    root["keepalive_interval"] = config.keepaliveInterval;
+    root["peer_timeout"] = config.peerTimeout;
+    root["dummy_traffic_enabled"] = config.dummyTrafficEnabled;
+    root["punch_timeout"] = config.punchTimeout;
+    root["traversal_modes"] = SerializeTraversalModes(config.traversalModes);
+    root["nat4_source_port_start"] = config.nat4SourcePortStart;
+    root["nat4_source_port_count"] = config.nat4SourcePortCount;
+    root["nat4_peer_port_offset"] = config.nat4PeerPortOffset;
+    root["nat4_round_timeout"] = config.nat4RoundTimeout;
+    root["ipv6_accept_inbound"] = config.ipv6AcceptInbound;
+    root["ipv6_listen_port"] = config.ipv6ListenPort;
+    root["ipv6_probe_host"] = config.ipv6ProbeHost;
+    root["ipv6_probe_port"] = config.ipv6ProbePort;
+    root["ipv6_fallback_timeout"] = config.ipv6FallbackTimeout;
+    root["log_level"] = config.logLevel;
+    root["rendezvous_retry_delay_seconds"] = config.rendezvousRetryDelaySeconds;
+    root["auto_wait_for_peer"] = config.autoWaitForPeer;
+
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
         *error = "Cannot save configuration: " + path;
         return false;
     }
-    output
-        << "{\n"
-        << "  \"rendezvous_address\": \"" << Escape(config.rendezvousAddress) << "\",\n"
-        << "  \"rendezvous_port\": " << config.rendezvousPort << ",\n"
-        << "  \"room_id\": \"" << Escape(config.roomId) << "\",\n"
-        << "  \"peer_id\": \"" << Escape(config.peerId) << "\",\n"
-        << "  \"auth_token\": \"" << Escape(config.authToken) << "\",\n"
-        << "  \"adapter_name\": \"" << Escape(config.adapterName) << "\",\n"
-        << "  \"local_tun_ipv4\": \"" << Escape(config.localTunIpv4) << "\",\n"
-        << "  \"tun_prefix\": " << config.tunPrefix << ",\n"
-        << "  \"tun_mtu\": " << config.tunMtu << ",\n"
-        << "  \"auto_config_ipv4\": " << (config.autoConfigIpv4 ? "true" : "false") << ",\n"
-        << "  \"keepalive_interval\": " << config.keepaliveInterval << ",\n"
-        << "  \"peer_timeout\": " << config.peerTimeout << ",\n"
-        << "  \"dummy_traffic_enabled\": " << (config.dummyTrafficEnabled ? "true" : "false") << ",\n"
-        << "  \"punch_timeout\": " << config.punchTimeout << ",\n"
-        << "  \"traversal_modes\": \""
-        << SerializeTraversalModes(config.traversalModes) << "\",\n"
-        << "  \"nat4_source_port_start\": " << config.nat4SourcePortStart << ",\n"
-        << "  \"nat4_source_port_count\": " << config.nat4SourcePortCount << ",\n"
-        << "  \"nat4_peer_port_offset\": " << config.nat4PeerPortOffset << ",\n"
-        << "  \"nat4_round_timeout\": " << config.nat4RoundTimeout << ",\n"
-        << "  \"ipv6_accept_inbound\": "
-        << (config.ipv6AcceptInbound ? "true" : "false") << ",\n"
-        << "  \"ipv6_listen_port\": " << config.ipv6ListenPort << ",\n"
-        << "  \"ipv6_probe_host\": \"" << Escape(config.ipv6ProbeHost) << "\",\n"
-        << "  \"ipv6_probe_port\": " << config.ipv6ProbePort << ",\n"
-        << "  \"ipv6_fallback_timeout\": " << config.ipv6FallbackTimeout << ",\n"
-        << "  \"log_level\": " << config.logLevel << ",\n"
-        << "  \"rendezvous_retry_delay_seconds\": "
-        << config.rendezvousRetryDelaySeconds << ",\n"
-        << "  \"auto_wait_for_peer\": " << (config.autoWaitForPeer ? "true" : "false") << "\n"
-        << "}\n";
+    Json::StreamWriterBuilder writerBuilder;
+    writerBuilder["indentation"] = "  ";
+    output << Json::writeString(writerBuilder, root) << '\n';
     output.flush();
     if (!output.good()) {
         *error = "Cannot write configuration: " + path;

@@ -26,25 +26,41 @@ DEPFILES := $(sort $(OBJECTS:.o=.d) $(TUI_OBJECTS:.o=.d))
 
 FTXUI_CFLAGS := $(shell pkg-config --cflags ftxui 2>/dev/null)
 FTXUI_LIBS := $(shell pkg-config --libs ftxui 2>/dev/null)
+JSONCPP_CFLAGS := $(shell pkg-config --cflags jsoncpp 2>/dev/null)
+JSONCPP_LIBS := $(shell pkg-config --libs jsoncpp 2>/dev/null)
 
-.PHONY: all clean rendezvous rendezvous_tui
+# rendezvous/config.cpp always needs JsonCpp, so every object picks up its
+# flags; FTXUI stays scoped to the TUI objects since only that build needs it.
+CPPFLAGS += $(JSONCPP_CFLAGS)
+LDLIBS += $(JSONCPP_LIBS)
+
+.PHONY: all clean rendezvous rendezvous_tui check-jsoncpp
 
 all: $(TARGET)
 
 rendezvous: $(TARGET)
 
-rendezvous_tui:
+check-jsoncpp:
+	@pkg-config --exists jsoncpp || { \
+		echo "JsonCpp was not found. Install its development package first, e.g.:"; \
+		echo "  Debian/Ubuntu: sudo apt install libjsoncpp-dev"; \
+		echo "  Fedora:        sudo dnf install jsoncpp-devel"; \
+		echo "  Arch:          sudo pacman -S jsoncpp"; \
+		exit 1; \
+	}
+
+rendezvous_tui: check-jsoncpp
 	@pkg-config --exists ftxui || { \
 		echo "FTXUI was not found. Install its development package (ftxui.pc) first."; \
 		exit 1; \
 	}
 	$(MAKE) -f $(firstword $(MAKEFILE_LIST)) $(TUI_TARGET)
 
-$(TARGET): $(OBJECTS)
-	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+$(TARGET): check-jsoncpp $(OBJECTS)
+	$(CXX) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -o $@
 
-$(TUI_TARGET): $(TUI_OBJECTS)
-	$(CXX) $(LDFLAGS) $^ $(FTXUI_LIBS) $(LDLIBS) -o $@
+$(TUI_TARGET): check-jsoncpp $(TUI_OBJECTS)
+	$(CXX) $(LDFLAGS) $(TUI_OBJECTS) $(FTXUI_LIBS) $(LDLIBS) -o $@
 
 $(TUI_OBJECTS): CPPFLAGS += $(FTXUI_CFLAGS)
 

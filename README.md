@@ -56,7 +56,7 @@ cmake -S . -B build -DBUILD_GUI=ON -DBUILD_TUI=ON
 cmake --build build --config Release
 ```
 
-Windows 构建会自动下载 Wintun SDK、GLFW、ImGui 和 FTXUI。生成：
+Windows 构建会自动下载 Wintun SDK、GLFW、ImGui、FTXUI 和 JsonCpp（JSON 配置读写）。生成：
 
 - `EasyTunnel.exe`：Console 客户端
 - `EasyTunnel_gui.exe`：GUI 客户端
@@ -82,8 +82,10 @@ cmake -S . -B build -DBUILD_GUI=OFF -DBUILD_TUI=ON
 cmake --build build --target EasyTunnel_rendezvous_tui
 ```
 
-不使用 CMake 时，普通 Makefile 仍默认只构建原 console 服务端；如果系统已安装
-FTXUI（`pkg-config ftxui` 可用），可显式构建 TUI：
+不使用 CMake 时，普通 Makefile 构建会合服务器；需要预先安装 JsonCpp 开发包
+（`pkg-config jsoncpp` 可用，例如 Debian/Ubuntu 的 `libjsoncpp-dev`），否则会在
+编译前给出安装提示并退出。如果系统已安装 FTXUI（`pkg-config ftxui` 可用），可
+显式构建 TUI：
 
 ```bash
 make -f Makefile.rendezvous

@@ -2,25 +2,10 @@
 
 #include <filesystem>
 #include <fstream>
-#include <sstream>
+
+#include <json/json.h>
 
 namespace {
-std::string EscapeJson(const std::string& value) {
-    std::string output;
-    output.reserve(value.size());
-    for (const char c : value) {
-        switch (c) {
-            case '\\': output += "\\\\"; break;
-            case '"': output += "\\\""; break;
-            case '\n': output += "\\n"; break;
-            case '\r': output += "\\r"; break;
-            case '\t': output += "\\t"; break;
-            default: output += c; break;
-        }
-    }
-    return output;
-}
-
 const char* ConfigLogLevel(LogLevel level) {
     switch (level) {
         case LogLevel::Debug: return "Debug";
@@ -31,93 +16,44 @@ const char* ConfigLogLevel(LogLevel level) {
     }
 }
 
-size_t ValueStart(const std::string& json, const std::string& key) {
-    const size_t keyPos = json.find("\"" + key + "\"");
-    if (keyPos == std::string::npos) return std::string::npos;
-    const size_t colon = json.find(':', keyPos + key.size() + 2);
-    if (colon == std::string::npos) return std::string::npos;
-    return json.find_first_not_of(" \t\r\n", colon + 1);
+// A missing key or a key whose JSON type does not match keeps the struct's
+// current value instead of failing the whole file.
+void ReadString(const Json::Value& root, const char* key, std::string* value) {
+    if (root.isMember(key) && root[key].isString()) *value = root[key].asString();
 }
 
-bool ReadString(const std::string& json, const std::string& key, std::string* value) {
-    size_t pos = ValueStart(json, key);
-    if (pos == std::string::npos || json[pos] != '"') return false;
-    ++pos;
-    std::string output;
-    bool escaped = false;
-    for (; pos < json.size(); ++pos) {
-        const char c = json[pos];
-        if (escaped) {
-            switch (c) {
-                case 'n': output += '\n'; break;
-                case 'r': output += '\r'; break;
-                case 't': output += '\t'; break;
-                case '\\': output += '\\'; break;
-                case '"': output += '"'; break;
-                default: return false;
-            }
-            escaped = false;
-        } else if (c == '\\') {
-            escaped = true;
-        } else if (c == '"') {
-            *value = std::move(output);
-            return true;
-        } else {
-            output += c;
-        }
-    }
-    return false;
-}
-
-bool ReadUInt16(const std::string& json, const std::string& key, uint16_t* value) {
-    const size_t pos = ValueStart(json, key);
-    if (pos == std::string::npos) return false;
-    try {
-        size_t consumed = 0;
-        const unsigned long parsed = std::stoul(json.substr(pos), &consumed);
-        if (consumed == 0 || parsed > 65535) return false;
-        *value = static_cast<uint16_t>(parsed);
-        return true;
-    } catch (...) {
-        return false;
+void ReadUInt16(const Json::Value& root, const char* key, uint16_t* value) {
+    if (root.isMember(key) && root[key].isUInt() && root[key].asUInt() <= 65535) {
+        *value = static_cast<uint16_t>(root[key].asUInt());
     }
 }
 
-bool ReadBool(const std::string& json, const std::string& key, bool* value) {
-    const size_t pos = ValueStart(json, key);
-    if (pos == std::string::npos) return false;
-    if (json.compare(pos, 4, "true") == 0) {
-        *value = true;
-        return true;
-    }
-    if (json.compare(pos, 5, "false") == 0) {
-        *value = false;
-        return true;
-    }
-    return false;
+void ReadBool(const Json::Value& root, const char* key, bool* value) {
+    if (root.isMember(key) && root[key].isBool()) *value = root[key].asBool();
 }
 
 bool WriteConfig(const std::string& path, const RendezvousConfig& config,
                  std::string* error) {
+    Json::Value root;
+    root["bind_address"] = config.bindAddress;
+    root["port"] = config.port;
+    root["auth_token"] = config.authToken;
+    root["client_timeout_seconds"] = config.clientTimeoutSeconds;
+    root["max_clients_per_room"] = config.maxClientsPerRoom;
+    root["ipv4_relay_enabled"] = config.ipv4RelayEnabled;
+    root["ipv4_relay_port_start"] = config.ipv4RelayPortStart;
+    root["ipv4_relay_port_end"] = config.ipv4RelayPortEnd;
+    root["log_level"] = ConfigLogLevel(config.logLevel);
+    root["log_file"] = config.logFile;
+
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
         *error = "Cannot create rendezvous config: " + path;
         return false;
     }
-    output
-        << "{\n"
-        << "  \"bind_address\": \"" << EscapeJson(config.bindAddress) << "\",\n"
-        << "  \"port\": " << config.port << ",\n"
-        << "  \"auth_token\": \"" << EscapeJson(config.authToken) << "\",\n"
-        << "  \"client_timeout_seconds\": " << config.clientTimeoutSeconds << ",\n"
-        << "  \"max_clients_per_room\": " << config.maxClientsPerRoom << ",\n"
-        << "  \"ipv4_relay_enabled\": "
-        << (config.ipv4RelayEnabled ? "true" : "false") << ",\n"
-        << "  \"ipv4_relay_port_start\": " << config.ipv4RelayPortStart << ",\n"
-        << "  \"ipv4_relay_port_end\": " << config.ipv4RelayPortEnd << ",\n"
-        << "  \"log_level\": \"" << ConfigLogLevel(config.logLevel) << "\",\n"
-        << "  \"log_file\": \"" << EscapeJson(config.logFile) << "\"\n"
-        << "}\n";
+    Json::StreamWriterBuilder writerBuilder;
+    writerBuilder["indentation"] = "  ";
+    output << Json::writeString(writerBuilder, root) << '\n';
     if (!output.good()) {
         *error = "Cannot write rendezvous config: " + path;
         return false;
@@ -140,38 +76,30 @@ bool LoadOrCreateRendezvousConfig(const std::string& path, RendezvousConfig* con
         *error = "Cannot open rendezvous config: " + path;
         return false;
     }
-    std::ostringstream contents;
-    contents << input.rdbuf();
-    const std::string json = contents.str();
-    if (json.find('{') == std::string::npos || json.find('}') == std::string::npos) {
+
+    Json::Value root;
+    Json::CharReaderBuilder builder;
+    std::string parseErrors;
+    if (!Json::parseFromStream(builder, input, &root, &parseErrors)
+        || !root.isObject()) {
         *error = "Invalid JSON object in " + path;
         return false;
     }
 
-    std::string text;
-    uint16_t number = 0;
-    if (ReadString(json, "bind_address", &text)) config->bindAddress = text;
-    if (ReadUInt16(json, "port", &number)) config->port = number;
-    if (ReadString(json, "auth_token", &text)) config->authToken = text;
-    if (ReadUInt16(json, "client_timeout_seconds", &number)) {
-        config->clientTimeoutSeconds = number;
-    }
-    if (ReadUInt16(json, "max_clients_per_room", &number)) {
-        config->maxClientsPerRoom = number;
-    }
-    ReadBool(json, "ipv4_relay_enabled", &config->ipv4RelayEnabled);
-    if (ReadUInt16(json, "ipv4_relay_port_start", &number)) {
-        config->ipv4RelayPortStart = number;
-    }
-    if (ReadUInt16(json, "ipv4_relay_port_end", &number)) {
-        config->ipv4RelayPortEnd = number;
-    }
-    if (ReadString(json, "log_level", &text)
-        && !TryParseLogLevel(text, &config->logLevel)) {
-        *error = "Invalid log_level in " + path + ": " + text;
+    ReadString(root, "bind_address", &config->bindAddress);
+    ReadUInt16(root, "port", &config->port);
+    ReadString(root, "auth_token", &config->authToken);
+    ReadUInt16(root, "client_timeout_seconds", &config->clientTimeoutSeconds);
+    ReadUInt16(root, "max_clients_per_room", &config->maxClientsPerRoom);
+    ReadBool(root, "ipv4_relay_enabled", &config->ipv4RelayEnabled);
+    ReadUInt16(root, "ipv4_relay_port_start", &config->ipv4RelayPortStart);
+    ReadUInt16(root, "ipv4_relay_port_end", &config->ipv4RelayPortEnd);
+    if (root.isMember("log_level") && root["log_level"].isString()
+        && !TryParseLogLevel(root["log_level"].asString(), &config->logLevel)) {
+        *error = "Invalid log_level in " + path + ": " + root["log_level"].asString();
         return false;
     }
-    if (ReadString(json, "log_file", &text)) config->logFile = text;
+    ReadString(root, "log_file", &config->logFile);
 
     return ValidateRendezvousConfig(*config, error);
 }
