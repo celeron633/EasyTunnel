@@ -121,29 +121,37 @@ void CopyToBuffer(const std::string& value, char (&buffer)[N]) {
 }
 }  // namespace
 
+// Two balanced columns: session and timing settings on the left, the data path
+// on the right. The whole page then fits the default window without scrolling.
 void GuiApp::RenderSettingsTab() {
     bool configChanged = false;
     ImGui::Spacing();
+    if (!ImGui::BeginTable("##SettingsColumns", 2,
+                           ImGuiTableFlags_SizingStretchSame
+                               | ImGuiTableFlags_BordersInnerV)) {
+        return;
+    }
+    ImGui::TableNextColumn();
     ImGui::SeparatorText("Rendezvous");
     if (BeginForm("##RendezvousSettings")) {
         const TunnelState state = currentState_.load();
         const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
         if (active) ImGui::BeginDisabled();
-        FormField("Rendezvous Server Addr");
+        FormField("Server address");
         configChanged |= ImGui::InputText(
             "##ServerAddress", serverAddress_, sizeof(serverAddress_));
-        FormField("Rendezvous Server Port");
+        FormField("Server port");
         configChanged |= ImGui::InputInt("##ServerPort", &serverPort_);
         serverPort_ = std::clamp(serverPort_, 1, 65535);
         FormField("Room ID");
         configChanged |= ImGui::InputText("##RoomId", roomId_, sizeof(roomId_));
-        FormField("My Peer ID");
+        FormField("My peer ID");
         configChanged |= ImGui::InputText("##PeerId", peerId_, sizeof(peerId_));
-        FormField("Auth Token");
+        FormField("Auth token");
         configChanged |= ImGui::InputText("##AuthToken", authToken_, sizeof(authToken_),
                                           ImGuiInputTextFlags_Password);
         if (active) ImGui::EndDisabled();
-        FormField("Retry Delay Seconds");
+        FormField("Retry delay (s)");
         const bool retryDelayChanged = ImGui::InputInt(
             "##RendezvousRetryDelay", &rendezvousRetryDelaySeconds_);
         rendezvousRetryDelaySeconds_ = std::clamp(rendezvousRetryDelaySeconds_, 1, 3600);
@@ -170,13 +178,53 @@ void GuiApp::RenderSettingsTab() {
         EndForm();
     }
     ImGui::Spacing();
+    ImGui::SeparatorText("NAT liveness");
+    if (BeginForm("##NatSettings")) {
+        FormField("Keepalive (s)");
+        configChanged |= ImGui::InputInt("##Keepalive", &keepaliveInterval_);
+        keepaliveInterval_ = std::clamp(keepaliveInterval_, 1, 300);
+        FormField("Peer timeout (s)");
+        configChanged |= ImGui::InputInt("##PeerTimeout", &peerTimeout_);
+        peerTimeout_ = std::clamp(peerTimeout_, keepaliveInterval_ + 1, 3600);
+        FormField("Punch timeout (s)");
+        configChanged |= ImGui::InputInt("##PunchTimeout", &punchTimeout_);
+        punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
+        FormField("NAT4 port start");
+        configChanged |= ImGui::InputInt("##Nat4SourcePortStart", &nat4SourcePortStart_);
+        nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
+        FormField("NAT4 port count");
+        configChanged |= ImGui::InputInt("##Nat4SourcePortCount", &nat4SourcePortCount_);
+        nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 1, 60);
+        if (nat4SourcePortCount_ > 0) {
+            nat4SourcePortStart_ = (std::min)(
+                nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
+        }
+        FormField("NAT4 peer offset");
+        configChanged |= ImGui::InputInt("##Nat4PeerPortOffset", &nat4PeerPortOffset_);
+        nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
+        FormField("NAT4 round timeout (s)");
+        configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &nat4RoundTimeout_);
+        nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
+        EndForm();
+    }
+    ImGui::Spacing();
+    ImGui::SeparatorText("Log and misc");
+    if (BeginForm("##LogSettings")) {
+        FormField("Log level");
+        configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
+        FormField("1 KiB/s dummy traffic");
+        configChanged |= ImGui::Checkbox("##DummyTraffic", &dummyTrafficEnabled_);
+        EndForm();
+    }
+
+    ImGui::TableNextColumn();
     ImGui::SeparatorText("TUN adapter");
     if (BeginForm("##TunSettings")) {
-        FormField("Adapter Name");
+        FormField("Adapter name");
         configChanged |= ImGui::InputText("##AdapterName", adapterName_, sizeof(adapterName_));
         FormField("Local TUN IPv4");
         configChanged |= ImGui::InputText("##TunIpv4", localTunIpv4_, sizeof(localTunIpv4_));
-        FormField("TUN Prefix");
+        FormField("TUN prefix");
         configChanged |= ImGui::SliderInt("##TunPrefix", &tunPrefix_, 0, 32);
         FormField("TUN MTU");
         configChanged |= ImGui::InputInt("##TunMtu", &tunMtu_);
@@ -185,7 +233,7 @@ void GuiApp::RenderSettingsTab() {
             FormMessage(ImVec4(1.0f, 0.8f, 0.0f, 1.0f),
                         "MTU > 1472 may cause outer IPv4 fragmentation");
         }
-        FormField("Auto Configure IPv4");
+        FormField("Auto configure IPv4");
         configChanged |= ImGui::Checkbox("##AutoConfig", &autoConfigIpv4_);
         EndForm();
     }
@@ -227,68 +275,26 @@ void GuiApp::RenderSettingsTab() {
         ImGui::EndTable();
     }
     ImGui::Spacing();
-    ImGui::SeparatorText("NAT liveness");
-    if (BeginForm("##NatSettings")) {
-        FormField("Keepalive Seconds");
-        configChanged |= ImGui::InputInt("##Keepalive", &keepaliveInterval_);
-        keepaliveInterval_ = std::clamp(keepaliveInterval_, 1, 300);
-        FormField("Peer Timeout Seconds");
-        configChanged |= ImGui::InputInt("##PeerTimeout", &peerTimeout_);
-        peerTimeout_ = std::clamp(peerTimeout_, keepaliveInterval_ + 1, 3600);
-        FormField("Punch Timeout Seconds");
-        configChanged |= ImGui::InputInt("##PunchTimeout", &punchTimeout_);
-        punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
-        FormField("NAT4 Source Port Start");
-        configChanged |= ImGui::InputInt("##Nat4SourcePortStart", &nat4SourcePortStart_);
-        nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
-        FormField("NAT4 Source Port Count");
-        configChanged |= ImGui::InputInt("##Nat4SourcePortCount", &nat4SourcePortCount_);
-        nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 1, 60);
-        if (nat4SourcePortCount_ > 0) {
-            nat4SourcePortStart_ = (std::min)(
-                nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
-        }
-        FormField("NAT4 Peer Port Offset");
-        configChanged |= ImGui::InputInt("##Nat4PeerPortOffset", &nat4PeerPortOffset_);
-        nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
-        FormField("NAT4 Round Timeout Seconds");
-        configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &nat4RoundTimeout_);
-        nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
-        EndForm();
-    }
-    ImGui::Spacing();
-    ImGui::SeparatorText("Log");
-    if (BeginForm("##LogSettings")) {
-        FormField("Log Level");
-        configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
-        EndForm();
-    }
-    ImGui::Spacing();
     ImGui::SeparatorText("IPv6 direct connection");
     if (BeginForm("##Ipv6FallbackSettings")) {
-        FormField("Accept Inbound UDP");
+        FormField("Accept inbound UDP");
         configChanged |= ImGui::Checkbox("##Ipv6Inbound", &ipv6AcceptInbound_);
-        FormField("Listen Port (0=auto)");
+        FormField("Listen port (0=auto)");
         configChanged |= ImGui::InputInt("##Ipv6ListenPort", &ipv6ListenPort_);
         ipv6ListenPort_ = std::clamp(ipv6ListenPort_, 0, 65535);
-        FormField("Probe Host");
+        FormField("Probe host");
         configChanged |= ImGui::InputText(
             "##Ipv6ProbeHost", ipv6ProbeHost_, sizeof(ipv6ProbeHost_));
-        FormField("Probe TCP Port");
+        FormField("Probe TCP port");
         configChanged |= ImGui::InputInt("##Ipv6ProbePort", &ipv6ProbePort_);
         ipv6ProbePort_ = std::clamp(ipv6ProbePort_, 1, 65535);
-        FormField("Timeout Seconds");
+        FormField("Probe timeout (s)");
         configChanged |= ImGui::InputInt("##Ipv6FallbackTimeout", &ipv6FallbackTimeout_);
         ipv6FallbackTimeout_ = std::clamp(ipv6FallbackTimeout_, 1, 120);
         EndForm();
     }
-    ImGui::Spacing();
-    ImGui::SeparatorText("Misc");
-    if (BeginForm("##MiscSettings")) {
-        FormField("1 KiB/s dummy traffic");
-        configChanged |= ImGui::Checkbox("##DummyTraffic", &dummyTrafficEnabled_);
-        EndForm();
-    }
+    ImGui::EndTable();
+
     if (configChanged) SaveGuiConfig();
     ImGui::Spacing();
     RenderConfigSaveStatus();

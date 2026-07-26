@@ -1,8 +1,11 @@
 #include "gui_app.h"
 
+#include <cfloat>
+
 #include "imgui.h"
 
 #include "../log.h"
+#include "gui_theme.h"
 
 namespace {
 int ScrollLogToEnd(ImGuiInputTextCallbackData* data) {
@@ -18,40 +21,36 @@ int ScrollLogToEnd(ImGuiInputTextCallbackData* data) {
 
 void GuiApp::RenderLogTab() {
     ImGui::Spacing();
-    if (ImGui::Button("Clear")) {
-        std::lock_guard<std::mutex> lock(logMutex_);
-        logLines_.clear();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Copy all")) {
-        std::string text;
-        {
-            std::lock_guard<std::mutex> lock(logMutex_);
-            for (size_t i = 0; i < logLines_.size(); ++i) {
-                if (i != 0) text.push_back('\n');
-                text += logLines_[i];
-            }
-        }
-        ImGui::SetClipboardText(text.c_str());
+    ImGui::SeparatorText("Live log");
+    if (ImGui::Button("Copy all", ImVec2(90, 0))) {
+        ImGui::SetClipboardText(logText_.c_str());
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Copy all in-memory log lines to the clipboard");
     }
     ImGui::SameLine();
+    if (ImGui::Button("Clear", ImVec2(90, 0))) {
+        std::lock_guard<std::mutex> lock(logMutex_);
+        logLines_.clear();
+    }
+    ImGui::SameLine();
     const bool autoScrollChanged = ImGui::Checkbox("Auto-scroll", &logAutoScroll_);
     ImGui::SameLine();
-    const std::string filePath = GetLogFilePath();
-    ImGui::TextDisabled("File: %s", filePath.empty() ? "unavailable" : filePath.c_str());
-    ImGui::Separator();
+    const std::string lineLabel = std::to_string(renderedLogLineCount_) + " lines";
+    gui_theme::TextRightAligned(lineLabel.c_str());
 
-    std::string text;
     size_t lineCount = 0;
     {
         std::lock_guard<std::mutex> lock(logMutex_);
         lineCount = logLines_.size();
-        for (size_t i = 0; i < logLines_.size(); ++i) {
-            if (i != 0) text.push_back('\n');
-            text += logLines_[i];
+        // Joining 2000 lines on every frame was pure waste; the text only
+        // changes when a line is appended or the buffer is trimmed.
+        if (lineCount != renderedLogLineCount_) {
+            logText_.clear();
+            for (size_t i = 0; i < lineCount; ++i) {
+                if (i != 0) logText_.push_back('\n');
+                logText_ += logLines_[i];
+            }
         }
     }
 
@@ -60,11 +59,16 @@ void GuiApp::RenderLogTab() {
     if (scrollPending) {
         ImGui::SetKeyboardFocusHere();
     }
+    // A negative height fills the remaining space; the reserved line keeps the
+    // log file path visible below the box.
     ImGui::InputTextMultiline(
-        "##LogText", text.data(), text.size() + 1, ImVec2(-FLT_MIN, -FLT_MIN),
+        "##LogText", logText_.data(), logText_.size() + 1,
+        ImVec2(-FLT_MIN, -ImGui::GetTextLineHeightWithSpacing()),
         ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_CallbackAlways,
         ScrollLogToEnd, &scrollPending);
     renderedLogLineCount_ = lineCount;
+    const std::string filePath = GetLogFilePath();
+    ImGui::TextDisabled("File: %s", filePath.empty() ? "unavailable" : filePath.c_str());
 }
 
 void GuiApp::OnLog(LogLevel /*level*/, const std::string& message) {

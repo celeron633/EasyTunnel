@@ -7,6 +7,7 @@
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
 
+#include "gui_theme.h"
 #include "ui_heartbeat.h"
 
 #ifdef _WIN32
@@ -51,7 +52,8 @@ bool GuiApp::Init() {
     if (!glfwInit()) return false;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    window_ = glfwCreateWindow(860, 680, "EasyTunnel", nullptr, nullptr);
+    // Wide enough for the two-column settings page without horizontal scrolling.
+    window_ = glfwCreateWindow(1040, 680, "EasyTunnel", nullptr, nullptr);
     if (!window_) {
         glfwTerminate();
         return false;
@@ -146,6 +148,18 @@ void GuiApp::Shutdown() {
     }
 }
 
+void GuiApp::RenderHeader() {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("EasyTunnel");
+    ImGui::SameLine(0.0f, 12.0f);
+    const gui_theme::StateStyle style = gui_theme::StyleFor(currentState_.load());
+    gui_theme::Badge(style.label, style.color);
+    ImGui::SameLine();
+    const std::string identity = std::string(roomId_) + " / " + peerId_;
+    gui_theme::TextRightAligned(identity.c_str());
+    ImGui::Separator();
+}
+
 void GuiApp::RenderFrame() {
     UpdateLiveStats();
     UpdateStatisticsHistory();
@@ -156,6 +170,7 @@ void GuiApp::RenderFrame() {
         | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse
         | ImGuiWindowFlags_NoBringToFrontOnFocus;
     ImGui::Begin("##MainWindow", nullptr, flags);
+    RenderHeader();
     if (ImGui::BeginTabBar("##MainTabs")) {
         if (ImGui::BeginTabItem("Connection")) {
             RenderConnectionTab();

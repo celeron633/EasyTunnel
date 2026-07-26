@@ -10,6 +10,8 @@
 
 #include "imgui.h"
 
+#include "gui_theme.h"
+
 namespace {
 float NiceScaleMaximum(float maximum) {
     if (maximum <= 0.0f) return 1.0f;
@@ -54,8 +56,8 @@ void RenderChartHeader(const char* title, const std::string& scaleLabel) {
 }
 
 void RenderTimeAxis(const char* id) {
-    constexpr const char* kFirstLabel = "60 s";
-    constexpr const char* kLastLabel = "0";
+    constexpr const char* kFirstLabel = "-60s";
+    constexpr const char* kLastLabel = "now";
     ImGui::PushID(id);
     ImGui::TextDisabled("%s", kFirstLabel);
     ImGui::SameLine();
@@ -115,9 +117,11 @@ void GuiApp::UpdateStatisticsHistory() {
                               stats.rttMilliseconds.load());
 }
 
+// All three plots share one row, so the panel keeps a single fixed height and
+// the charts grow with the window instead of stacking below the fold.
 void GuiApp::RenderStatisticsCharts() {
     ImGui::Spacing();
-    ImGui::SeparatorText("60-second history");
+    ImGui::SeparatorText("Last 60 seconds");
     const auto& samples = statisticsHistory_.Samples();
     if (samples.empty()) {
         ImGui::TextDisabled("Collecting the first sample...");
@@ -125,30 +129,25 @@ void GuiApp::RenderStatisticsCharts() {
     }
     constexpr float kMinimumPlotHeight = 76.0f;
     const ImGuiStyle& style = ImGui::GetStyle();
-    const float nonPlotHeight = 4.0f * (ImGui::GetTextLineHeight() + style.ItemSpacing.y)
-        + 2.0f * style.CellPadding.y + style.ItemSpacing.y;
-    const float availableHeight = ImGui::GetContentRegionAvail().y;
+    const float nonPlotHeight = 2.0f * (ImGui::GetTextLineHeight() + style.ItemSpacing.y)
+        + 2.0f * style.CellPadding.y;
     const float plotHeight = (std::max)(kMinimumPlotHeight,
-        (availableHeight - nonPlotHeight) * 0.5f);
-    const ImVec4 txColor(0.88f, 0.16f, 0.18f, 1.0f);
-    const ImVec4 rxColor(0.16f, 0.78f, 0.24f, 1.0f);
-    const ImVec4 latencyColor(0.95f, 0.76f, 0.12f, 1.0f);
-    const ImVec4 txHoveredColor(0.20f, 1.0f, 0.30f, 1.0f);
-    const ImVec4 rxHoveredColor(1.0f, 0.20f, 0.20f, 1.0f);
-    const ImVec4 latencyHoveredColor(1.0f, 0.90f, 0.24f, 1.0f);
-    if (ImGui::BeginTable("##SpeedHistory", 2,
+        ImGui::GetContentRegionAvail().y - nonPlotHeight);
+    const ImVec4 hovered(1.0f, 1.0f, 1.0f, 1.0f);
+    if (ImGui::BeginTable("##History", 3,
                           ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
         ImGui::TableNextColumn();
         RenderHistogram("##TxHistory", "TX speed", samples, plotHeight, "KiB/s",
-            txColor, txHoveredColor,
+            gui_theme::kTx, hovered,
             [](const StatisticsSample& sample) { return sample.txKibPerSecond; });
         ImGui::TableNextColumn();
         RenderHistogram("##RxHistory", "RX speed", samples, plotHeight, "KiB/s",
-            rxColor, rxHoveredColor,
+            gui_theme::kRx, hovered,
             [](const StatisticsSample& sample) { return sample.rxKibPerSecond; });
+        ImGui::TableNextColumn();
+        RenderHistogram("##LatencyHistory", "Latency", samples, plotHeight, "ms",
+            gui_theme::kLatency, hovered,
+            [](const StatisticsSample& sample) { return sample.latencyMilliseconds; });
         ImGui::EndTable();
     }
-    RenderHistogram("##LatencyHistory", "Latency", samples, plotHeight, "ms",
-        latencyColor, latencyHoveredColor,
-        [](const StatisticsSample& sample) { return sample.latencyMilliseconds; });
 }

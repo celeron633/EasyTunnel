@@ -33,6 +33,7 @@ public:
 
 private:
     void RenderFrame();
+    void RenderHeader();
     void RenderConnectionTab();
     void RenderSettingsTab();
     void RenderLogTab();
@@ -98,6 +99,8 @@ private:
     std::mutex logMutex_;
     std::vector<std::string> logLines_;
     bool logAutoScroll_ = true;
+    // Rebuilt only when the line count moves, so an idle log tab costs nothing.
+    std::string logText_;
     std::size_t renderedLogLineCount_ = 0;
     std::string configFilePath_;
     std::string configSaveMessage_;
@@ -106,7 +109,6 @@ private:
 
     int statisticsTotalUnit_ = 0;
     int statisticsSpeedUnit_ = 0;
-    int statusUnit_ = 0;
     bool speedSampleInitialized_ = false;
     uint64_t previousTxBytes_ = 0;
     uint64_t previousRxBytes_ = 0;

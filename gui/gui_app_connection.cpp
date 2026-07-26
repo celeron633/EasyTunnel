@@ -12,6 +12,7 @@
 #include "../nat_protocol.h"
 #include "../rendezvous_client.h"
 #include "../util.h"
+#include "gui_theme.h"
 
 namespace {
 const char* ByteUnitName(int unit) {
@@ -38,18 +39,19 @@ std::string FormatByteValue(double bytes, int unit) {
     return output.str();
 }
 
+// Value plus unit in one flat cell. It has to read as a number, not a button,
+// so the frame stays transparent until the pointer is over it.
 bool RenderByteValueButton(const char* id, double bytes, int unit, bool perSecond) {
-    const std::string label = FormatByteValue(bytes, unit) + "###" + id;
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5.0f, 1.0f));
+    std::string label = FormatByteValue(bytes, unit) + ' ' + ByteUnitName(unit);
+    if (perSecond) label += "/s";
+    label += "###";
+    label += id;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     const bool clicked = ImGui::Button(label.c_str());
+    ImGui::PopStyleColor();
     ImGui::PopStyleVar();
-    ImGui::SameLine(0.0f, 4.0f);
-    if (perSecond) {
-        const std::string unitLabel = std::string(ByteUnitName(unit)) + "/s";
-        ImGui::TextUnformatted(unitLabel.c_str());
-    } else {
-        ImGui::TextUnformatted(ByteUnitName(unit));
-    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Click to switch unit");
     return clicked;
 }
 
@@ -74,17 +76,42 @@ void GuiApp::RenderConnectionTab() {
     const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
     const bool waiting = active && waitingForPeer_.load();
     const bool canBrowseClients = !active || waiting;
-    ImGui::Spacing();
-    ImGui::SeparatorText("Online clients in this room");
-    if (canBrowseClients && ImGui::Button("Refresh clients")) RefreshClients();
-    ImGui::SameLine();
-    ImGui::TextDisabled("Only clients currently waiting/connecting are listed");
+    const bool canConnect = selectedClient_ >= 0
+        && selectedClient_ < static_cast<int>(clients_.size());
 
+    ImGui::Spacing();
+    ImGui::SeparatorText("Online peers");
+    // The whole action toolbar lives on one row above the list, the way the
+    // terminal client lays it out.
+    if (!canBrowseClients) ImGui::BeginDisabled();
+    if (ImGui::Button("Refresh", ImVec2(90, 0))) RefreshClients();
+    if (!canBrowseClients) ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (active) {
+        if (ImGui::Button("Disconnect", ImVec2(120, 0))) Disconnect();
+    } else if (ImGui::Button("Wait for peer", ImVec2(120, 0))) {
+        StartConnection("");
+    }
+    ImGui::SameLine();
+    if (!canConnect || (active && !waiting)) ImGui::BeginDisabled();
+    if (ImGui::Button("Connect selected", ImVec2(150, 0)) && canConnect) {
+        ConnectSelectedClient();
+    }
+    if (!canConnect || (active && !waiting)) ImGui::EndDisabled();
+    ImGui::SameLine();
+    const std::string onlineLabel = std::to_string(clients_.size()) + " online";
+    gui_theme::TextRightAligned(onlineLabel.c_str());
+
+    // The list grows with the room instead of always reserving room for six
+    // peers, so an empty room leaves the space to the charts below.
+    const int visibleRows = std::clamp(static_cast<int>(clients_.size()), 1, 6);
+    const float tableHeight = ImGui::GetTextLineHeightWithSpacing() * (visibleRows + 1)
+        + ImGui::GetStyle().CellPadding.y * 2.0f;
     const ImGuiTableFlags clientTableFlags = ImGuiTableFlags_Borders
         | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
         | ImGuiTableFlags_SizingStretchProp;
     if (ImGui::BeginTable("##ClientList", 5, clientTableFlags,
-                          ImVec2(-FLT_MIN, 160.0f))) {
+                          ImVec2(-FLT_MIN, tableHeight))) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("Peer ID", ImGuiTableColumnFlags_WidthStretch, 1.4f);
         ImGui::TableSetupColumn("Public endpoint", ImGuiTableColumnFlags_WidthStretch, 1.5f);
@@ -92,6 +119,11 @@ void GuiApp::RenderConnectionTab() {
         ImGui::TableSetupColumn("TUN IP", ImGuiTableColumnFlags_WidthStretch, 1.0f);
         ImGui::TableSetupColumn("Idle", ImGuiTableColumnFlags_WidthStretch, 0.6f);
         ImGui::TableHeadersRow();
+        if (clients_.empty()) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextDisabled("No online peers. Press Refresh.");
+        }
         for (int i = 0; i < static_cast<int>(clients_.size()); ++i) {
             const RendezvousPeerInfo& client = clients_[i];
             ImGui::TableNextRow();
@@ -119,73 +151,52 @@ void GuiApp::RenderConnectionTab() {
         }
         ImGui::EndTable();
     }
-    if (clients_.empty()) ImGui::TextDisabled("No online clients");
-
     ImGui::Spacing();
-    const bool canConnect = selectedClient_ >= 0
-        && selectedClient_ < static_cast<int>(clients_.size());
-    if (!active) {
-        if (ImGui::Button("Wait for peer", ImVec2(130, 0))) StartConnection("");
-        ImGui::SameLine();
-        if (!canConnect) ImGui::BeginDisabled();
-        if (ImGui::Button("Connect selected", ImVec2(150, 0)) && canConnect) {
-            ConnectSelectedClient();
-        }
-        if (!canConnect) ImGui::EndDisabled();
-    } else if (waiting) {
-        if (ImGui::Button("Disconnect", ImVec2(130, 0))) Disconnect();
-        ImGui::SameLine();
-        if (!canConnect) ImGui::BeginDisabled();
-        if (ImGui::Button("Connect selected", ImVec2(150, 0)) && canConnect) {
-            ConnectSelectedClient();
-        }
-        if (!canConnect) ImGui::EndDisabled();
-    } else if (ImGui::Button("Disconnect", ImVec2(130, 0))) {
-        Disconnect();
-    }
-    ImGui::SameLine();
-    {
-        std::lock_guard<std::mutex> lock(statusMutex_);
-        ImVec4 color(0.7f, 0.7f, 0.7f, 1.0f);
-        if (state == TunnelState::Connected) color = ImVec4(0.2f, 1.0f, 0.2f, 1.0f);
-        else if (state == TunnelState::Connecting) color = ImVec4(1.0f, 0.85f, 0.2f, 1.0f);
-        else if (state == TunnelState::Error) color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
-        ImGui::TextColored(color, "%s", statusMessage_.c_str());
-    }
-
-    ImGui::Spacing();
-    ImGui::SeparatorText("Packet statistics");
+    ImGui::SeparatorText("Traffic");
     const auto& stats = engine_.GetStats();
-    ImGui::Columns(2, "stats", true);
-    ImGui::Text("TX Packets: %llu", static_cast<unsigned long long>(stats.txPackets.load()));
-    ImGui::TextUnformatted("TX Bytes:");
-    ImGui::SameLine();
-    if (RenderByteValueButton("TxTotal", static_cast<double>(stats.txBytes.load()),
-                              statisticsTotalUnit_, false)) {
-        statisticsTotalUnit_ = (statisticsTotalUnit_ + 1) % 3;
+    const auto now = std::chrono::steady_clock::now();
+    const bool txActive = now - lastTxActivity_ < std::chrono::milliseconds(350);
+    const bool rxActive = now - lastRxActivity_ < std::chrono::milliseconds(350);
+    // One row per direction keeps packets, totals and speed under shared
+    // headers instead of repeating the labels six times.
+    auto trafficRow = [this](const char* name, bool activeDirection,
+                             const ImVec4& color, uint64_t packets, double bytes,
+                             double bytesPerSecond, const char* totalId,
+                             const char* speedId) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        gui_theme::ActivityDot(activeDirection, color);
+        ImGui::SameLine(0.0f, 6.0f);
+        ImGui::TextUnformatted(name);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Text("%llu", static_cast<unsigned long long>(packets));
+        ImGui::TableSetColumnIndex(2);
+        if (RenderByteValueButton(totalId, bytes, statisticsTotalUnit_, false)) {
+            statisticsTotalUnit_ = (statisticsTotalUnit_ + 1) % 3;
+        }
+        ImGui::TableSetColumnIndex(3);
+        if (RenderByteValueButton(speedId, bytesPerSecond, statisticsSpeedUnit_, true)) {
+            statisticsSpeedUnit_ = (statisticsSpeedUnit_ + 1) % 3;
+        }
+    };
+    if (ImGui::BeginTable("##Traffic", 4,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+        ImGui::TableSetupColumn("Packets", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Speed", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+        trafficRow("TX", txActive, gui_theme::kTx, stats.txPackets.load(),
+                   static_cast<double>(stats.txBytes.load()), txBytesPerSecond_,
+                   "TxTotal", "TxSpeed");
+        trafficRow("RX", rxActive, gui_theme::kRx, stats.rxPackets.load(),
+                   static_cast<double>(stats.rxBytes.load()), rxBytesPerSecond_,
+                   "RxTotal", "RxSpeed");
+        ImGui::EndTable();
     }
-    ImGui::TextUnformatted("TX Speed:");
-    ImGui::SameLine();
-    if (RenderByteValueButton("TxSpeed", txBytesPerSecond_, statisticsSpeedUnit_, true)) {
-        statisticsSpeedUnit_ = (statisticsSpeedUnit_ + 1) % 3;
-    }
-    ImGui::NextColumn();
-    ImGui::Text("RX Packets: %llu", static_cast<unsigned long long>(stats.rxPackets.load()));
-    ImGui::TextUnformatted("RX Bytes:");
-    ImGui::SameLine();
-    if (RenderByteValueButton("RxTotal", static_cast<double>(stats.rxBytes.load()),
-                              statisticsTotalUnit_, false)) {
-        statisticsTotalUnit_ = (statisticsTotalUnit_ + 1) % 3;
-    }
-    ImGui::TextUnformatted("RX Speed:");
-    ImGui::SameLine();
-    if (RenderByteValueButton("RxSpeed", rxBytesPerSecond_, statisticsSpeedUnit_, true)) {
-        statisticsSpeedUnit_ = (statisticsSpeedUnit_ + 1) % 3;
-    }
-    ImGui::Columns(1);
     const int64_t rttMilliseconds = stats.rttMilliseconds.load();
-    if (rttMilliseconds < 0) ImGui::TextUnformatted("Latency: -- ms");
-    else ImGui::Text("Latency: %lld ms", static_cast<long long>(rttMilliseconds));
+    if (rttMilliseconds < 0) ImGui::TextUnformatted("Latency  -- ms");
+    else ImGui::Text("Latency  %lld ms", static_cast<long long>(rttMilliseconds));
     RenderStatisticsCharts();
 }
 
@@ -227,37 +238,13 @@ void GuiApp::RenderStatusBar() {
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize
         | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus;
+    // The TX/RX counters used to be mirrored here from the Connection tab, with
+    // a third independent unit toggle. The traffic table owns them now, so the
+    // bar carries only what no tab shows: the live state message.
     ImGui::Begin("##StatusBar", nullptr, flags);
-    const auto& stats = engine_.GetStats();
-    const auto now = std::chrono::steady_clock::now();
-    const bool txActive = now - lastTxActivity_ < std::chrono::milliseconds(350);
-    const bool rxActive = now - lastRxActivity_ < std::chrono::milliseconds(350);
-    const ImVec4 txColor = txActive ? ImVec4(1.0f, 0.12f, 0.12f, 1.0f)
-                                     : ImVec4(0.28f, 0.04f, 0.04f, 1.0f);
-    const ImVec4 rxColor = rxActive ? ImVec4(0.12f, 1.0f, 0.18f, 1.0f)
-                                     : ImVec4(0.04f, 0.28f, 0.06f, 1.0f);
-    const ImGuiColorEditFlags ledFlags = ImGuiColorEditFlags_NoTooltip
-        | ImGuiColorEditFlags_NoDragDrop | ImGuiColorEditFlags_NoBorder;
-    ImGui::ColorButton("##TxLed", txColor, ledFlags, ImVec2(10.0f, 10.0f));
-    ImGui::SameLine(0.0f, 4.0f);
-    ImGui::TextUnformatted("TX:");
-    ImGui::SameLine(0.0f, 4.0f);
-    bool changeStatusUnit = RenderByteValueButton("StatusTx",
-        static_cast<double>(stats.txBytes.load()), statusUnit_, false);
-    ImGui::SameLine(0.0f, 10.0f);
-    ImGui::ColorButton("##RxLed", rxColor, ledFlags, ImVec2(10.0f, 10.0f));
-    ImGui::SameLine(0.0f, 4.0f);
-    ImGui::TextUnformatted("RX:");
-    ImGui::SameLine(0.0f, 4.0f);
-    changeStatusUnit |= RenderByteValueButton("StatusRx",
-        static_cast<double>(stats.rxBytes.load()), statusUnit_, false);
-    if (changeStatusUnit) statusUnit_ = (statusUnit_ + 1) % 3;
-
-    const float statusX = ImGui::GetWindowWidth() - 330.0f;
-    if (ImGui::GetCursorPosX() < statusX) ImGui::SameLine(statusX);
-    else ImGui::SameLine();
+    const gui_theme::StateStyle style = gui_theme::StyleFor(currentState_.load());
     std::lock_guard<std::mutex> lock(statusMutex_);
-    ImGui::Text("Status: %s", statusMessage_.c_str());
+    ImGui::TextColored(style.color, "%s", statusMessage_.c_str());
     ImGui::End();
 }
 

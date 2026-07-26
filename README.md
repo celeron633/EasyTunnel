@@ -151,7 +151,7 @@ TUI 包含 Dashboard、Config、Logs 三个页签。Dashboard 实时列出全部
 GUI 推荐流程：
 
 1. A 端点击 **Wait for peer**，注册并保持在线。
-2. B 端点击 **Refresh clients**。
+2. B 端点击 **Refresh**。
 3. B 端从列表选择 A，点击 **Connect selected**。
 4. 双方收到公网端点后自动打洞。
 5. PUNCH/PUNCH_ACK 成功后，状态切换为 Connected。
