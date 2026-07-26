@@ -52,7 +52,7 @@ void GuiApp::RenderSettingsTab() {
     ImGui::SeparatorText("Rendezvous");
     if (BeginForm("##RendezvousSettings")) {
         const TunnelState state = currentState_.load();
-        const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
+        const bool active = IsTunnelActive(state);
         if (active) ImGui::BeginDisabled();
         FormField("Server address");
         configChanged |= ImGui::InputText("##ServerAddress", &config_.rendezvousAddress);

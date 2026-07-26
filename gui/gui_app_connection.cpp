@@ -70,7 +70,7 @@ void RenderPeerCell(const std::string& value) {
 
 void GuiApp::RenderConnectionTab() {
     const TunnelState state = currentState_.load();
-    const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
+    const bool active = IsTunnelActive(state);
     const bool waiting = active && waitingForPeer_.load();
     const bool canBrowseClients = !active || waiting;
     const bool canConnect = selectedClient_ >= 0

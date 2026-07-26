@@ -140,6 +140,8 @@ ftxui::Element TuiApp::RenderStateBadge() const {
             return text(" CONNECTED ") | bold | color(Color::Green);
         case TunnelState::Connecting:
             return text(" CONNECTING ") | bold | color(Color::Yellow);
+        case TunnelState::Waiting:
+            return text(" WAITING ") | bold | color(Color::Blue);
         case TunnelState::Error:
             return text(" ERROR ") | bold | color(Color::Red);
         default:

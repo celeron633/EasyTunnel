@@ -16,13 +16,18 @@
 
 ## 1. 客户端顶层状态
 
-客户端对 UI 暴露四种 `TunnelState`：
+客户端对 UI 暴露五种 `TunnelState`：
 
 ```mermaid
 stateDiagram-v2
     [*] --> Disconnected
     Disconnected --> Connecting: Start(config)
     Error --> Connecting: 再次 Start(config)
+
+    Connecting --> Waiting: 注册成功且 target_peer_id 为空
+    Waiting --> Connecting: 匹配到 Peer，开始按协商顺序打洞
+    Waiting --> Error: 会合无响应 / 无共同模式
+    Waiting --> Disconnected: Stop
 
     Connecting --> Connected: 传输路径确认且 TUN 打开成功
     Connecting --> Error: 协商失败 / 配置错误 / TUN 打开失败
@@ -39,6 +44,10 @@ stateDiagram-v2
 说明：
 
 - `Start` 只负责置为 `Connecting` 并创建客户端工作线程，不会立即打开 TUN。
+- 等待模式（`target_peer_id` 为空）注册成功后进入 `Waiting`，此时并没有正在进行的
+  协商；收到 `PEER` 开始打洞才回到 `Connecting`。指定目标连接时全程保持 `Connecting`。
+- `IsTunnelActive()` 把 `Connecting`、`Waiting`、`Connected` 归为"引擎运行中"，
+  UI 用它决定按钮和配置项是否可用。
 - 只有传输路径完成确认后才打开 TUN，然后进入 `Connected`。
 - Peer keepalive 超时会显式进入 `Error`；普通停止最终进入 `Disconnected`。
 - 错误状态下工作线程仍会关闭 UDP socket 和 TUN，但保留 `Error` 供 UI 展示。
@@ -311,7 +320,7 @@ Hello 或 Ready 丢失时客户端继续发送 Hello，线程在双方已绑定�
 | 会合首次响应 | 5 秒无合法服务端响应 | 客户端 `Error` |
 | 指定 Peer 等待 | `punch_timeout` 内未匹配 | 客户端 `Error` |
 | 模式能力协商 | 双方没有共同启用模式 | 发起方立即 `Error`，等待方继续在线 |
-| 空目标等待模式 | 未收到 PEER | 持续等待，直到 Stop |
+| 空目标等待模式 | 未收到 PEER | 保持 `Waiting`，直到 Stop |
 | 普通 NAT | `punch_timeout` | 策略列表下一项或 `Error` |
 | NAT4 | `punch_timeout` | 策略列表下一项或 `Error` |
 | IPv6 直连 | `ipv6_fallback_timeout` | 策略列表下一项或 `Error` |

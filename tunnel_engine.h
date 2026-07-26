@@ -22,9 +22,19 @@
 enum class TunnelState {
 	Disconnected,
 	Connecting,
+	// Registered with the rendezvous server without a target peer: nothing is
+	// being negotiated until somebody else shows up. Kept apart from
+	// Connecting so the UI does not claim a handshake is in flight.
+	Waiting,
 	Connected,
 	Error
 };
+
+// True while the engine is running, i.e. everything but Disconnected/Error.
+inline bool IsTunnelActive(TunnelState state) {
+	return state == TunnelState::Connecting || state == TunnelState::Waiting
+		|| state == TunnelState::Connected;
+}
 
 struct TunnelStats {
 	std::atomic<uint64_t> txPackets{0};

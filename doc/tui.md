@@ -52,7 +52,7 @@ ftxui::screen
 ```
 
 - 标题行右侧只保留 Quit，Tab 切换条独占一行并居中
-- 状态徽标按 `TunnelState` 着色：Connected 绿、Connecting 黄、Error 红、Disconnected 灰
+- 状态徽标按 `TunnelState` 着色：Connected 绿、Connecting 黄、Waiting 蓝、Error 红、Disconnected 灰
 - 连接状态移到全局底栏，任何页面都能看到，不再占用 Connection 页空间
 - 底栏右侧的按键提示随当前页面变化
 - 按钮统一渲染为 `[Label]`，聚焦时反色，替换 FTXUI 默认的动画色块

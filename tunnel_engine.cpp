@@ -38,6 +38,7 @@ const char* TunnelStateName(TunnelState state) {
 	switch (state) {
 		case TunnelState::Disconnected: return "Disconnected";
 		case TunnelState::Connecting: return "Connecting";
+		case TunnelState::Waiting: return "Waiting";
 		case TunnelState::Connected: return "Connected";
 		case TunnelState::Error: return "Error";
 		default: return "Unknown";
@@ -162,9 +163,11 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		Log(LogLevel::Debug, "Opened rendezvous UDP socket; resolved_server="
 			+ FormatUdpEndpoint(server) + ", recv_timeout_ms="
 			+ std::to_string(kSocketRecvTimeoutMs));
-		SetState(TunnelState::Connecting,
-			cfg.target_peer_id.empty() ? "Registered; waiting for a peer"
-			                           : "Connecting to " + cfg.target_peer_id);
+		if (cfg.target_peer_id.empty()) {
+			SetState(TunnelState::Waiting, "Registered; waiting for a peer");
+		} else {
+			SetState(TunnelState::Connecting, "Connecting to " + cfg.target_peer_id);
+		}
 		bool traversalConnected = SelectPeer(
 			sock, cfg, server, running_, &peer, &matchedPeerId,
 			&traversalModes, &socketError);

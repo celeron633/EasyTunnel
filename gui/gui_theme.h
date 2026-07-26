@@ -24,6 +24,8 @@ inline StateStyle StyleFor(TunnelState state) {
             return {"CONNECTED", ImVec4(0.24f, 0.85f, 0.38f, 1.0f)};
         case TunnelState::Connecting:
             return {"CONNECTING", ImVec4(1.00f, 0.80f, 0.20f, 1.0f)};
+        case TunnelState::Waiting:
+            return {"WAITING", ImVec4(0.36f, 0.68f, 1.00f, 1.0f)};
         case TunnelState::Error:
             return {"ERROR", ImVec4(1.00f, 0.38f, 0.38f, 1.0f)};
         default:
