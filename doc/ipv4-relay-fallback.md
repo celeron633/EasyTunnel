@@ -121,7 +121,7 @@ Relay 会消耗服务器上下行带宽，并让服务器看到未加密的隧�
 
 ## 前端设置
 
-- Console：在 `tunnel.conf` 的 `traversal_modes` 中启用并排序 `ipv4_relay`；
+- Console：在 `EasyTunnel.json` 的 `traversal_modes` 中启用并排序 `ipv4_relay`；
 - TUI/GUI：Settings → Traversal strategy 表格；
 - 会合服务器 TUI：Config → IPv4 relay，可配置开关及端口范围；Dashboard 显示活动
   relay 数、已转发数据报和字节数；Relay Tab 列出每个 relay 会话的房间、双方节点、

@@ -24,20 +24,20 @@ TuiApp::~TuiApp() {
 
 bool TuiApp::Init() {
     try {
-        configPath_ = std::filesystem::absolute("EasyTunnel_tui.json").string();
+        configPath_ = std::filesystem::absolute(kClientConfigFileName).string();
     } catch (...) {
-        configPath_ = "EasyTunnel_tui.json";
+        configPath_ = kClientConfigFileName;
     }
     bool existed = false;
     std::string error;
-    if (!LoadTuiConfig(configPath_, &config_, &existed, &error)) {
+    if (!LoadClientConfig(configPath_, &config_, &existed, &error)) {
         configMessage_ = error;
         configSaveOk_ = false;
     }
     SyncTextFromConfig();
     retryDelaySeconds_.store(config_.rendezvousRetryDelaySeconds);
     if (!existed) {
-        if (SaveTuiConfig(configPath_, config_, &error)) {
+        if (SaveClientConfig(configPath_, config_, &error)) {
             configMessage_ = "Created " + configPath_;
             configSaveOk_ = true;
         } else {

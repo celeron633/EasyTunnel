@@ -1,8 +1,11 @@
-#include "tui_config.h"
+#include "client_config.h"
 
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+
+#include "nat_protocol.h"
+#include "util.h"
 
 namespace {
 std::string Escape(const std::string& value) {
@@ -81,8 +84,8 @@ bool BoolValue(const std::string& json, const std::string& key, bool* value) {
 }
 }  // namespace
 
-bool LoadTuiConfig(const std::string& path, TuiConfig* config,
-                   bool* existed, std::string* error) {
+bool LoadClientConfig(const std::string& path, ClientConfig* config,
+                      bool* existed, std::string* error) {
     std::ifstream input(path, std::ios::binary);
     if (!input.is_open()) {
         *existed = false;
@@ -139,10 +142,8 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     config->punchTimeout = std::clamp(config->punchTimeout, 1, 600);
     config->nat4SourcePortStart = std::clamp(config->nat4SourcePortStart, 1, 65535);
     config->nat4SourcePortCount = std::clamp(config->nat4SourcePortCount, 1, 60);
-    if (config->nat4SourcePortCount > 0) {
-        config->nat4SourcePortStart = (std::min)(
-            config->nat4SourcePortStart, 65536 - config->nat4SourcePortCount);
-    }
+    config->nat4SourcePortStart = (std::min)(
+        config->nat4SourcePortStart, 65536 - config->nat4SourcePortCount);
     config->nat4PeerPortOffset = std::clamp(config->nat4PeerPortOffset, 0, 256);
     config->nat4RoundTimeout = std::clamp(config->nat4RoundTimeout, 1, 60);
     config->ipv6ListenPort = std::clamp(config->ipv6ListenPort, 0, 65535);
@@ -154,11 +155,11 @@ bool LoadTuiConfig(const std::string& path, TuiConfig* config,
     return true;
 }
 
-bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
-                   std::string* error) {
+bool SaveClientConfig(const std::string& path, const ClientConfig& config,
+                      std::string* error) {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {
-        *error = "Cannot save TUI configuration: " + path;
+        *error = "Cannot save configuration: " + path;
         return false;
     }
     output
@@ -196,8 +197,88 @@ bool SaveTuiConfig(const std::string& path, const TuiConfig& config,
         << "}\n";
     output.flush();
     if (!output.good()) {
-        *error = "Cannot write TUI configuration: " + path;
+        *error = "Cannot write configuration: " + path;
         return false;
     }
     return true;
+}
+
+bool ValidateClientConfig(const ClientConfig& config, std::string* error) {
+    if (config.rendezvousAddress.empty()) {
+        *error = "Rendezvous server is required";
+        return false;
+    }
+    if (!IsSafeControlField(config.roomId)) { *error = "Invalid room ID"; return false; }
+    if (!IsSafeControlField(config.peerId)) { *error = "Invalid peer ID"; return false; }
+    if (!config.authToken.empty() && !IsSafeControlField(config.authToken)) {
+        *error = "Invalid auth token";
+        return false;
+    }
+    in_addr address{};
+    if (!ParseIpv4(config.localTunIpv4, &address)) {
+        *error = "Invalid local TUN IPv4";
+        return false;
+    }
+    const bool anyModeEnabled = std::any_of(
+        config.traversalModes.begin(), config.traversalModes.end(),
+        [](const auto& setting) { return setting.enabled; });
+    if (!anyModeEnabled) {
+        *error = "Enable at least one traversal mode";
+        return false;
+    }
+    const auto ipv6Mode = std::find_if(
+        config.traversalModes.begin(), config.traversalModes.end(),
+        [](const auto& setting) { return setting.mode == TraversalMode::Ipv6; });
+    if (ipv6Mode != config.traversalModes.end() && ipv6Mode->enabled
+        && config.ipv6ProbeHost.empty()) {
+        *error = "IPv6 probe host is required";
+        return false;
+    }
+    return true;
+}
+
+// The clamps mirror LoadClientConfig, so a config that came through the loader
+// converts without further checks; UI-edited values are clamped here again.
+Config ToEngineConfig(const ClientConfig& config,
+                      const std::string& targetPeerId) {
+    Config output;
+    output.rendezvous_addr = config.rendezvousAddress;
+    output.rendezvous_port = static_cast<uint16_t>(
+        std::clamp(config.rendezvousPort, 1, 65535));
+    output.room_id = config.roomId;
+    output.peer_id = config.peerId;
+    output.target_peer_id = targetPeerId;
+    output.auth_token = config.authToken;
+    output.adapter_name = config.adapterName;
+    output.local_tun_ipv4 = config.localTunIpv4;
+    output.tun_prefix = static_cast<uint8_t>(std::clamp(config.tunPrefix, 0, 32));
+    output.tun_mtu = static_cast<uint16_t>(std::clamp(config.tunMtu, 576, 9000));
+    output.auto_config_ipv4 = config.autoConfigIpv4;
+    output.keepalive_interval = static_cast<uint16_t>(
+        std::clamp(config.keepaliveInterval, 1, 300));
+    output.peer_timeout = static_cast<uint16_t>(
+        std::clamp(config.peerTimeout, output.keepalive_interval + 1, 3600));
+    output.dummy_traffic_enabled = config.dummyTrafficEnabled;
+    output.punch_timeout = static_cast<uint16_t>(
+        std::clamp(config.punchTimeout, 1, 600));
+    output.traversal_modes = config.traversalModes;
+    output.nat4_source_port_count = static_cast<uint16_t>(
+        std::clamp(config.nat4SourcePortCount, 1, 60));
+    output.nat4_source_port_start = static_cast<uint16_t>((std::min)(
+        std::clamp(config.nat4SourcePortStart, 1, 65535),
+        65536 - static_cast<int>(output.nat4_source_port_count)));
+    output.nat4_peer_port_offset = static_cast<uint16_t>(
+        std::clamp(config.nat4PeerPortOffset, 0, 256));
+    output.nat4_round_timeout = static_cast<uint16_t>(
+        std::clamp(config.nat4RoundTimeout, 1, 60));
+    output.ipv6_accept_inbound = config.ipv6AcceptInbound;
+    output.ipv6_listen_port = static_cast<uint16_t>(
+        std::clamp(config.ipv6ListenPort, 0, 65535));
+    output.ipv6_probe_host = config.ipv6ProbeHost;
+    output.ipv6_probe_port = static_cast<uint16_t>(
+        std::clamp(config.ipv6ProbePort, 1, 65535));
+    output.ipv6_fallback_timeout = static_cast<uint16_t>(
+        std::clamp(config.ipv6FallbackTimeout, 1, 120));
+    output.log_level = static_cast<LogLevel>(std::clamp(config.logLevel, 0, 3));
+    return output;
 }

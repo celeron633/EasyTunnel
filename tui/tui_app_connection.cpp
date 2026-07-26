@@ -11,10 +11,7 @@
 #include <ftxui/component/event.hpp>
 #include <ftxui/dom/elements.hpp>
 
-#include "../log.h"
-#include "../nat_protocol.h"
 #include "../rendezvous_client.h"
-#include "../util.h"
 #include "tui_theme.h"
 
 namespace {
@@ -34,16 +31,6 @@ std::string ByteText(double bytes, int unit, bool speed) {
     output << ' ' << UnitName(unit);
     if (speed) output << "/s";
     return output.str();
-}
-
-int ParseInt(const std::string& text, int fallback) {
-    try {
-        size_t consumed = 0;
-        const int value = std::stoi(text, &consumed);
-        return consumed == text.size() ? value : fallback;
-    } catch (...) {
-        return fallback;
-    }
 }
 
 int64_t SteadyMilliseconds() {
@@ -208,90 +195,17 @@ ftxui::Component TuiApp::BuildConnectionTab() {
     });
 }
 
-bool TuiApp::Validate(std::string* error) const {
-    if (config_.rendezvousAddress.empty()) { *error = "Rendezvous server is required"; return false; }
-    if (!IsSafeControlField(config_.roomId)) { *error = "Invalid Room ID"; return false; }
-    if (!IsSafeControlField(config_.peerId)) { *error = "Invalid Peer ID"; return false; }
-    if (!config_.authToken.empty() && !IsSafeControlField(config_.authToken)) {
-        *error = "Invalid Auth Token"; return false;
-    }
-    in_addr address{};
-    if (!ParseIpv4(config_.localTunIpv4, &address)) {
-        *error = "Invalid Local TUN IPv4"; return false;
-    }
-    if (ParseInt(serverPortText_, 0) < 1 || ParseInt(serverPortText_, 0) > 65535) {
-        *error = "Invalid rendezvous port"; return false;
-    }
-    const bool anyModeEnabled = std::any_of(
-        config_.traversalModes.begin(), config_.traversalModes.end(),
-        [](const auto& setting) { return setting.enabled; });
-    if (!anyModeEnabled) {
-        *error = "Enable at least one traversal mode"; return false;
-    }
-    const auto ipv6Mode = std::find_if(
-        config_.traversalModes.begin(), config_.traversalModes.end(),
-        [](const auto& setting) { return setting.mode == TraversalMode::Ipv6; });
-    if (ipv6Mode != config_.traversalModes.end() && ipv6Mode->enabled
-        && config_.ipv6ProbeHost.empty()) {
-        *error = "IPv6 probe host is required"; return false;
-    }
-    return true;
-}
-
-Config TuiApp::BuildEngineConfig(const std::string& targetPeerId) const {
-    Config output;
-    output.rendezvous_addr = config_.rendezvousAddress;
-    output.rendezvous_port = static_cast<uint16_t>(ParseInt(serverPortText_, 3478));
-    output.room_id = config_.roomId;
-    output.peer_id = config_.peerId;
-    output.target_peer_id = targetPeerId;
-    output.auth_token = config_.authToken;
-    output.adapter_name = config_.adapterName;
-    output.local_tun_ipv4 = config_.localTunIpv4;
-    output.tun_prefix = static_cast<uint8_t>(std::clamp(ParseInt(tunPrefixText_, 24), 0, 32));
-    output.tun_mtu = static_cast<uint16_t>(std::clamp(ParseInt(tunMtuText_, 1452), 576, 9000));
-    output.auto_config_ipv4 = config_.autoConfigIpv4;
-    output.keepalive_interval = static_cast<uint16_t>(
-        std::clamp(ParseInt(keepaliveText_, 15), 1, 300));
-    output.peer_timeout = static_cast<uint16_t>(
-        std::clamp(ParseInt(peerTimeoutText_, 45), output.keepalive_interval + 1, 3600));
-    output.dummy_traffic_enabled = config_.dummyTrafficEnabled;
-    output.punch_timeout = static_cast<uint16_t>(
-        std::clamp(ParseInt(punchTimeoutText_, 30), 1, 600));
-    output.traversal_modes = config_.traversalModes;
-    output.nat4_source_port_start = static_cast<uint16_t>(
-        std::clamp(ParseInt(nat4SourcePortStartText_, 30000), 1, 65535));
-    output.nat4_source_port_count = static_cast<uint16_t>(
-        std::clamp(ParseInt(nat4SourcePortCountText_, 25), 1, 60));
-    if (output.nat4_source_port_count > 0) {
-        output.nat4_source_port_start = static_cast<uint16_t>((std::min)(
-            static_cast<int>(output.nat4_source_port_start),
-            65536 - static_cast<int>(output.nat4_source_port_count)));
-    }
-    output.nat4_peer_port_offset = static_cast<uint16_t>(
-        std::clamp(ParseInt(nat4PeerPortOffsetText_, 20), 0, 256));
-    output.nat4_round_timeout = static_cast<uint16_t>(
-        std::clamp(ParseInt(nat4RoundTimeoutText_, 10), 1, 60));
-    output.ipv6_accept_inbound = config_.ipv6AcceptInbound;
-    output.ipv6_listen_port = static_cast<uint16_t>(
-        std::clamp(ParseInt(ipv6ListenPortText_, 0), 0, 65535));
-    output.ipv6_probe_host = config_.ipv6ProbeHost;
-    output.ipv6_probe_port = static_cast<uint16_t>(
-        std::clamp(ParseInt(ipv6ProbePortText_, 53), 1, 65535));
-    output.ipv6_fallback_timeout = static_cast<uint16_t>(
-        std::clamp(ParseInt(ipv6FallbackTimeoutText_, 15), 1, 120));
-    TryParseLogLevel(logLevels_[std::clamp(config_.logLevel, 0, 3)], &output.log_level);
-    return output;
-}
-
+// The Settings page edits numeric fields through text mirrors, so they are
+// folded back into the config before validation and engine start.
 bool TuiApp::StartConnection(const std::string& targetPeerId) {
+    SyncConfigFromText();
     std::string error;
-    if (!Validate(&error)) { SetStatus(error); return false; }
+    if (!ValidateClientConfig(config_, &error)) { SetStatus(error); return false; }
     if (!targetPeerId.empty() && targetPeerId == config_.peerId) {
         SetStatus("Cannot connect to this client itself");
         return false;
     }
-    return engine_.Start(BuildEngineConfig(targetPeerId));
+    return engine_.Start(ToEngineConfig(config_, targetPeerId));
 }
 
 void TuiApp::ConnectSelectedClient() {
@@ -311,11 +225,12 @@ void TuiApp::Disconnect() {
 }
 
 void TuiApp::RefreshClients() {
+    SyncConfigFromText();
     std::string error;
-    if (!Validate(&error)) { SetStatus(error); return; }
+    if (!ValidateClientConfig(config_, &error)) { SetStatus(error); return; }
     std::vector<RendezvousPeerInfo> clients;
     if (!ListRendezvousClients(config_.rendezvousAddress,
-                               static_cast<uint16_t>(ParseInt(serverPortText_, 3478)),
+                               static_cast<uint16_t>(config_.rendezvousPort),
                                config_.roomId, config_.authToken, &clients, &error)) {
         SetStatus(error);
         return;

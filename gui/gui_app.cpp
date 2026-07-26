@@ -43,9 +43,9 @@ bool GuiApp::Init() {
         OnLog(level, message);
     });
     try {
-        configFilePath_ = std::filesystem::absolute("EasyTunnel_gui.json").string();
+        configFilePath_ = std::filesystem::absolute(kClientConfigFileName).string();
     } catch (...) {
-        configFilePath_ = "EasyTunnel_gui.json";
+        configFilePath_ = kClientConfigFileName;
     }
     LoadGuiConfig();
     glfwSetErrorCallback(GlfwErrorCallback);
@@ -77,9 +77,9 @@ bool GuiApp::Init() {
     engine_.SetStateCallback([this](TunnelState state, const std::string& message) {
         OnStateChanged(state, message);
     });
-    autoWaitEnabledRuntime_.store(autoWaitForPeer_);
-    autoWaitRetryDelaySecondsRuntime_.store(rendezvousRetryDelaySeconds_);
-    autoWaitPending_.store(autoWaitForPeer_);
+    autoWaitEnabledRuntime_.store(config_.autoWaitForPeer);
+    autoWaitRetryDelaySecondsRuntime_.store(config_.rendezvousRetryDelaySeconds);
+    autoWaitPending_.store(config_.autoWaitForPeer);
     return true;
 }
 
@@ -155,7 +155,7 @@ void GuiApp::RenderHeader() {
     const gui_theme::StateStyle style = gui_theme::StyleFor(currentState_.load());
     gui_theme::Badge(style.label, style.color);
     ImGui::SameLine();
-    const std::string identity = std::string(roomId_) + " / " + peerId_;
+    const std::string identity = config_.roomId + " / " + config_.peerId;
     gui_theme::TextRightAligned(identity.c_str());
     ImGui::Separator();
 }

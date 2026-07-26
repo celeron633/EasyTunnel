@@ -68,5 +68,3 @@ struct Config {
     bool auto_config_ipv4 = true;
     LogLevel log_level = LogLevel::Info;
 };
-
-bool LoadConfig(const std::string& file, Config* out);

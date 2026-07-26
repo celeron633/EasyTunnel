@@ -249,7 +249,7 @@ void TuiApp::SaveIfChanged() {
     if (signature == savedSignature_) return;
     SyncConfigFromText();
     std::string error;
-    if (SaveTuiConfig(configPath_, config_, &error)) {
+    if (SaveClientConfig(configPath_, config_, &error)) {
         configMessage_ = "Configuration saved: " + configPath_;
         configSaveOk_ = true;
         savedSignature_ = signature;

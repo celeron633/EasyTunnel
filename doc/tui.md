@@ -15,11 +15,11 @@ tui/
 ├── tui_app_settings.cpp   # Settings 页和配置同步
 ├── tui_app_log.cpp        # Log 页和剪贴板操作
 ├── tui_theme.h       # 共用的按钮样式、区块标题和标签行
-├── tui_config.h      # TUI JSON 配置模型
-├── tui_config.cpp    # JSON 加载、校验和保存
 ├── windows_tray.h    # Windows 托盘图标（仅 Windows 编译）
 └── windows_tray.cpp
 ```
+
+JSON 配置模型与读写位于仓库根目录的 `client_config.h/cpp`，三个客户端共用。
 
 ## 技术选型
 
@@ -139,13 +139,13 @@ Windows 构建在进入 FTXUI 主循环前创建托盘图标，复用 exe 内嵌
 
 ## 配置持久化
 
-TUI 在当前工作目录读写：
+TUI 在当前工作目录读写与 Console/GUI 客户端共用的配置：
 
 ```text
-EasyTunnel_tui.json
+EasyTunnel.json
 ```
 
-首次运行自动创建默认配置。之后每次 Ticker 比较一次配置签名，仅在内容变化时写入 JSON。配置字段与 GUI 对齐：
+读写、校验和引擎配置转换统一在根目录 `client_config.cpp`（`ClientConfig` 结构体）实现。首次运行自动创建默认配置。之后每次 Ticker 比较一次配置签名，仅在内容变化时写入 JSON。配置字段：
 
 - 会合服务器、房间、Peer 和 Token
 - TUN 适配器及 IPv4

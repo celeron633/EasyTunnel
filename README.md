@@ -198,54 +198,34 @@ GUI 推荐流程：
 
 示例文件：[conf/rendezvous.json.example](conf/rendezvous.json.example)
 
-## Console 客户端配置
+## 客户端配置（三端共用）
 
-复制 [conf/tunnel.conf.example](conf/tunnel.conf.example)，分别修改两端配置：
+Console、GUI 和 TUI 客户端共用当前工作目录下的同一个 JSON 配置：
 
-```ini
-rendezvous_addr=203.0.113.10
-rendezvous_port=3478
-room_id=example-room
-peer_id=node-a
-target_peer_id=
-auth_token=change-this-secret
-
-keepalive_interval=15
-peer_timeout=45
-dummy_traffic_enabled=false
-punch_timeout=30
-traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:false
-nat4_source_port_start=30000
-nat4_source_port_count=25
-nat4_peer_port_offset=20
-nat4_round_timeout=10
-ipv6_accept_inbound=false
-ipv6_listen_port=0
-ipv6_probe_host=2400:3200::1
-ipv6_probe_port=53
-ipv6_fallback_timeout=15
-
-adapter_name=EasyTunnel-A
-local_tun_ipv4=10.66.0.1
-tun_prefix=24
-tun_mtu=1452
-auto_config_ipv4=true
-log_level=Info
+```text
+EasyTunnel.json
 ```
 
-`target_peer_id` 留空表示注册并等待；填写目标 Peer ID 表示主动连接：
+三端使用同一套读写逻辑（`client_config.cpp`）：文件不存在时自动创建默认配置，数值越界会被夹取，切换任意前端都会保留会合账号、TUN 参数和穿透策略。示例文件：[conf/EasyTunnel.json.example](conf/EasyTunnel.json.example)。
+
+`auth_token` 会明文保存，请限制配置文件访问权限。
+
+### Console 客户端
 
 ```powershell
-EasyTunnel.exe tunnel.conf
+EasyTunnel.exe [EasyTunnel.json] [target_peer_id]
 ```
+
+- 第一个参数是配置路径，省略时使用当前目录的 `EasyTunnel.json`
+- 第二个参数是目标 Peer ID：留空表示注册并等待，填写表示主动连接
+- 首次运行会创建默认配置并提示编辑
 
 Linux 客户端通常需要 root 或相应的 TUN/network capability。
 
 ## GUI 配置与日志
 
-- GUI 配置修改后自动保存到当前工作目录的 `EasyTunnel_gui.json`。
+- 配置修改后自动保存到当前工作目录的 `EasyTunnel.json`。
 - 启动时自动加载配置，并在页面显示保存结果和绝对路径。
-- `auth_token` 会明文保存，请限制配置文件访问权限。
 - **Log** 页面显示实时日志，最多保留 2000 行。
 - 文件日志位于 `EasyTunnel_gui.exe` 同目录的 `EasyTunnel_gui.log`。
 - Connection 页面按 1 秒间隔显示最近 60 秒的 TX/RX 速度和延迟柱形图。
@@ -270,7 +250,7 @@ sudo ./build/EasyTunnel_tui
 - 方向键切换页面、日志等级和在线客户端
 - `Enter` / `Space` 执行按钮、复选框和统计单位切换
 - 支持 FTXUI 终端中的鼠标点击
-- 配置自动保存到当前工作目录的 `EasyTunnel_tui.json`
+- 配置自动保存到当前工作目录的 `EasyTunnel.json`（与 Console/GUI 共用）
 - Windows 下提供托盘图标：单击切换终端窗口显示/隐藏，右键菜单可退出
 - Connection 页面提供与 GUI 一致的最近 60 秒速度和延迟历史图
 - 日志写入可执行文件目录的 `EasyTunnel_tui.log`

@@ -8,10 +8,7 @@
 
 #include "imgui.h"
 
-#include "../log.h"
-#include "../nat_protocol.h"
 #include "../rendezvous_client.h"
-#include "../util.h"
 #include "gui_theme.h"
 
 namespace {
@@ -248,70 +245,17 @@ void GuiApp::RenderStatusBar() {
     ImGui::End();
 }
 
-bool GuiApp::ValidateCommonFields(std::string* error) const {
-    if (serverAddress_[0] == '\0') { *error = "Rendezvous server is required"; return false; }
-    if (!IsSafeControlField(roomId_)) { *error = "Invalid room ID"; return false; }
-    if (!IsSafeControlField(peerId_)) { *error = "Invalid peer ID"; return false; }
-    if (authToken_[0] != '\0' && !IsSafeControlField(authToken_)) {
-        *error = "Invalid auth token"; return false;
-    }
-    in_addr tunAddress{};
-    if (!ParseIpv4(localTunIpv4_, &tunAddress)) {
-        *error = "Invalid local TUN IPv4"; return false;
-    }
-    if (std::none_of(traversalModes_.begin(), traversalModes_.end(),
-                     [](const auto& setting) { return setting.enabled; })) {
-        *error = "Enable at least one traversal mode"; return false;
-    }
-    const auto ipv6Mode = std::find_if(
-        traversalModes_.begin(), traversalModes_.end(), [](const auto& setting) {
-            return setting.mode == TraversalMode::Ipv6;
-        });
-    if (ipv6Mode != traversalModes_.end() && ipv6Mode->enabled
-        && ipv6ProbeHost_[0] == '\0') {
-        *error = "IPv6 probe host is required"; return false;
-    }
-    return true;
-}
-
 bool GuiApp::StartConnection(const std::string& targetPeerId) {
     std::string error;
-    if (!ValidateCommonFields(&error)) {
+    if (!ValidateClientConfig(config_, &error)) {
         OnStateChanged(TunnelState::Error, error);
         return false;
     }
-    if (!targetPeerId.empty() && targetPeerId == peerId_) {
+    if (!targetPeerId.empty() && targetPeerId == config_.peerId) {
         OnStateChanged(TunnelState::Error, "Cannot connect to this client itself");
         return false;
     }
-    Config cfg;
-    cfg.rendezvous_addr = serverAddress_;
-    cfg.rendezvous_port = static_cast<uint16_t>(serverPort_);
-    cfg.room_id = roomId_;
-    cfg.peer_id = peerId_;
-    cfg.target_peer_id = targetPeerId;
-    cfg.auth_token = authToken_;
-    cfg.adapter_name = adapterName_;
-    cfg.local_tun_ipv4 = localTunIpv4_;
-    cfg.tun_prefix = static_cast<uint8_t>(tunPrefix_);
-    cfg.tun_mtu = static_cast<uint16_t>(tunMtu_);
-    cfg.auto_config_ipv4 = autoConfigIpv4_;
-    cfg.keepalive_interval = static_cast<uint16_t>(keepaliveInterval_);
-    cfg.peer_timeout = static_cast<uint16_t>(peerTimeout_);
-    cfg.dummy_traffic_enabled = dummyTrafficEnabled_;
-    cfg.punch_timeout = static_cast<uint16_t>(punchTimeout_);
-    cfg.traversal_modes = traversalModes_;
-    cfg.nat4_source_port_start = static_cast<uint16_t>(nat4SourcePortStart_);
-    cfg.nat4_source_port_count = static_cast<uint16_t>(nat4SourcePortCount_);
-    cfg.nat4_peer_port_offset = static_cast<uint16_t>(nat4PeerPortOffset_);
-    cfg.nat4_round_timeout = static_cast<uint16_t>(nat4RoundTimeout_);
-    cfg.ipv6_accept_inbound = ipv6AcceptInbound_;
-    cfg.ipv6_listen_port = static_cast<uint16_t>(ipv6ListenPort_);
-    cfg.ipv6_probe_host = ipv6ProbeHost_;
-    cfg.ipv6_probe_port = static_cast<uint16_t>(ipv6ProbePort_);
-    cfg.ipv6_fallback_timeout = static_cast<uint16_t>(ipv6FallbackTimeout_);
-    TryParseLogLevel(kLogLevels[logLevelIdx_], &cfg.log_level);
-    const bool started = engine_.Start(cfg);
+    const bool started = engine_.Start(ToEngineConfig(config_, targetPeerId));
     if (started) waitingForPeer_.store(targetPeerId.empty());
     return started;
 }
@@ -331,20 +275,20 @@ void GuiApp::ConnectSelectedClient() {
 
 void GuiApp::RefreshClients() {
     std::string error;
-    if (!ValidateCommonFields(&error)) {
+    if (!ValidateClientConfig(config_, &error)) {
         SetStatusMessage(error);
         return;
     }
     std::vector<RendezvousPeerInfo> clients;
-    if (!ListRendezvousClients(serverAddress_, static_cast<uint16_t>(serverPort_),
-                               roomId_, authToken_, &clients, &error)) {
+    if (!ListRendezvousClients(config_.rendezvousAddress,
+                               static_cast<uint16_t>(config_.rendezvousPort),
+                               config_.roomId, config_.authToken, &clients, &error)) {
         SetStatusMessage(error);
         return;
     }
-    const std::string self(peerId_);
     clients.erase(std::remove_if(clients.begin(), clients.end(),
-                                 [&self](const RendezvousPeerInfo& client) {
-                                     return client.peerId == self;
+                                 [this](const RendezvousPeerInfo& client) {
+                                     return client.peerId == config_.peerId;
                                  }),
                   clients.end());
     std::sort(clients.begin(), clients.end(),
@@ -371,7 +315,7 @@ void GuiApp::ProcessAutoWait() {
     const TunnelState state = currentState_.load();
     if (state != TunnelState::Disconnected && state != TunnelState::Error) return;
     std::string error;
-    if (!ValidateCommonFields(&error)) {
+    if (!ValidateClientConfig(config_, &error)) {
         OnStateChanged(TunnelState::Error, "Auto wait failed: " + error);
         autoWaitPending_.store(false);
         return;

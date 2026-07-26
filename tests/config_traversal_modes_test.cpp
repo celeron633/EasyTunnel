@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 
+#include "client_config.h"
 #include "config.h"
 
 namespace {
@@ -91,11 +92,21 @@ int main(int argc, char** argv) {
 
     Expect(argc == 2, "example config path is provided");
     if (argc == 2) {
-        Config example;
-        Expect(LoadConfig(argv[1], &example), "console example config loads");
-        Expect(SerializeTraversalModes(example.traversal_modes)
+        ClientConfig example;
+        bool existed = false;
+        Expect(LoadClientConfig(argv[1], &example, &existed, &error)
+                   && existed,
+               "shared example config loads");
+        Expect(SerializeTraversalModes(example.traversalModes)
                    == "nat:true,nat4:true,ipv6:false,ipv4_relay:false",
-               "console example traversal strategy");
+               "shared example traversal strategy");
+        Expect(ValidateClientConfig(example, &error),
+               "shared example config validates");
+        const Config engine = ToEngineConfig(example, "node-b");
+        Expect(engine.rendezvous_addr == example.rendezvousAddress
+                   && engine.target_peer_id == "node-b"
+                   && engine.tun_mtu == 1452,
+               "engine config mapping");
     }
 
     if (failures != 0) {

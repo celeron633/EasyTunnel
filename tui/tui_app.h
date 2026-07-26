@@ -13,10 +13,10 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include "../client_config.h"
 #include "../rendezvous_client.h"
 #include "../tunnel_engine.h"
 #include "../statistics_history.h"
-#include "tui_config.h"
 
 #ifdef _WIN32
 class TuiWindowsTray;
@@ -40,8 +40,6 @@ private:
     void Disconnect();
     void RefreshClients();
     void UpdateClientLabels();
-    bool Validate(std::string* error) const;
-    Config BuildEngineConfig(const std::string& targetPeerId) const;
     void OnStateChanged(TunnelState state, const std::string& message);
     void OnLog(LogLevel level, const std::string& message);
     void SetStatus(const std::string& message);
@@ -63,7 +61,7 @@ private:
     std::unique_ptr<TuiWindowsTray> windowsTray_;
 #endif
     TunnelEngine engine_;
-    TuiConfig config_;
+    ClientConfig config_;
     std::string configPath_;
     std::string savedSignature_;
     std::string configMessage_;

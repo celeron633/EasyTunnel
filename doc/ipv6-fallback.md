@@ -107,7 +107,7 @@ IPv6 Peer 通道新增消息：
 | `ipv6_probe_port` | `53` | 1～65535 | 探针使用的 TCP 端口 |
 | `ipv6_fallback_timeout` | `15` | 1～120 秒 | 端点交换和直连确认的等待时间 |
 
-无界面客户端在 `tunnel.conf` 的 `traversal_modes` 中启用该模式。TUI 和 GUI 的
+无界面客户端在 `EasyTunnel.json` 的 `traversal_modes` 中启用该模式。TUI 和 GUI 的
 Settings 页面在 Traversal strategy 表格中提供开关和排序，IPv6 参数位于单独分组。
 
 如果配置固定端口，需要同时在操作系统防火墙和光猫 IPv6 防火墙中允许该 UDP 端口。

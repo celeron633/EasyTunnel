@@ -39,11 +39,18 @@ if(BUILD_TESTING)
     add_executable(EasyTunnel_config_tests
         tests/config_traversal_modes_test.cpp
         config.cpp
+        client_config.cpp
+        nat_protocol.cpp
+        util.cpp
         log.cpp)
     target_include_directories(EasyTunnel_config_tests PRIVATE ${CMAKE_SOURCE_DIR})
-    target_link_libraries(EasyTunnel_config_tests PRIVATE spdlog::spdlog_header_only)
+    target_link_libraries(EasyTunnel_config_tests PRIVATE
+        Threads::Threads spdlog::spdlog_header_only)
+    if(WIN32)
+        target_link_libraries(EasyTunnel_config_tests PRIVATE ws2_32)
+    endif()
     add_test(NAME config_traversal_modes COMMAND EasyTunnel_config_tests
-        ${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example)
+        ${CMAKE_SOURCE_DIR}/conf/EasyTunnel.json.example)
 
     add_executable(EasyTunnel_rendezvous_capabilities_tests
         tests/rendezvous_capabilities_test.cpp
@@ -71,6 +78,7 @@ endif()
 # ---------------------------------------------------------------------------
 set(COMMON_SOURCES
     config.cpp
+    client_config.cpp
     hexdump.cpp
     log.cpp
     util.cpp
@@ -121,7 +129,6 @@ if(BUILD_TUI)
         tui/tui_app_statistics.cpp
         tui/tui_app_settings.cpp
         tui/tui_app_log.cpp
-        tui/tui_config.cpp
         statistics_history.cpp)
     if(WIN32)
         list(APPEND TUI_SOURCES tui/windows_tray.cpp)
@@ -286,20 +293,13 @@ if(WIN32)
     endif()
 endif()  # WIN32
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
+if(EXISTS "${CMAKE_SOURCE_DIR}/conf/EasyTunnel.json.example")
     add_custom_command(TARGET EasyTunnel POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
-                "$<TARGET_FILE_DIR:EasyTunnel>/tunnel.conf.example"
-        COMMENT "Copy tunnel.conf.example to output directory"
+                "${CMAKE_SOURCE_DIR}/conf/EasyTunnel.json.example"
+                "$<TARGET_FILE_DIR:EasyTunnel>/EasyTunnel.json.example"
+        COMMENT "Copy EasyTunnel.json.example to output directory"
     )
-endif()
-
-if(BUILD_TUI AND EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
-    add_custom_command(TARGET EasyTunnel_tui POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
-                "$<TARGET_FILE_DIR:EasyTunnel_tui>/tunnel.conf.example")
 endif()
 
 if(BUILD_GUI)
@@ -327,10 +327,12 @@ if(BUILD_GUI)
         ${IMGUI_DIR}/imgui_draw.cpp
         ${IMGUI_DIR}/imgui_tables.cpp
         ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
         ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
         ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
     )
-    target_include_directories(imgui_lib PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+    target_include_directories(imgui_lib PUBLIC
+        ${IMGUI_DIR} ${IMGUI_DIR}/backends ${IMGUI_DIR}/misc/cpp)
     find_package(OpenGL REQUIRED)
     target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
 
@@ -371,10 +373,4 @@ if(BUILD_GUI)
             COMMENT "Copy wintun.dll to GUI output directory")
     endif()
 
-    if(EXISTS "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example")
-        add_custom_command(TARGET EasyTunnel_gui POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CMAKE_SOURCE_DIR}/conf/tunnel.conf.example"
-                    "$<TARGET_FILE_DIR:EasyTunnel_gui>/tunnel.conf.example")
-    endif()
 endif()

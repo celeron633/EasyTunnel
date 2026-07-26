@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "../client_config.h"
 #include "../rendezvous_client.h"
 #include "../tunnel_engine.h"
 #include "../statistics_history.h"
@@ -45,7 +46,6 @@ private:
     void OnStateChanged(TunnelState state, const std::string& message);
     void SetStatusMessage(const std::string& message);
     void OnLog(LogLevel level, const std::string& message);
-    bool ValidateCommonFields(std::string* error) const;
     bool LoadGuiConfig();
     bool SaveGuiConfig();
     void ShowConfigSaveMessage(std::string message, bool succeeded);
@@ -62,36 +62,11 @@ private:
 #endif
     TunnelEngine engine_;
 
-    char serverAddress_[256] = "127.0.0.1";
-    int serverPort_ = 3478;
-    char roomId_[128] = "default-room";
-    char peerId_[128] = "node-a";
-    char authToken_[128] = {};
+    // The settings widgets bind straight into this struct; every accepted edit
+    // is clamped in RenderSettingsTab and saved through the shared module.
+    ClientConfig config_;
     std::vector<RendezvousPeerInfo> clients_;
     int selectedClient_ = -1;
-
-    char adapterName_[128] = "EasyTunnel";
-    char localTunIpv4_[64] = "10.66.0.1";
-    int tunPrefix_ = 24;
-    int tunMtu_ = 1452;
-    bool autoConfigIpv4_ = true;
-    int keepaliveInterval_ = 15;
-    int peerTimeout_ = 45;
-    bool dummyTrafficEnabled_ = false;
-    int punchTimeout_ = 30;
-    int nat4SourcePortStart_ = 30000;
-    int nat4SourcePortCount_ = 25;
-    int nat4PeerPortOffset_ = 20;
-    int nat4RoundTimeout_ = 10;
-    std::vector<TraversalModeSetting> traversalModes_ = DefaultTraversalModes();
-    bool ipv6AcceptInbound_ = false;
-    int ipv6ListenPort_ = 0;
-    char ipv6ProbeHost_[256] = "2400:3200::1";
-    int ipv6ProbePort_ = 53;
-    int ipv6FallbackTimeout_ = 15;
-    int logLevelIdx_ = 1;
-    int rendezvousRetryDelaySeconds_ = 5;
-    bool autoWaitForPeer_ = false;
 
     std::mutex statusMutex_;
     std::string statusMessage_ = "Disconnected";

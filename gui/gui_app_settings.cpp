@@ -2,12 +2,10 @@
 
 #include <algorithm>
 #include <cfloat>
-#include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <utility>
 
 #include "imgui.h"
+#include "imgui_stdlib.h"
 
 #include "../log.h"
 
@@ -38,87 +36,6 @@ void FormMessage(const ImVec4& color, const char* text) {
     ImGui::TableSetColumnIndex(1);
     ImGui::TextColored(color, "%s", text);
 }
-
-std::string JsonEscape(const std::string& value) {
-    std::string out;
-    out.reserve(value.size() + 8);
-    for (const char c : value) {
-        switch (c) {
-            case '\\': out += "\\\\"; break;
-            case '"': out += "\\\""; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += c; break;
-        }
-    }
-    return out;
-}
-
-size_t JsonValueStart(const std::string& json, const std::string& key) {
-    const size_t keyPos = json.find("\"" + key + "\"");
-    if (keyPos == std::string::npos) return std::string::npos;
-    const size_t colon = json.find(':', keyPos + key.size() + 2);
-    if (colon == std::string::npos) return std::string::npos;
-    return json.find_first_not_of(" \t\r\n", colon + 1);
-}
-
-bool JsonString(const std::string& json, const std::string& key, std::string* value) {
-    size_t pos = JsonValueStart(json, key);
-    if (pos == std::string::npos || json[pos] != '"') return false;
-    ++pos;
-    std::string out;
-    bool escaped = false;
-    for (; pos < json.size(); ++pos) {
-        const char c = json[pos];
-        if (escaped) {
-            switch (c) {
-                case 'n': out += '\n'; break;
-                case 'r': out += '\r'; break;
-                case 't': out += '\t'; break;
-                case '\\': out += '\\'; break;
-                case '"': out += '"'; break;
-                default: return false;
-            }
-            escaped = false;
-        } else if (c == '\\') {
-            escaped = true;
-        } else if (c == '"') {
-            *value = std::move(out);
-            return true;
-        } else {
-            out += c;
-        }
-    }
-    return false;
-}
-
-bool JsonInt(const std::string& json, const std::string& key, int* value) {
-    const size_t pos = JsonValueStart(json, key);
-    if (pos == std::string::npos) return false;
-    try {
-        size_t consumed = 0;
-        const int parsed = std::stoi(json.substr(pos), &consumed);
-        if (consumed == 0) return false;
-        *value = parsed;
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool JsonBool(const std::string& json, const std::string& key, bool* value) {
-    const size_t pos = JsonValueStart(json, key);
-    if (pos == std::string::npos) return false;
-    if (json.compare(pos, 4, "true") == 0) { *value = true; return true; }
-    if (json.compare(pos, 5, "false") == 0) { *value = false; return true; }
-    return false;
-}
-
-template <size_t N>
-void CopyToBuffer(const std::string& value, char (&buffer)[N]) {
-    std::snprintf(buffer, N, "%s", value.c_str());
-}
 }  // namespace
 
 // Two balanced columns: session and timing settings on the left, the data path
@@ -138,33 +55,34 @@ void GuiApp::RenderSettingsTab() {
         const bool active = state == TunnelState::Connecting || state == TunnelState::Connected;
         if (active) ImGui::BeginDisabled();
         FormField("Server address");
-        configChanged |= ImGui::InputText(
-            "##ServerAddress", serverAddress_, sizeof(serverAddress_));
+        configChanged |= ImGui::InputText("##ServerAddress", &config_.rendezvousAddress);
         FormField("Server port");
-        configChanged |= ImGui::InputInt("##ServerPort", &serverPort_);
-        serverPort_ = std::clamp(serverPort_, 1, 65535);
+        configChanged |= ImGui::InputInt("##ServerPort", &config_.rendezvousPort);
+        config_.rendezvousPort = std::clamp(config_.rendezvousPort, 1, 65535);
         FormField("Room ID");
-        configChanged |= ImGui::InputText("##RoomId", roomId_, sizeof(roomId_));
+        configChanged |= ImGui::InputText("##RoomId", &config_.roomId);
         FormField("My peer ID");
-        configChanged |= ImGui::InputText("##PeerId", peerId_, sizeof(peerId_));
+        configChanged |= ImGui::InputText("##PeerId", &config_.peerId);
         FormField("Auth token");
-        configChanged |= ImGui::InputText("##AuthToken", authToken_, sizeof(authToken_),
+        configChanged |= ImGui::InputText("##AuthToken", &config_.authToken,
                                           ImGuiInputTextFlags_Password);
         if (active) ImGui::EndDisabled();
         FormField("Retry delay (s)");
         const bool retryDelayChanged = ImGui::InputInt(
-            "##RendezvousRetryDelay", &rendezvousRetryDelaySeconds_);
-        rendezvousRetryDelaySeconds_ = std::clamp(rendezvousRetryDelaySeconds_, 1, 3600);
+            "##RendezvousRetryDelay", &config_.rendezvousRetryDelaySeconds);
+        config_.rendezvousRetryDelaySeconds = std::clamp(
+            config_.rendezvousRetryDelaySeconds, 1, 3600);
         if (retryDelayChanged) {
-            autoWaitRetryDelaySecondsRuntime_.store(rendezvousRetryDelaySeconds_);
+            autoWaitRetryDelaySecondsRuntime_.store(config_.rendezvousRetryDelaySeconds);
         }
         configChanged |= retryDelayChanged;
         FormField("Auto wait for peer");
-        const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer", &autoWaitForPeer_);
+        const bool autoWaitChanged = ImGui::Checkbox("##AutoWaitForPeer",
+                                                     &config_.autoWaitForPeer);
         configChanged |= autoWaitChanged;
         if (autoWaitChanged) {
-            autoWaitEnabledRuntime_.store(autoWaitForPeer_);
-            if (autoWaitForPeer_) {
+            autoWaitEnabledRuntime_.store(config_.autoWaitForPeer);
+            if (config_.autoWaitForPeer) {
                 autoWaitRetryAfterMs_.store(0);
                 const TunnelState currentState = currentState_.load();
                 if (currentState == TunnelState::Disconnected
@@ -181,39 +99,42 @@ void GuiApp::RenderSettingsTab() {
     ImGui::SeparatorText("NAT liveness");
     if (BeginForm("##NatSettings")) {
         FormField("Keepalive (s)");
-        configChanged |= ImGui::InputInt("##Keepalive", &keepaliveInterval_);
-        keepaliveInterval_ = std::clamp(keepaliveInterval_, 1, 300);
+        configChanged |= ImGui::InputInt("##Keepalive", &config_.keepaliveInterval);
+        config_.keepaliveInterval = std::clamp(config_.keepaliveInterval, 1, 300);
         FormField("Peer timeout (s)");
-        configChanged |= ImGui::InputInt("##PeerTimeout", &peerTimeout_);
-        peerTimeout_ = std::clamp(peerTimeout_, keepaliveInterval_ + 1, 3600);
+        configChanged |= ImGui::InputInt("##PeerTimeout", &config_.peerTimeout);
+        config_.peerTimeout = std::clamp(config_.peerTimeout,
+                                         config_.keepaliveInterval + 1, 3600);
         FormField("Punch timeout (s)");
-        configChanged |= ImGui::InputInt("##PunchTimeout", &punchTimeout_);
-        punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
+        configChanged |= ImGui::InputInt("##PunchTimeout", &config_.punchTimeout);
+        config_.punchTimeout = std::clamp(config_.punchTimeout, 1, 600);
         FormField("NAT4 port start");
-        configChanged |= ImGui::InputInt("##Nat4SourcePortStart", &nat4SourcePortStart_);
-        nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
+        configChanged |= ImGui::InputInt("##Nat4SourcePortStart",
+                                         &config_.nat4SourcePortStart);
+        config_.nat4SourcePortStart = std::clamp(config_.nat4SourcePortStart, 1, 65535);
         FormField("NAT4 port count");
-        configChanged |= ImGui::InputInt("##Nat4SourcePortCount", &nat4SourcePortCount_);
-        nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 1, 60);
-        if (nat4SourcePortCount_ > 0) {
-            nat4SourcePortStart_ = (std::min)(
-                nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
-        }
+        configChanged |= ImGui::InputInt("##Nat4SourcePortCount",
+                                         &config_.nat4SourcePortCount);
+        config_.nat4SourcePortCount = std::clamp(config_.nat4SourcePortCount, 1, 60);
+        config_.nat4SourcePortStart = (std::min)(
+            config_.nat4SourcePortStart, 65536 - config_.nat4SourcePortCount);
         FormField("NAT4 peer offset");
-        configChanged |= ImGui::InputInt("##Nat4PeerPortOffset", &nat4PeerPortOffset_);
-        nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
+        configChanged |= ImGui::InputInt("##Nat4PeerPortOffset",
+                                         &config_.nat4PeerPortOffset);
+        config_.nat4PeerPortOffset = std::clamp(config_.nat4PeerPortOffset, 0, 256);
         FormField("NAT4 round timeout (s)");
-        configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &nat4RoundTimeout_);
-        nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
+        configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &config_.nat4RoundTimeout);
+        config_.nat4RoundTimeout = std::clamp(config_.nat4RoundTimeout, 1, 60);
         EndForm();
     }
     ImGui::Spacing();
     ImGui::SeparatorText("Log and misc");
     if (BeginForm("##LogSettings")) {
         FormField("Log level");
-        configChanged |= ImGui::Combo("##LogLevel", &logLevelIdx_, kLogLevels, kLogLevelCount);
+        configChanged |= ImGui::Combo("##LogLevel", &config_.logLevel,
+                                      kLogLevels, kLogLevelCount);
         FormField("1 KiB/s dummy traffic");
-        configChanged |= ImGui::Checkbox("##DummyTraffic", &dummyTrafficEnabled_);
+        configChanged |= ImGui::Checkbox("##DummyTraffic", &config_.dummyTrafficEnabled);
         EndForm();
     }
 
@@ -221,20 +142,20 @@ void GuiApp::RenderSettingsTab() {
     ImGui::SeparatorText("TUN adapter");
     if (BeginForm("##TunSettings")) {
         FormField("Adapter name");
-        configChanged |= ImGui::InputText("##AdapterName", adapterName_, sizeof(adapterName_));
+        configChanged |= ImGui::InputText("##AdapterName", &config_.adapterName);
         FormField("Local TUN IPv4");
-        configChanged |= ImGui::InputText("##TunIpv4", localTunIpv4_, sizeof(localTunIpv4_));
+        configChanged |= ImGui::InputText("##TunIpv4", &config_.localTunIpv4);
         FormField("TUN prefix");
-        configChanged |= ImGui::SliderInt("##TunPrefix", &tunPrefix_, 0, 32);
+        configChanged |= ImGui::SliderInt("##TunPrefix", &config_.tunPrefix, 0, 32);
         FormField("TUN MTU");
-        configChanged |= ImGui::InputInt("##TunMtu", &tunMtu_);
-        tunMtu_ = std::clamp(tunMtu_, 576, 9000);
-        if (tunMtu_ > 1472) {
+        configChanged |= ImGui::InputInt("##TunMtu", &config_.tunMtu);
+        config_.tunMtu = std::clamp(config_.tunMtu, 576, 9000);
+        if (config_.tunMtu > 1472) {
             FormMessage(ImVec4(1.0f, 0.8f, 0.0f, 1.0f),
                         "MTU > 1472 may cause outer IPv4 fragmentation");
         }
         FormField("Auto configure IPv4");
-        configChanged |= ImGui::Checkbox("##AutoConfig", &autoConfigIpv4_);
+        configChanged |= ImGui::Checkbox("##AutoConfig", &config_.autoConfigIpv4);
         EndForm();
     }
     ImGui::Spacing();
@@ -247,29 +168,30 @@ void GuiApp::RenderSettingsTab() {
         ImGui::TableSetupColumn("Mode", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Order", ImGuiTableColumnFlags_WidthFixed, 95.0f);
         ImGui::TableHeadersRow();
-        for (size_t i = 0; i < traversalModes_.size(); ++i) {
+        for (size_t i = 0; i < config_.traversalModes.size(); ++i) {
             ImGui::PushID(static_cast<int>(i));
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            configChanged |= ImGui::Checkbox("##Enabled", &traversalModes_[i].enabled);
+            configChanged |= ImGui::Checkbox("##Enabled",
+                                             &config_.traversalModes[i].enabled);
             ImGui::TableSetColumnIndex(1);
             ImGui::Text("%d", static_cast<int>(i + 1));
             ImGui::TableSetColumnIndex(2);
-            ImGui::TextUnformatted(TraversalModeDisplayName(traversalModes_[i].mode));
+            ImGui::TextUnformatted(TraversalModeDisplayName(config_.traversalModes[i].mode));
             ImGui::TableSetColumnIndex(3);
             if (i == 0) ImGui::BeginDisabled();
             if (ImGui::SmallButton("Up")) {
-                std::swap(traversalModes_[i], traversalModes_[i - 1]);
+                std::swap(config_.traversalModes[i], config_.traversalModes[i - 1]);
                 configChanged = true;
             }
             if (i == 0) ImGui::EndDisabled();
             ImGui::SameLine();
-            if (i + 1 == traversalModes_.size()) ImGui::BeginDisabled();
+            if (i + 1 == config_.traversalModes.size()) ImGui::BeginDisabled();
             if (ImGui::SmallButton("Down")) {
-                std::swap(traversalModes_[i], traversalModes_[i + 1]);
+                std::swap(config_.traversalModes[i], config_.traversalModes[i + 1]);
                 configChanged = true;
             }
-            if (i + 1 == traversalModes_.size()) ImGui::EndDisabled();
+            if (i + 1 == config_.traversalModes.size()) ImGui::EndDisabled();
             ImGui::PopID();
         }
         ImGui::EndTable();
@@ -278,19 +200,19 @@ void GuiApp::RenderSettingsTab() {
     ImGui::SeparatorText("IPv6 direct connection");
     if (BeginForm("##Ipv6FallbackSettings")) {
         FormField("Accept inbound UDP");
-        configChanged |= ImGui::Checkbox("##Ipv6Inbound", &ipv6AcceptInbound_);
+        configChanged |= ImGui::Checkbox("##Ipv6Inbound", &config_.ipv6AcceptInbound);
         FormField("Listen port (0=auto)");
-        configChanged |= ImGui::InputInt("##Ipv6ListenPort", &ipv6ListenPort_);
-        ipv6ListenPort_ = std::clamp(ipv6ListenPort_, 0, 65535);
+        configChanged |= ImGui::InputInt("##Ipv6ListenPort", &config_.ipv6ListenPort);
+        config_.ipv6ListenPort = std::clamp(config_.ipv6ListenPort, 0, 65535);
         FormField("Probe host");
-        configChanged |= ImGui::InputText(
-            "##Ipv6ProbeHost", ipv6ProbeHost_, sizeof(ipv6ProbeHost_));
+        configChanged |= ImGui::InputText("##Ipv6ProbeHost", &config_.ipv6ProbeHost);
         FormField("Probe TCP port");
-        configChanged |= ImGui::InputInt("##Ipv6ProbePort", &ipv6ProbePort_);
-        ipv6ProbePort_ = std::clamp(ipv6ProbePort_, 1, 65535);
+        configChanged |= ImGui::InputInt("##Ipv6ProbePort", &config_.ipv6ProbePort);
+        config_.ipv6ProbePort = std::clamp(config_.ipv6ProbePort, 1, 65535);
         FormField("Probe timeout (s)");
-        configChanged |= ImGui::InputInt("##Ipv6FallbackTimeout", &ipv6FallbackTimeout_);
-        ipv6FallbackTimeout_ = std::clamp(ipv6FallbackTimeout_, 1, 120);
+        configChanged |= ImGui::InputInt("##Ipv6FallbackTimeout",
+                                         &config_.ipv6FallbackTimeout);
+        config_.ipv6FallbackTimeout = std::clamp(config_.ipv6FallbackTimeout, 1, 120);
         EndForm();
     }
     ImGui::EndTable();
@@ -301,128 +223,26 @@ void GuiApp::RenderSettingsTab() {
 }
 
 bool GuiApp::LoadGuiConfig() {
-    std::ifstream input(configFilePath_, std::ios::binary);
-    if (!input.is_open()) {
-        ShowConfigSaveMessage("Configuration will be saved to " + configFilePath_, true);
-        return true;
-    }
-    std::ostringstream contents;
-    contents << input.rdbuf();
-    const std::string json = contents.str();
-    if (json.find('{') == std::string::npos || json.find('}') == std::string::npos) {
-        const std::string message = "Invalid configuration JSON: " + configFilePath_;
-        ShowConfigSaveMessage(message, false);
-        Log(LogLevel::Error, message);
+    bool existed = false;
+    std::string error;
+    if (!LoadClientConfig(configFilePath_, &config_, &existed, &error)) {
+        ShowConfigSaveMessage(error, false);
+        Log(LogLevel::Error, error);
         return false;
     }
-    std::string text;
-    if (JsonString(json, "rendezvous_address", &text)) CopyToBuffer(text, serverAddress_);
-    JsonInt(json, "rendezvous_port", &serverPort_);
-    if (JsonString(json, "room_id", &text)) CopyToBuffer(text, roomId_);
-    if (JsonString(json, "peer_id", &text)) CopyToBuffer(text, peerId_);
-    if (JsonString(json, "auth_token", &text)) CopyToBuffer(text, authToken_);
-    if (JsonString(json, "adapter_name", &text)) CopyToBuffer(text, adapterName_);
-    if (JsonString(json, "local_tun_ipv4", &text)) CopyToBuffer(text, localTunIpv4_);
-    JsonInt(json, "tun_prefix", &tunPrefix_);
-    JsonInt(json, "tun_mtu", &tunMtu_);
-    JsonBool(json, "auto_config_ipv4", &autoConfigIpv4_);
-    JsonInt(json, "keepalive_interval", &keepaliveInterval_);
-    JsonInt(json, "peer_timeout", &peerTimeout_);
-    JsonBool(json, "dummy_traffic_enabled", &dummyTrafficEnabled_);
-    JsonInt(json, "punch_timeout", &punchTimeout_);
-    if (JsonString(json, "traversal_modes", &text)) {
-        std::string traversalError;
-        if (!ParseTraversalModes(text, &traversalModes_, &traversalError)) {
-            const std::string message = "Invalid traversal_modes: " + traversalError;
-            ShowConfigSaveMessage(message, false);
-            Log(LogLevel::Error, message);
-            return false;
-        }
-    }
-    JsonInt(json, "nat4_source_port_start", &nat4SourcePortStart_);
-    JsonInt(json, "nat4_source_port_count", &nat4SourcePortCount_);
-    JsonInt(json, "nat4_peer_port_offset", &nat4PeerPortOffset_);
-    JsonInt(json, "nat4_round_timeout", &nat4RoundTimeout_);
-    JsonBool(json, "ipv6_accept_inbound", &ipv6AcceptInbound_);
-    JsonInt(json, "ipv6_listen_port", &ipv6ListenPort_);
-    if (JsonString(json, "ipv6_probe_host", &text)) CopyToBuffer(text, ipv6ProbeHost_);
-    JsonInt(json, "ipv6_probe_port", &ipv6ProbePort_);
-    JsonInt(json, "ipv6_fallback_timeout", &ipv6FallbackTimeout_);
-    JsonInt(json, "log_level", &logLevelIdx_);
-    JsonInt(json, "rendezvous_retry_delay_seconds", &rendezvousRetryDelaySeconds_);
-    JsonBool(json, "auto_wait_for_peer", &autoWaitForPeer_);
-
-    serverPort_ = std::clamp(serverPort_, 1, 65535);
-    tunPrefix_ = std::clamp(tunPrefix_, 0, 32);
-    tunMtu_ = std::clamp(tunMtu_, 576, 9000);
-    keepaliveInterval_ = std::clamp(keepaliveInterval_, 1, 300);
-    peerTimeout_ = std::clamp(peerTimeout_, keepaliveInterval_ + 1, 3600);
-    punchTimeout_ = std::clamp(punchTimeout_, 1, 600);
-    nat4SourcePortStart_ = std::clamp(nat4SourcePortStart_, 1, 65535);
-    nat4SourcePortCount_ = std::clamp(nat4SourcePortCount_, 1, 60);
-    if (nat4SourcePortCount_ > 0) {
-        nat4SourcePortStart_ = (std::min)(
-            nat4SourcePortStart_, 65536 - nat4SourcePortCount_);
-    }
-    nat4PeerPortOffset_ = std::clamp(nat4PeerPortOffset_, 0, 256);
-    nat4RoundTimeout_ = std::clamp(nat4RoundTimeout_, 1, 60);
-    ipv6ListenPort_ = std::clamp(ipv6ListenPort_, 0, 65535);
-    ipv6ProbePort_ = std::clamp(ipv6ProbePort_, 1, 65535);
-    ipv6FallbackTimeout_ = std::clamp(ipv6FallbackTimeout_, 1, 120);
-    logLevelIdx_ = std::clamp(logLevelIdx_, 0, kLogLevelCount - 1);
-    rendezvousRetryDelaySeconds_ = std::clamp(rendezvousRetryDelaySeconds_, 1, 3600);
-    const std::string message = "Configuration loaded from " + configFilePath_;
+    const std::string message = existed
+        ? "Configuration loaded from " + configFilePath_
+        : "Configuration will be saved to " + configFilePath_;
     ShowConfigSaveMessage(message, true);
-    Log(LogLevel::Info, message);
+    if (existed) Log(LogLevel::Info, message);
     return true;
 }
 
 bool GuiApp::SaveGuiConfig() {
-    std::ofstream output(configFilePath_, std::ios::binary | std::ios::trunc);
-    if (!output.is_open()) {
-        const std::string message = "Failed to save configuration: " + configFilePath_;
-        ShowConfigSaveMessage(message, false);
-        Log(LogLevel::Error, message);
-        return false;
-    }
-    output
-        << "{\n"
-        << "  \"rendezvous_address\": \"" << JsonEscape(serverAddress_) << "\",\n"
-        << "  \"rendezvous_port\": " << serverPort_ << ",\n"
-        << "  \"room_id\": \"" << JsonEscape(roomId_) << "\",\n"
-        << "  \"peer_id\": \"" << JsonEscape(peerId_) << "\",\n"
-        << "  \"auth_token\": \"" << JsonEscape(authToken_) << "\",\n"
-        << "  \"adapter_name\": \"" << JsonEscape(adapterName_) << "\",\n"
-        << "  \"local_tun_ipv4\": \"" << JsonEscape(localTunIpv4_) << "\",\n"
-        << "  \"tun_prefix\": " << tunPrefix_ << ",\n"
-        << "  \"tun_mtu\": " << tunMtu_ << ",\n"
-        << "  \"auto_config_ipv4\": " << (autoConfigIpv4_ ? "true" : "false") << ",\n"
-        << "  \"keepalive_interval\": " << keepaliveInterval_ << ",\n"
-        << "  \"peer_timeout\": " << peerTimeout_ << ",\n"
-        << "  \"dummy_traffic_enabled\": " << (dummyTrafficEnabled_ ? "true" : "false") << ",\n"
-        << "  \"punch_timeout\": " << punchTimeout_ << ",\n"
-        << "  \"traversal_modes\": \""
-        << SerializeTraversalModes(traversalModes_) << "\",\n"
-        << "  \"nat4_source_port_start\": " << nat4SourcePortStart_ << ",\n"
-        << "  \"nat4_source_port_count\": " << nat4SourcePortCount_ << ",\n"
-        << "  \"nat4_peer_port_offset\": " << nat4PeerPortOffset_ << ",\n"
-        << "  \"nat4_round_timeout\": " << nat4RoundTimeout_ << ",\n"
-        << "  \"ipv6_accept_inbound\": "
-        << (ipv6AcceptInbound_ ? "true" : "false") << ",\n"
-        << "  \"ipv6_listen_port\": " << ipv6ListenPort_ << ",\n"
-        << "  \"ipv6_probe_host\": \"" << JsonEscape(ipv6ProbeHost_) << "\",\n"
-        << "  \"ipv6_probe_port\": " << ipv6ProbePort_ << ",\n"
-        << "  \"ipv6_fallback_timeout\": " << ipv6FallbackTimeout_ << ",\n"
-        << "  \"log_level\": " << logLevelIdx_ << ",\n"
-        << "  \"rendezvous_retry_delay_seconds\": "
-        << rendezvousRetryDelaySeconds_ << ",\n"
-        << "  \"auto_wait_for_peer\": " << (autoWaitForPeer_ ? "true" : "false") << "\n"
-        << "}\n";
-    output.flush();
-    if (!output.good()) {
-        const std::string message = "Failed to write configuration: " + configFilePath_;
-        ShowConfigSaveMessage(message, false);
-        Log(LogLevel::Error, message);
+    std::string error;
+    if (!SaveClientConfig(configFilePath_, config_, &error)) {
+        ShowConfigSaveMessage(error, false);
+        Log(LogLevel::Error, error);
         return false;
     }
     ShowConfigSaveMessage("Configuration saved: " + configFilePath_, true);
