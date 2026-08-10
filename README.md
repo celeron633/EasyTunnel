@@ -56,7 +56,7 @@ cmake -S . -B build -DBUILD_GUI=ON -DBUILD_TUI=ON
 cmake --build build --config Release
 ```
 
-Windows 构建会自动下载 Wintun SDK、GLFW、ImGui、FTXUI 和 JsonCpp（JSON 配置读写）。生成：
+Windows 构建会自动下载 Wintun SDK、GLFW、ImGui、ImPlot、FTXUI 和 JsonCpp（JSON 配置读写）。生成：
 
 - `EasyTunnel.exe`：Console 客户端
 - `EasyTunnel_gui.exe`：GUI 客户端

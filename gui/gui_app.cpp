@@ -3,6 +3,7 @@
 #include <filesystem>
 
 #include "imgui.h"
+#include "implot.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
@@ -62,8 +63,10 @@ bool GuiApp::Init() {
     glfwSwapInterval(1);
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImPlot::CreateContext();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+    ImPlot::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 130");
     uiHeartbeat_ = std::make_unique<UiHeartbeat>();
@@ -138,6 +141,7 @@ void GuiApp::Shutdown() {
     if (uiHeartbeat_) uiHeartbeat_->SetPhase(UiPhase::ShutdownUi);
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
     glfwDestroyWindow(window_);
     glfwTerminate();

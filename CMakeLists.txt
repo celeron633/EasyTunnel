@@ -340,6 +340,13 @@ if(BUILD_GUI)
     )
     FetchContent_MakeAvailable(imgui)
 
+    FetchContent_Declare(
+        implot
+        GIT_REPOSITORY https://github.com/epezent/implot.git
+        GIT_TAG v1.0
+    )
+    FetchContent_MakeAvailable(implot)
+
     set(IMGUI_DIR ${imgui_SOURCE_DIR})
     add_library(imgui_lib STATIC
         ${IMGUI_DIR}/imgui.cpp
@@ -354,6 +361,14 @@ if(BUILD_GUI)
         ${IMGUI_DIR} ${IMGUI_DIR}/backends ${IMGUI_DIR}/misc/cpp)
     find_package(OpenGL REQUIRED)
     target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
+
+    set(IMPLOT_DIR ${implot_SOURCE_DIR})
+    add_library(implot_lib STATIC
+        ${IMPLOT_DIR}/implot.cpp
+        ${IMPLOT_DIR}/implot_items.cpp
+    )
+    target_include_directories(implot_lib PUBLIC ${IMPLOT_DIR})
+    target_link_libraries(implot_lib PUBLIC imgui_lib)
 
     set(GUI_SOURCES
         gui/gui_main.cpp
@@ -371,7 +386,7 @@ if(BUILD_GUI)
     add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
     target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(EasyTunnel_gui PRIVATE
-        spdlog::spdlog_header_only jsoncpp_static imgui_lib Threads::Threads)
+        spdlog::spdlog_header_only jsoncpp_static implot_lib Threads::Threads)
 
     if(MSVC)
         target_compile_options(EasyTunnel_gui PRIVATE /W4 /utf-8)
