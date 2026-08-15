@@ -381,6 +381,7 @@ if(BUILD_GUI)
         gui/ui_heartbeat.cpp)
     if(WIN32)
         list(APPEND GUI_SOURCES
+            gui/windows_startup.cpp
             gui/windows_tray.cpp)
     endif()
     add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
@@ -398,7 +399,8 @@ if(BUILD_GUI)
     endif()
 
     if(WIN32)
-        target_link_libraries(EasyTunnel_gui PRIVATE ws2_32 iphlpapi shell32)
+        target_link_libraries(EasyTunnel_gui PRIVATE
+            ws2_32 iphlpapi shell32 taskschd ole32 oleaut32 secur32)
         target_include_directories(EasyTunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
         add_custom_command(TARGET EasyTunnel_gui POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

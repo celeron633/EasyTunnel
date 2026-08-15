@@ -59,6 +59,7 @@ private:
     std::unique_ptr<UiHeartbeat> uiHeartbeat_;
 #ifdef _WIN32
     std::unique_ptr<WindowsTray> windowsTray_;
+    bool startWithWindows_ = false;
 #endif
     TunnelEngine engine_;
 

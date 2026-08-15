@@ -12,6 +12,7 @@
 #include "ui_heartbeat.h"
 
 #ifdef _WIN32
+#include "windows_startup.h"
 #include "windows_tray.h"
 #endif
 
@@ -49,6 +50,12 @@ bool GuiApp::Init() {
         configFilePath_ = kClientConfigFileName;
     }
     LoadGuiConfig();
+#ifdef _WIN32
+    std::string startupError;
+    if (!IsWindowsStartupEnabled(&startWithWindows_, &startupError)) {
+        Log(LogLevel::Error, startupError);
+    }
+#endif
     glfwSetErrorCallback(GlfwErrorCallback);
     if (!glfwInit()) return false;
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);

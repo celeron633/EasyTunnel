@@ -8,6 +8,9 @@
 #include "imgui_stdlib.h"
 
 #include "../log.h"
+#ifdef _WIN32
+#include "windows_startup.h"
+#endif
 
 namespace {
 constexpr float kFormLabelWidth = 155.0f;
@@ -135,6 +138,28 @@ void GuiApp::RenderSettingsTab() {
                                       kLogLevels, kLogLevelCount);
         FormField("1 KiB/s dummy traffic");
         configChanged |= ImGui::Checkbox("##DummyTraffic", &config_.dummyTrafficEnabled);
+#ifdef _WIN32
+        FormField("Start with Windows");
+        const bool previousStartWithWindows = startWithWindows_;
+        if (ImGui::Checkbox("##StartWithWindows", &startWithWindows_)) {
+            std::string error;
+            if (SetWindowsStartupEnabled(startWithWindows_, &error)) {
+                ShowConfigSaveMessage(
+                    startWithWindows_
+                        ? "Windows startup enabled"
+                        : "Windows startup disabled",
+                    true);
+            } else {
+                startWithWindows_ = previousStartWithWindows;
+                ShowConfigSaveMessage(error, false);
+                Log(LogLevel::Error, error);
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip(
+                "Uses an elevated logon task in Windows Task Scheduler.");
+        }
+#endif
         EndForm();
     }
 
