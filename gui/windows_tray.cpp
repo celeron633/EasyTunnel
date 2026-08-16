@@ -34,11 +34,14 @@ struct WindowsTray::Impl {
     HICON icon = nullptr;
     bool ownsIcon = false;
     UINT taskbarCreatedMessage = 0;
+    const bool* closeToMinimize = nullptr;
+    bool exitRequested = false;
 
-    bool Init(GLFWwindow* glfwWindowValue) {
+    bool Init(GLFWwindow* glfwWindowValue, const bool* closeToMinimizeValue) {
         if (!glfwWindowValue || active) return false;
 
         glfwWindow = glfwWindowValue;
+        closeToMinimize = closeToMinimizeValue;
         window = glfwGetWin32Window(glfwWindow);
         if (!window) return false;
 
@@ -99,6 +102,8 @@ struct WindowsTray::Impl {
         previousWindowProc = nullptr;
         window = nullptr;
         glfwWindow = nullptr;
+        closeToMinimize = nullptr;
+        exitRequested = false;
     }
 
     void HideWindow() const {
@@ -110,18 +115,12 @@ struct WindowsTray::Impl {
         SetForegroundWindow(window);
     }
 
-    void ConfirmExit() const {
-        const int result = MessageBoxW(
-            window, L"Exit EasyTunnel?", kWindowTitle,
-            MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND);
-        if (result == IDYES) {
-            glfwSetWindowShouldClose(glfwWindow, GLFW_TRUE);
-        } else {
-            HideWindow();
-        }
+    void RequestExit() {
+        RestoreWindow();
+        exitRequested = true;
     }
 
-    void ShowContextMenu() const {
+    void ShowContextMenu() {
         HMENU menu = CreatePopupMenu();
         if (!menu) return;
 
@@ -135,7 +134,7 @@ struct WindowsTray::Impl {
             cursor.x, cursor.y, 0, window, nullptr);
         DestroyMenu(menu);
 
-        if (command == kExitCommand) ConfirmExit();
+        if (command == kExitCommand) RequestExit();
         PostMessageW(window, WM_NULL, 0, 0);
     }
 
@@ -146,7 +145,11 @@ struct WindowsTray::Impl {
         }
 
         if (message == WM_CLOSE) {
-            ConfirmExit();
+            if (closeToMinimize && *closeToMinimize) {
+                HideWindow();
+            } else {
+                RequestExit();
+            }
             return 0;
         }
 
@@ -186,8 +189,14 @@ WindowsTray::~WindowsTray() {
     Shutdown();
 }
 
-bool WindowsTray::Init(GLFWwindow* window) {
-    return impl_->Init(window);
+bool WindowsTray::Init(GLFWwindow* window, const bool* closeToMinimize) {
+    return impl_->Init(window, closeToMinimize);
+}
+
+bool WindowsTray::ConsumeExitRequest() {
+    const bool requested = impl_->exitRequested;
+    impl_->exitRequested = false;
+    return requested;
 }
 
 void WindowsTray::Shutdown() {

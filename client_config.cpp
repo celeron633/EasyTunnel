@@ -76,6 +76,7 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
     ReadInt(root, "rendezvous_retry_delay_seconds",
             &config->rendezvousRetryDelaySeconds);
     ReadBool(root, "auto_wait_for_peer", &config->autoWaitForPeer);
+    ReadBool(root, "close_to_minimize", &config->closeToMinimize);
 
     config->rendezvousPort = std::clamp(config->rendezvousPort, 1, 65535);
     config->tunPrefix = std::clamp(config->tunPrefix, 0, 32);
@@ -129,6 +130,7 @@ bool SaveClientConfig(const std::string& path, const ClientConfig& config,
     root["log_level"] = config.logLevel;
     root["rendezvous_retry_delay_seconds"] = config.rendezvousRetryDelaySeconds;
     root["auto_wait_for_peer"] = config.autoWaitForPeer;
+    root["close_to_minimize"] = config.closeToMinimize;
 
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output.is_open()) {

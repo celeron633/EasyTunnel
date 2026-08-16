@@ -80,7 +80,7 @@ bool GuiApp::Init() {
     uiHeartbeat_->Start(OpenGLInfo());
 #ifdef _WIN32
     windowsTray_ = std::make_unique<WindowsTray>();
-    if (!windowsTray_->Init(window_)) {
+    if (!windowsTray_->Init(window_, &config_.closeToMinimize)) {
         return false;
     }
 #endif
@@ -199,4 +199,25 @@ void GuiApp::RenderFrame() {
     }
     ImGui::End();
     RenderStatusBar();
+#ifdef _WIN32
+    if (windowsTray_ && windowsTray_->ConsumeExitRequest()) {
+        ImGui::OpenPopup("Exit EasyTunnel?");
+    }
+    if (ImGui::BeginPopupModal("Exit EasyTunnel?", nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f),
+                           "Are you sure you want to exit?");
+        ImGui::Spacing();
+        if (ImGui::Button("Yes", ImVec2(80.0f, 0.0f))) {
+            glfwSetWindowShouldClose(window_, GLFW_TRUE);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("No", ImVec2(80.0f, 0.0f))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SetItemDefaultFocus();
+        ImGui::EndPopup();
+    }
+#endif
 }

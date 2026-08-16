@@ -13,7 +13,8 @@ public:
     WindowsTray(const WindowsTray&) = delete;
     WindowsTray& operator=(const WindowsTray&) = delete;
 
-    bool Init(GLFWwindow* window);
+    bool Init(GLFWwindow* window, const bool* closeToMinimize);
+    bool ConsumeExitRequest();
     void Shutdown();
 
 private:

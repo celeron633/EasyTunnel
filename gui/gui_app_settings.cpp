@@ -139,6 +139,9 @@ void GuiApp::RenderSettingsTab() {
         FormField("1 KiB/s dummy traffic");
         configChanged |= ImGui::Checkbox("##DummyTraffic", &config_.dummyTrafficEnabled);
 #ifdef _WIN32
+        FormField("Close to minimize");
+        configChanged |= ImGui::Checkbox("##CloseToMinimize",
+                                         &config_.closeToMinimize);
         FormField("Start with Windows");
         const bool previousStartWithWindows = startWithWindows_;
         if (ImGui::Checkbox("##StartWithWindows", &startWithWindows_)) {

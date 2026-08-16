@@ -38,6 +38,7 @@ struct ClientConfig {
     int logLevel = 1;
     int rendezvousRetryDelaySeconds = 5;
     bool autoWaitForPeer = false;
+    bool closeToMinimize = false;
 };
 
 // Loads the JSON file. A missing file is not an error: *existed is set to
