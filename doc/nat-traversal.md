@@ -328,10 +328,13 @@ NAT4 ready room=... round=0 peer=... endpoint=... target=... endpoint=...
 客户端获得预测目标并成功：
 
 ```text
-NAT4 peer observed as 203.0.113.20:50000, target 203.0.113.20:50020
+NAT4 peer observed as 203.0.113.20:50000, target 203.0.113.20:50020; punching attempt 1
 NAT4 socket pool matched local port 30017 with peer 203.0.113.20:50020
 NAT4 hole punching confirmed with 203.0.113.20:50020
 ```
+
+如果首次发送后尚未匹配到对端，同一 round 内的补发会记录为
+`NAT4 punching attempt 2, target ...`，避免将补发误解为重复发现相同端点。
 
 ## 故障修复记录与排查
 

@@ -184,6 +184,7 @@ bool PunchNat4(socket_t* sock, const Config& cfg,
         auto nextPoolPunch = std::chrono::steady_clock::time_point{};
         bool havePeer = peer->family == AF_INET;
         bool punchSent = false;
+        uint32_t punchAttempt = 0;
         UdpEndpoint rendezvousPeer = *peer;
 
         while (running.load() && std::chrono::steady_clock::now() < roundDeadline) {
@@ -263,9 +264,18 @@ bool PunchNat4(socket_t* sock, const Config& cfg,
                                 closeRound();
                                 return false;
                             }
-                            Log(LogLevel::Info, "NAT4 peer observed as "
-                                + FormatUdpEndpoint(rendezvousPeer) + ", target "
-                                + FormatUdpEndpoint(predicted));
+                            ++punchAttempt;
+                            if (!punchSent || endpointChanged) {
+                                Log(LogLevel::Info, "NAT4 peer observed as "
+                                    + FormatUdpEndpoint(rendezvousPeer) + ", target "
+                                    + FormatUdpEndpoint(predicted)
+                                    + "; punching attempt "
+                                    + std::to_string(punchAttempt));
+                            } else {
+                                Log(LogLevel::Info, "NAT4 punching attempt "
+                                    + std::to_string(punchAttempt) + ", target "
+                                    + FormatUdpEndpoint(predicted));
+                            }
                             const int repeatCount = (!punchSent || endpointChanged)
                                 ? kPunchRepeat : 1;
                             SendPoolPunch(pool, predicted, punch, repeatCount);
