@@ -1,3 +1,9 @@
-// Windows application icon resource.
-// The lowest-id ICON resource is used by Explorer as the executable's icon.
-1 ICON "EasyTunnel.ico"
+// Windows application icons. The lowest-id resource remains the icon Explorer
+// uses for the executable; the other states are selected at runtime.
+#include "resource.h"
+
+IDI_EASYTUNNEL              ICON "EasyTunnel.ico"
+IDI_EASYTUNNEL_DISCONNECTED ICON "IconSets/EasyTunnelDisconnected.ico"
+IDI_EASYTUNNEL_RX           ICON "IconSets/EasyTunnelRx.ico"
+IDI_EASYTUNNEL_TX           ICON "IconSets/EasyTunnelTx.ico"
+IDI_EASYTUNNEL_RX_TX        ICON "IconSets/EasyTunnelRxTx.ico"

@@ -11,24 +11,63 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <array>
+#include <atomic>
+#include <cstddef>
 #include <cwchar>
 #include <future>
 #include <thread>
 #include <utility>
 
 #include "../log.h"
+#include "../res/resource.h"
 
 namespace {
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;
+constexpr UINT kUpdateIconMessage = WM_APP + 2;
 constexpr UINT kToggleCommand = 1001;
 constexpr UINT kExitCommand = 1002;
-constexpr wchar_t kTip[] = L"EasyTunnel TUI";
 constexpr wchar_t kWindowClass[] = L"EasyTunnelTuiTray";
+
+enum class IconMode : std::size_t {
+    Idle,
+    Disconnected,
+    Rx,
+    Tx,
+    RxTx,
+    Count,
+};
+
+constexpr std::array<int, static_cast<std::size_t>(IconMode::Count)> kIconResources{
+    IDI_EASYTUNNEL,
+    IDI_EASYTUNNEL_DISCONNECTED,
+    IDI_EASYTUNNEL_RX,
+    IDI_EASYTUNNEL_TX,
+    IDI_EASYTUNNEL_RX_TX,
+};
+
+IconMode StatusMode(bool unavailable, bool rxActive, bool txActive) {
+    if (unavailable) return IconMode::Disconnected;
+    if (rxActive && txActive) return IconMode::RxTx;
+    if (rxActive) return IconMode::Rx;
+    if (txActive) return IconMode::Tx;
+    return IconMode::Idle;
+}
+
+const wchar_t* StatusTip(IconMode mode) {
+    switch (mode) {
+        case IconMode::Disconnected: return L"EasyTunnel TUI - disconnected / waiting";
+        case IconMode::Rx: return L"EasyTunnel TUI - receiving (RX)";
+        case IconMode::Tx: return L"EasyTunnel TUI - transmitting (TX)";
+        case IconMode::RxTx: return L"EasyTunnel TUI - receiving and transmitting";
+        default: return L"EasyTunnel TUI - connected";
+    }
+}
 
 // Under classic conhost the console window is ours to show and hide. Under
 // Windows Terminal GetConsoleWindow() returns the hidden ConPTY pseudo window,
-// so fall back to the window that had focus while we started up — the terminal
+// so fall back to the window that had focus while we started up - the terminal
 // that launched the TUI.
 HWND ResolveTerminalWindow() {
     HWND console = GetConsoleWindow();
@@ -41,12 +80,51 @@ HWND ResolveTerminalWindow() {
 struct TuiWindowsTray::Impl {
     std::function<void()> exitRequested;
     HWND terminal = nullptr;
-    HWND window = nullptr;
+    std::atomic<HWND> window{nullptr};
     NOTIFYICONDATAW iconData{};
-    HICON icon = nullptr;
-    bool ownsIcon = false;
+    std::array<HICON, static_cast<std::size_t>(IconMode::Count)> icons{};
+    HICON fallbackIcon = nullptr;
+    std::atomic<IconMode> requestedMode{IconMode::Disconnected};
+    IconMode currentMode = IconMode::Disconnected;
     UINT taskbarCreatedMessage = 0;
     std::thread thread;
+
+    HICON SelectedIcon(IconMode mode) const {
+        const HICON selected = icons[static_cast<std::size_t>(mode)];
+        const HICON idle = icons[static_cast<std::size_t>(IconMode::Idle)];
+        return selected ? selected : (idle ? idle : fallbackIcon);
+    }
+
+    void LoadIcons() {
+        const int width = GetSystemMetrics(SM_CXSMICON);
+        const int height = GetSystemMetrics(SM_CYSMICON);
+        for (std::size_t index = 0; index < icons.size(); ++index) {
+            icons[index] = static_cast<HICON>(LoadImageW(
+                GetModuleHandleW(nullptr), MAKEINTRESOURCEW(kIconResources[index]),
+                IMAGE_ICON, width, height, LR_DEFAULTCOLOR));
+        }
+        fallbackIcon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
+    }
+
+    void DestroyIcons() {
+        for (HICON& icon : icons) {
+            if (icon) DestroyIcon(icon);
+            icon = nullptr;
+        }
+    }
+
+    void SetTip(IconMode mode) {
+        wcsncpy_s(iconData.szTip, StatusTip(mode), _TRUNCATE);
+    }
+
+    void ApplyRequestedMode() {
+        const IconMode mode = requestedMode.load();
+        if (mode == currentMode && iconData.hIcon != nullptr) return;
+        currentMode = mode;
+        iconData.hIcon = SelectedIcon(mode);
+        SetTip(mode);
+        Shell_NotifyIconW(NIM_MODIFY, &iconData);
+    }
 
     bool Start(std::function<void()> exitCallback) {
         exitRequested = std::move(exitCallback);
@@ -65,16 +143,20 @@ struct TuiWindowsTray::Impl {
         windowClass.hInstance = GetModuleHandleW(nullptr);
         windowClass.lpszClassName = kWindowClass;
         RegisterClassW(&windowClass);
+        LoadIcons();
 
         // A hidden top-level window rather than a message-only one: only
         // top-level windows receive the TaskbarCreated broadcast that tells us
         // to re-add the icon after Explorer restarts.
-        window = CreateWindowW(kWindowClass, kTip, WS_OVERLAPPED, 0, 0, 0, 0,
-                               nullptr, nullptr, windowClass.hInstance, this);
-        if (window == nullptr || !AddIcon()) {
+        HWND createdWindow = CreateWindowW(
+            kWindowClass, L"EasyTunnel TUI", WS_OVERLAPPED, 0, 0, 0, 0,
+            nullptr, nullptr, windowClass.hInstance, this);
+        window.store(createdWindow);
+        if (createdWindow == nullptr || !AddIcon()) {
             Log(LogLevel::Error, "Failed to create the Windows tray icon");
-            if (window != nullptr) DestroyWindow(window);
-            window = nullptr;
+            if (createdWindow != nullptr) DestroyWindow(createdWindow);
+            window.store(nullptr);
+            DestroyIcons();
             ready.set_value(false);
             return;
         }
@@ -87,45 +169,43 @@ struct TuiWindowsTray::Impl {
             DispatchMessageW(&message);
         }
         Shell_NotifyIconW(NIM_DELETE, &iconData);
-        if (icon != nullptr && ownsIcon) DestroyIcon(icon);
-        icon = nullptr;
-        window = nullptr;
+        DestroyIcons();
+        window.store(nullptr);
     }
 
     bool AddIcon() {
-        if (icon == nullptr) {
-            icon = static_cast<HICON>(LoadImageW(
-                GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON,
-                GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
-                LR_DEFAULTCOLOR));
-            ownsIcon = icon != nullptr;
-            if (icon == nullptr) icon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
-        }
+        currentMode = requestedMode.load();
         iconData = {};
         iconData.cbSize = sizeof(iconData);
-        iconData.hWnd = window;
+        iconData.hWnd = window.load();
         iconData.uID = kTrayIconId;
         iconData.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         iconData.uCallbackMessage = kTrayCallbackMessage;
-        iconData.hIcon = icon;
-        static_assert(sizeof(kTip) <= sizeof(iconData.szTip));
-        std::wmemcpy(iconData.szTip, kTip, sizeof(kTip) / sizeof(kTip[0]));
+        iconData.hIcon = SelectedIcon(currentMode);
+        SetTip(currentMode);
         if (!Shell_NotifyIconW(NIM_ADD, &iconData)) return false;
         iconData.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIconW(NIM_SETVERSION, &iconData);
         return true;
     }
 
+    void UpdateStatus(bool unavailable, bool rxActive, bool txActive) {
+        const IconMode mode = StatusMode(unavailable, rxActive, txActive);
+        if (mode == requestedMode.exchange(mode)) return;
+        const HWND iconWindow = window.load();
+        if (iconWindow != nullptr) PostMessageW(iconWindow, kUpdateIconMessage, 0, 0);
+    }
+
     void Stop() {
         if (thread.joinable()) {
-            if (window != nullptr) PostMessageW(window, WM_CLOSE, 0, 0);
+            const HWND iconWindow = window.load();
+            if (iconWindow != nullptr) PostMessageW(iconWindow, WM_CLOSE, 0, 0);
             thread.join();
         }
     }
 
     bool TerminalVisible() const {
-        return terminal != nullptr && IsWindowVisible(terminal)
-            && !IsIconic(terminal);
+        return terminal != nullptr && IsWindowVisible(terminal) && !IsIconic(terminal);
     }
 
     void ToggleTerminal() const {
@@ -150,20 +230,25 @@ struct TuiWindowsTray::Impl {
 
         POINT cursor{};
         GetCursorPos(&cursor);
-        SetForegroundWindow(window);
+        const HWND iconWindow = window.load();
+        SetForegroundWindow(iconWindow);
         const UINT command = TrackPopupMenu(
             menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
-            cursor.x, cursor.y, 0, window, nullptr);
+            cursor.x, cursor.y, 0, iconWindow, nullptr);
         DestroyMenu(menu);
 
         if (command == kToggleCommand) ToggleTerminal();
         else if (command == kExitCommand && exitRequested) exitRequested();
-        PostMessageW(window, WM_NULL, 0, 0);
+        PostMessageW(iconWindow, WM_NULL, 0, 0);
     }
 
     LRESULT HandleMessage(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
         if (taskbarCreatedMessage != 0 && message == taskbarCreatedMessage) {
             AddIcon();
+            return 0;
+        }
+        if (message == kUpdateIconMessage) {
+            ApplyRequestedMode();
             return 0;
         }
         if (message == kTrayCallbackMessage) {
@@ -211,6 +296,10 @@ TuiWindowsTray::~TuiWindowsTray() {
 
 bool TuiWindowsTray::Init(std::function<void()> exitRequested) {
     return impl_->Start(std::move(exitRequested));
+}
+
+void TuiWindowsTray::UpdateStatus(bool unavailable, bool rxActive, bool txActive) {
+    impl_->UpdateStatus(unavailable, rxActive, txActive);
 }
 
 void TuiWindowsTray::Shutdown() {

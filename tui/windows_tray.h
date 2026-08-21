@@ -20,6 +20,7 @@ public:
     // exitRequested is invoked from the tray thread and must be thread-safe;
     // ScreenInteractive::ExitLoopClosure() qualifies.
     bool Init(std::function<void()> exitRequested);
+    void UpdateStatus(bool unavailable, bool rxActive, bool txActive);
     void Shutdown();
 
 private:

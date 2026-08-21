@@ -13,29 +13,127 @@
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 
-#include <cwchar>
+#include <array>
+#include <cstddef>
 
 #include "../log.h"
+#include "../res/resource.h"
 
 namespace {
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;
 constexpr UINT kExitCommand = 1001;
-constexpr wchar_t kWindowTitle[] = L"EasyTunnel";
+
+enum class IconMode : std::size_t {
+    Idle,
+    Disconnected,
+    Rx,
+    Tx,
+    RxTx,
+    Count,
+};
+
+constexpr std::array<int, static_cast<std::size_t>(IconMode::Count)> kIconResources{
+    IDI_EASYTUNNEL,
+    IDI_EASYTUNNEL_DISCONNECTED,
+    IDI_EASYTUNNEL_RX,
+    IDI_EASYTUNNEL_TX,
+    IDI_EASYTUNNEL_RX_TX,
+};
+
+IconMode StatusMode(bool unavailable, bool rxActive, bool txActive) {
+    if (unavailable) return IconMode::Disconnected;
+    if (rxActive && txActive) return IconMode::RxTx;
+    if (rxActive) return IconMode::Rx;
+    if (txActive) return IconMode::Tx;
+    return IconMode::Idle;
+}
+
+const wchar_t* StatusTip(IconMode mode) {
+    switch (mode) {
+        case IconMode::Disconnected: return L"EasyTunnel - disconnected / waiting";
+        case IconMode::Rx: return L"EasyTunnel - receiving (RX)";
+        case IconMode::Tx: return L"EasyTunnel - transmitting (TX)";
+        case IconMode::RxTx: return L"EasyTunnel - receiving and transmitting";
+        default: return L"EasyTunnel - connected";
+    }
+}
 }  // namespace
 
 struct WindowsTray::Impl {
+    struct IconHandles {
+        HICON tray = nullptr;
+        HICON small = nullptr;
+        HICON large = nullptr;
+    };
+
     static Impl* active;
 
     GLFWwindow* glfwWindow = nullptr;
     HWND window = nullptr;
     WNDPROC previousWindowProc = nullptr;
     NOTIFYICONDATAW iconData{};
-    HICON icon = nullptr;
-    bool ownsIcon = false;
+    std::array<IconHandles, static_cast<std::size_t>(IconMode::Count)> icons{};
+    HICON fallbackIcon = nullptr;
+    IconMode currentMode = IconMode::Disconnected;
     UINT taskbarCreatedMessage = 0;
     const bool* closeToMinimize = nullptr;
     bool exitRequested = false;
+    bool iconAdded = false;
+
+    static HICON LoadResourceIcon(int resource, int width, int height) {
+        return static_cast<HICON>(LoadImageW(
+            GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resource), IMAGE_ICON,
+            width, height, LR_DEFAULTCOLOR));
+    }
+
+    void LoadIcons() {
+        const int trayWidth = GetSystemMetrics(SM_CXSMICON);
+        const int trayHeight = GetSystemMetrics(SM_CYSMICON);
+        const int largeWidth = GetSystemMetrics(SM_CXICON);
+        const int largeHeight = GetSystemMetrics(SM_CYICON);
+        for (std::size_t index = 0; index < icons.size(); ++index) {
+            icons[index].tray = LoadResourceIcon(kIconResources[index], trayWidth, trayHeight);
+            icons[index].small = LoadResourceIcon(kIconResources[index], trayWidth, trayHeight);
+            icons[index].large = LoadResourceIcon(kIconResources[index], largeWidth, largeHeight);
+        }
+        fallbackIcon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
+    }
+
+    HICON TrayIcon(IconMode mode) const {
+        const HICON selected = icons[static_cast<std::size_t>(mode)].tray;
+        const HICON idle = icons[static_cast<std::size_t>(IconMode::Idle)].tray;
+        return selected ? selected : (idle ? idle : fallbackIcon);
+    }
+
+    HICON SmallIcon(IconMode mode) const {
+        const HICON selected = icons[static_cast<std::size_t>(mode)].small;
+        const HICON idle = icons[static_cast<std::size_t>(IconMode::Idle)].small;
+        return selected ? selected : (idle ? idle : fallbackIcon);
+    }
+
+    HICON LargeIcon(IconMode mode) const {
+        const HICON selected = icons[static_cast<std::size_t>(mode)].large;
+        const HICON idle = icons[static_cast<std::size_t>(IconMode::Idle)].large;
+        return selected ? selected : (idle ? idle : fallbackIcon);
+    }
+
+    void SetTip(IconMode mode) {
+        wcsncpy_s(iconData.szTip, StatusTip(mode), _TRUNCATE);
+    }
+
+    void ApplyMode(IconMode mode, bool modifyTray) {
+        currentMode = mode;
+        iconData.hIcon = TrayIcon(mode);
+        SetTip(mode);
+        if (modifyTray && iconAdded) Shell_NotifyIconW(NIM_MODIFY, &iconData);
+        if (window) {
+            SendMessageW(window, WM_SETICON, ICON_SMALL,
+                         reinterpret_cast<LPARAM>(SmallIcon(mode)));
+            SendMessageW(window, WM_SETICON, ICON_BIG,
+                         reinterpret_cast<LPARAM>(LargeIcon(mode)));
+        }
+    }
 
     bool Init(GLFWwindow* glfwWindowValue, const bool* closeToMinimizeValue) {
         if (!glfwWindowValue || active) return false;
@@ -55,12 +153,7 @@ struct WindowsTray::Impl {
 
         active = this;
         taskbarCreatedMessage = RegisterWindowMessageW(L"TaskbarCreated");
-
-        icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1),
-                                             IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
-                                             GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
-        ownsIcon = icon != nullptr;
-        if (!icon) icon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
+        LoadIcons();
 
         iconData = {};
         iconData.cbSize = sizeof(iconData);
@@ -68,10 +161,7 @@ struct WindowsTray::Impl {
         iconData.uID = kTrayIconId;
         iconData.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         iconData.uCallbackMessage = kTrayCallbackMessage;
-        iconData.hIcon = icon;
-        static_assert(sizeof(kWindowTitle) <= sizeof(iconData.szTip));
-        std::wmemcpy(iconData.szTip, kWindowTitle,
-                     sizeof(kWindowTitle) / sizeof(kWindowTitle[0]));
+        ApplyMode(IconMode::Disconnected, false);
 
         if (!AddIcon()) {
             Log(LogLevel::Error, "Failed to add the Windows tray icon");
@@ -83,22 +173,36 @@ struct WindowsTray::Impl {
 
     bool AddIcon() {
         if (!Shell_NotifyIconW(NIM_ADD, &iconData)) return false;
+        iconAdded = true;
         iconData.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIconW(NIM_SETVERSION, &iconData);
         return true;
     }
 
+    void UpdateStatus(bool unavailable, bool rxActive, bool txActive) {
+        const IconMode mode = StatusMode(unavailable, rxActive, txActive);
+        if (mode != currentMode) ApplyMode(mode, true);
+    }
+
     void Shutdown() {
-        if (window) Shell_NotifyIconW(NIM_DELETE, &iconData);
+        if (window && iconAdded) Shell_NotifyIconW(NIM_DELETE, &iconData);
+        iconAdded = false;
+        if (window) {
+            SendMessageW(window, WM_SETICON, ICON_SMALL, 0);
+            SendMessageW(window, WM_SETICON, ICON_BIG, 0);
+        }
         if (window && previousWindowProc) {
             SetWindowLongPtrW(window, GWLP_WNDPROC,
                               reinterpret_cast<LONG_PTR>(previousWindowProc));
         }
-        if (icon && ownsIcon) DestroyIcon(icon);
+        for (IconHandles& stateIcons : icons) {
+            if (stateIcons.tray) DestroyIcon(stateIcons.tray);
+            if (stateIcons.small) DestroyIcon(stateIcons.small);
+            if (stateIcons.large) DestroyIcon(stateIcons.large);
+            stateIcons = {};
+        }
         if (active == this) active = nullptr;
 
-        icon = nullptr;
-        ownsIcon = false;
         previousWindowProc = nullptr;
         window = nullptr;
         glfwWindow = nullptr;
@@ -145,11 +249,8 @@ struct WindowsTray::Impl {
         }
 
         if (message == WM_CLOSE) {
-            if (closeToMinimize && *closeToMinimize) {
-                HideWindow();
-            } else {
-                RequestExit();
-            }
+            if (closeToMinimize && *closeToMinimize) HideWindow();
+            else RequestExit();
             return 0;
         }
 
@@ -164,7 +265,8 @@ struct WindowsTray::Impl {
                 ShowContextMenu();
                 return 0;
             }
-            if (event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_LBUTTONDBLCLK) {
+            if (event == NIN_SELECT || event == NIN_KEYSELECT
+                || event == WM_LBUTTONDBLCLK) {
                 RestoreWindow();
                 return 0;
             }
@@ -173,7 +275,8 @@ struct WindowsTray::Impl {
         return CallWindowProcW(previousWindowProc, window, message, wParam, lParam);
     }
 
-    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam,
+                                       LPARAM lParam) {
         if (active && active->window == hwnd) {
             return active->HandleMessage(message, wParam, lParam);
         }
@@ -191,6 +294,10 @@ WindowsTray::~WindowsTray() {
 
 bool WindowsTray::Init(GLFWwindow* window, const bool* closeToMinimize) {
     return impl_->Init(window, closeToMinimize);
+}
+
+void WindowsTray::UpdateStatus(bool unavailable, bool rxActive, bool txActive) {
+    impl_->UpdateStatus(unavailable, rxActive, txActive);
 }
 
 bool WindowsTray::ConsumeExitRequest() {

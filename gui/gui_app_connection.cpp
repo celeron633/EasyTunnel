@@ -10,6 +10,9 @@
 
 #include "../rendezvous_client.h"
 #include "gui_theme.h"
+#ifdef _WIN32
+#include "windows_tray.h"
+#endif
 
 namespace {
 const char* ByteUnitName(int unit) {
@@ -206,6 +209,18 @@ void GuiApp::UpdateLiveStats() {
     if (rxPackets > observedRxPackets_) lastRxActivity_ = now;
     observedTxPackets_ = txPackets;
     observedRxPackets_ = rxPackets;
+#ifdef _WIN32
+    if (windowsTray_) {
+        const TunnelState state = currentState_.load();
+        const bool unavailable = state == TunnelState::Disconnected
+            || state == TunnelState::Waiting || state == TunnelState::Error;
+        const bool connected = state == TunnelState::Connected;
+        constexpr auto activityWindow = std::chrono::milliseconds(350);
+        windowsTray_->UpdateStatus(
+            unavailable, connected && now - lastRxActivity_ < activityWindow,
+            connected && now - lastTxActivity_ < activityWindow);
+    }
+#endif
 
     const uint64_t txBytes = stats.txBytes.load();
     const uint64_t rxBytes = stats.rxBytes.load();
