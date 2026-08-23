@@ -17,6 +17,8 @@ frp xTCP 的流程、五种模式和源码索引见
 - 根据双方 NAT 映射动态选择 Direct、Range、Random 等互补打洞计划。
 - 不保留旧 fixed-offset/manual 算法和旧 NAT/NAT4 穿透协议。
 - 困难 NAT 直连失败后，仍可按配置继续尝试 IPv6 或 IPv4 Relay。
+- 不收集 NAT 特征历史或打洞成功报告，不实现服务端策略学习；计划只由本次 STUN
+  结果、profile 和 attempt 序号确定性生成。
 - TUN 适配器、TUN 地址配置和现有隧道数据包格式不在本次重构范围内。
 
 ## 开发 Roadmap
@@ -90,11 +92,10 @@ frp xTCP 的流程、五种模式和源码索引见
       attempt 时间约束的可取消 sender delay。
 - [ ] 在公网 regular/random 样本上对比无延迟、TTL 7 和 TTL 4 的实际收益。
 
-### 阶段 6：策略学习和发布收敛
+### 阶段 6：发布收敛
 
 状态：待开始。
 
-- 收集不含敏感端点明文的成功/失败统计，按 NAT 特征调整策略优先级。
 - 完成协议不兼容、乱序、重复、过期 attempt 和资源上限测试。
 - 完成 Windows/Linux、重连、关闭以及长期 liveness 回归后再合并主分支。
 
@@ -172,7 +173,6 @@ frp xTCP 的流程、五种模式和源码索引见
 - [x] 实现低 TTL 预打洞以及 sender/receiver 延迟发送组合；TTL 设置/恢复、角色轮换、
       短超时上限和取消等待均有 unit test。
 - [ ] 收集公网样本，评估低 TTL 与 sender delay 的实际收益并决定最终默认轮换顺序。
-- [ ] 收集打洞成功报告，按 NAT 特征记录策略成功率并动态调整尝试顺序。
 
 #### 会合与候选地址
 

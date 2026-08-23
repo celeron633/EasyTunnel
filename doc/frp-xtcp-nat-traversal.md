@@ -68,7 +68,8 @@ socket，再绑定同一个本地 UDP 地址创建打洞 socket。
   `NAT_ARMED` 屏障保证 receiver 先完成资源准备；重试 attempt 的 sender delay 最大
   1 秒且不超过剩余时间的四分之一，不复制 frp 固定 3 秒等待。
 - EasyTunnel 会合服务目前只配对、交换观察结果和同步开始；frp 则由 frps 集中
-  分类、分配双方动作并根据成功报告学习策略。
+  分类、分配双方动作并根据成功报告学习策略。EasyTunnel 不引入这套学习状态，
+  继续根据当前 STUN 结果、profile 和 attempt 序号确定性生成计划。
 - 可借鉴的边界包括：随机监听 256 个 socket、随机探测 1000 个端口、范围半径
   10、明确的发送节流、取消流程和成功 socket 接管。具体数值应经过 EasyTunnel
   实网测试后再确定，不直接照搬。
