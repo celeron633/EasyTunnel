@@ -9,6 +9,7 @@
 
 #include "adaptive_nat_traversal.h"
 #include "nat_protocol.h"
+#include "nat_traversal.h"
 #include "peer_selection.h"
 #include "rendezvous/config.h"
 #include "rendezvous/registry.h"
@@ -246,11 +247,31 @@ int main() {
         bPunchThread.join();
     }
     Expect(aPunched && bPunched,
-           "two clients complete STUN, barrier and PUNCH2");
+           "two clients complete STUN, barrier and PUNCH");
     if (!aPunched) std::cerr << "A error: " << aError << '\n';
     if (!bPunched) std::cerr << "B error: " << bError << '\n';
     Expect(aPeer.family == AF_INET && bPeer.family == AF_INET,
            "winner sockets retain confirmed IPv4 peer endpoints");
+    if (aPunched) {
+        const std::string legacyPunch = MakeControlMessage(
+            "PUNCH", {aConfig.room_id, aPeerId});
+        const PeerControlResult legacyResult = HandlePeerControl(
+            aSocket, aConfig, aPeer, aPeer, aPeerId, aSession,
+            reinterpret_cast<const uint8_t*>(legacyPunch.data()),
+            legacyPunch.size());
+        Expect(legacyResult.handled && !legacyResult.peerSeen,
+               "legacy room/peer PUNCH format is rejected");
+
+        const std::string currentPunch = MakeControlMessage("PUNCH",
+            {aSession.sessionId, std::to_string(aSession.attemptId),
+             aPeerId, "delayed-nonce", aSession.punchToken});
+        const PeerControlResult currentResult = HandlePeerControl(
+            aSocket, aConfig, aPeer, aPeer, aPeerId, aSession,
+            reinterpret_cast<const uint8_t*>(currentPunch.data()),
+            currentPunch.size());
+        Expect(currentResult.handled && currentResult.peerSeen,
+               "current session-bound PUNCH remains valid after handoff");
+    }
 
     clientsRunning.store(false);
     CloseSocket(aSocket);
@@ -273,4 +294,3 @@ int main() {
     std::cout << "Adaptive NAT integration test passed\n";
     return 0;
 }
-

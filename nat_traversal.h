@@ -3,6 +3,7 @@
 #include <atomic>
 #include <string>
 #include "config.h"
+#include "rendezvous_client.h"
 #include "util.h"
 
 constexpr size_t kPeerDummyTrafficPacketSize = 1024;
@@ -23,6 +24,8 @@ struct PeerControlResult {
 
 PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
                                     const UdpEndpoint& peer, const UdpEndpoint& source,
+                                    const std::string& matchedPeerId,
+                                    const NatPunchSession& punchSession,
                                     const uint8_t* data, size_t len);
 
 bool SendPeerKeepalive(socket_t sock, const Config& cfg, const UdpEndpoint& peer,

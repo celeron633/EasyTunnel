@@ -15,7 +15,7 @@ stateDiagram-v2
     SelectStrategy --> NatPunch: nat_punch
     SelectStrategy --> Ipv6: ipv6
     SelectStrategy --> Relay: ipv4_relay
-    NatPunch --> Connected: PUNCH2/PUNCH2_ACK
+    NatPunch --> Connected: PUNCH/PUNCH_ACK
     Ipv6 --> Connected: V6_HELLO/V6_HELLO_ACK
     Relay --> Connected: RELAY_READY
     NatPunch --> SelectStrategy: 失败
@@ -74,8 +74,8 @@ sequenceDiagram
     B->>R: NAT_ARMED
     R-->>A: NAT_START
     R-->>B: NAT_START
-    A-->>B: PUNCH2(session, attempt, nonce, token)
-    B-->>A: PUNCH2_ACK(echo nonce)
+    A-->>B: PUNCH(session, attempt, nonce, token)
+    B-->>A: PUNCH_ACK(echo nonce)
 ```
 
 控制 socket 负责 REG/CONNECT；独立 punch socket 负责 STUN、`NAT_INFO` 和 Peer 打洞。

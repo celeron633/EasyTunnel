@@ -301,7 +301,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 					source.addr_len = srcLen;
 					source.family = src.ss_family;
 					const PeerControlResult control = HandlePeerControl(
-						sock, cfg, peer, source, buf.data(), static_cast<size_t>(recvLen));
+						sock, cfg, peer, source, matchedPeerId, natPunchSession,
+						buf.data(), static_cast<size_t>(recvLen));
 					if (control.handled) {
 						// control packet consumed
 						const auto receivedAt = std::chrono::steady_clock::now();

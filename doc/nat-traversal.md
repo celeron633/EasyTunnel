@@ -9,7 +9,7 @@ EasyTunnel 的 IPv4 P2P 穿透使用两台独立 STUN 服务探测 NAT 映射，
 ```text
 stun_client.cpp              RFC 8489 Binding 与映射分类
 nat_punch_plan.cpp           确定性的双方互补打洞计划
-adaptive_nat_traversal.cpp   STUN、会合屏障和 PUNCH2 状态机
+adaptive_nat_traversal.cpp   STUN、会合屏障和 PUNCH 状态机
 rendezvous_client.cpp        新 NAT 控制消息的收发与校验
 rendezvous/registry.cpp      session/attempt 及短生命周期屏障状态
 nat_traversal.cpp            连接后的 KEEPALIVE/PADDING 控制包
@@ -85,7 +85,7 @@ NAT_INFO(room, self, peer, session, attempt, version,
 
 ### easy/easy
 
-双方都向对端 STUN B 的稳定公网端点发送 `PUNCH2`。
+双方都向对端 STUN B 的稳定公网端点发送 `PUNCH`。
 
 ### regular/easy
 
@@ -112,13 +112,13 @@ hard/hard regular、random receiver 和 mixed random/range 仍在 `todo.md` 中�
 直连报文为：
 
 ```text
-PUNCH2(session, attempt, sender, nonce, punch_token)
-PUNCH2_ACK(session, attempt, sender, echoed_nonce, punch_token)
+PUNCH(session, attempt, sender, nonce, punch_token)
+PUNCH_ACK(session, attempt, sender, echoed_nonce, punch_token)
 ```
 
 客户端只接受当前 session/attempt、指定 Peer ID、正确 token 且公网 IP 与对端 STUN
-报告相符的报文。ACK 还必须回显本端 nonce。收到合法包的真实源端点成为最终 Peer，
-punch socket 原样交给现有 TUN 数据面。
+报告相符的报文。ACK 还必须回显本端 nonce。旧的 room/peer 两字段 PUNCH 格式不再兼容。
+收到合法包的真实源端点成为最终 Peer，punch socket 原样交给现有 TUN 数据面。
 
 Punch token 用于阻止无关 UDP 包误接管连接，不加密后续 TUN 流量。数据机密性仍需
 在上层或后续加密层解决。

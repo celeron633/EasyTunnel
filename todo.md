@@ -39,7 +39,7 @@
 - [x] 实现 Range：按两次 STUN 端口差动态计算预测范围，移除固定 `+20`。
 - [ ] 实现 Random receiver：限制 socket 数、目标探测数和 UDP 突发速率。
 - [ ] 实现 Mixed random/range 和 hard/hard regular 策略。
-- [x] PUNCH2/PUNCH2_ACK 携带 session、attempt、sender、nonce 和认证 token。
+- [x] PUNCH/PUNCH_ACK 携带 session、attempt、sender、nonce 和认证 token。
 - [x] 只接受当前 attempt 的包；获胜 socket 原样交给现有数据面。
 
 ## Phase 4：引擎切换与配置收敛

@@ -241,7 +241,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         CloseSocket(punchSocket);
         return false;
     }
-    const std::string punch = MakeControlMessage("PUNCH2",
+    const std::string punch = MakeControlMessage("PUNCH",
         {session.sessionId, std::to_string(session.attemptId),
          cfg.peer_id, nonce, session.punchToken});
     auto nextPunch = std::chrono::steady_clock::time_point{};
@@ -282,13 +282,13 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
             || !IsSafeControlField(fields[3])
             || fields[4] != session.punchToken
             || !SameIpv4Address(source, peerObservation.mappedA)
-            || (type != "PUNCH2" && type != "PUNCH2_ACK")) {
+            || (type != "PUNCH" && type != "PUNCH_ACK")) {
             continue;
         }
-        if (type == "PUNCH2_ACK" && fields[3] != nonce) continue;
+        if (type == "PUNCH_ACK" && fields[3] != nonce) continue;
 
-        if (type == "PUNCH2") {
-            const std::string ack = MakeControlMessage("PUNCH2_ACK",
+        if (type == "PUNCH") {
+            const std::string ack = MakeControlMessage("PUNCH_ACK",
                 {session.sessionId, std::to_string(session.attemptId),
                  cfg.peer_id, fields[3], session.punchToken});
             for (int repeat = 0; repeat < 5; ++repeat) {

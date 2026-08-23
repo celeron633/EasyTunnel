@@ -134,6 +134,7 @@ if(BUILD_TESTING)
         secure_random.cpp
         peer_selection.cpp
         rendezvous_client.cpp
+        nat_traversal.cpp
         rendezvous/registry.cpp
         rendezvous/ipv4_relay_app.cpp
         nat_protocol.cpp

@@ -16,26 +16,45 @@ bool Send(socket_t sock, const UdpEndpoint& endpoint, const std::string& data) {
 
 PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
                                     const UdpEndpoint& peer, const UdpEndpoint& source,
+                                    const std::string& matchedPeerId,
+                                    const NatPunchSession& punchSession,
                                     const uint8_t* data, size_t len) {
     PeerControlResult result;
     std::string type;
     std::vector<std::string> fields;
     if (!ParseControlMessage(data, len, &type, &fields)) return result;
     result.handled = true;
-    if (!SameUdpEndpoint(source, peer) || fields.empty() || fields[0] != cfg.room_id) return result;
-    if (type == "PUNCH" || type == "KEEPALIVE") {
+    if (!SameUdpEndpoint(source, peer)) return result;
+
+    if (type == "PUNCH" || type == "PUNCH_ACK") {
+        const bool validPunch = fields.size() == 5
+            && fields[0] == punchSession.sessionId
+            && fields[1] == std::to_string(punchSession.attemptId)
+            && fields[2] == matchedPeerId
+            && IsSafeControlField(fields[3])
+            && fields[4] == punchSession.punchToken;
+        if (!validPunch) return result;
+        if (type == "PUNCH") {
+            Send(sock, peer, MakeControlMessage("PUNCH_ACK",
+                {punchSession.sessionId, std::to_string(punchSession.attemptId),
+                 cfg.peer_id, fields[3], punchSession.punchToken}));
+        }
+        result.peerSeen = true;
+        return result;
+    }
+
+    if (fields.empty() || fields[0] != cfg.room_id) return result;
+    if (type == "KEEPALIVE") {
         std::vector<std::string> ackFields{cfg.room_id, cfg.peer_id};
-        if (type == "KEEPALIVE" && fields.size() >= 3) ackFields.push_back(fields[2]);
-        Send(sock, peer, MakeControlMessage(
-            type == "PUNCH" ? "PUNCH_ACK" : "KEEPALIVE_ACK", ackFields));
+        if (fields.size() >= 3) ackFields.push_back(fields[2]);
+        Send(sock, peer, MakeControlMessage("KEEPALIVE_ACK", ackFields));
     }
     if (type == "KEEPALIVE_ACK") {
         result.receivedKeepaliveAck = true;
         // Empty IDs are accepted by the engine for compatibility with older peers.
         result.keepaliveAckId = fields.size() >= 3 ? fields[2] : "";
     }
-    if (type == "PUNCH" || type == "PUNCH_ACK" || type == "KEEPALIVE"
-        || type == "KEEPALIVE_ACK" || type == "PADDING") {
+    if (type == "KEEPALIVE" || type == "KEEPALIVE_ACK" || type == "PADDING") {
         result.peerSeen = true;
     }
     result.consumedDummyTraffic = type == "PADDING";
