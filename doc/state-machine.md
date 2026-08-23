@@ -83,8 +83,8 @@ sequenceDiagram
 控制 socket 仍可继续 IPv6/Relay。
 
 当前计划支持 easy/easy Direct、regular/easy Range、hard/hard regular dual-range，
-以及 easy/random 的 bounded random sender/receiver。random/regular、random/random 与
-multi-public-IP 返回明确错误并进入下一个策略。
+easy/random 的 bounded random sender/receiver，以及 regular/random 的 mixed random
+sender + range receiver。random/random 与 multi-public-IP 返回明确错误并进入下一个策略。
 
 ## 会合服务器 NAT 状态
 
@@ -150,5 +150,5 @@ liveness，不影响打洞计划。
 
 Adaptive NAT 最多执行 `nat_punch_attempt_limit` 次 attempt（默认 3，最大 10），
 每次使用新的 attempt ID 和 punch token。`nat_punch_profile` 控制 Range 扩大速度、
-发送间隔、随机 socket/目标规模和单 attempt 报文预算；mixed random/range 仍在
-[新 NAT 穿透 TODO](新NAT穿透TODO.md)。
+发送间隔、随机 socket/目标规模和单 attempt 报文预算；mixed random/range 使用相同
+资源上限，低 TTL 和发送延迟变体仍在[新 NAT 穿透 TODO](新NAT穿透TODO.md)。

@@ -15,6 +15,8 @@ enum class NatPunchPlanMode {
     DualRangeScanner,
     RandomSender,
     RandomReceiver,
+    MixedRandomSender,
+    MixedRandomReceiver,
 };
 
 struct NatPunchObservation {
@@ -62,8 +64,9 @@ bool BuildRandomPortTargets(const NatPunchObservation& peer,
 
 // Builds deterministic plans for easy/easy direct, regular/easy complementary
 // sender/range-scanner, hard/hard regular dual-range scanning, and the
-// easy/random complementary random sender/receiver strategy. Mixed hard NAT
-// and multi-public-IP combinations remain unsupported.
+// easy/random complementary random sender/receiver strategy, and the
+// regular/random mixed strategy. random/random and multi-public-IP
+// combinations remain unsupported.
 bool BuildNatPunchPlan(const NatPunchObservation& local,
                        const NatPunchObservation& peer,
                        NatPunchPlan* plan, std::string* error);

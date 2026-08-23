@@ -402,7 +402,8 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         CloseSocket(punchSocket);
         return fail(NatPunchAttemptOutcome::StrategyUnsupported, *error);
     }
-    if (plan.mode == NatPunchPlanMode::RandomSender
+    if ((plan.mode == NatPunchPlanMode::RandomSender
+            || plan.mode == NatPunchPlanMode::MixedRandomSender)
         && !BuildRandomPortTargets(
             peerObservation, policy.randomTargetPortCount,
             &plan.targets, error)) {
@@ -411,7 +412,8 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     }
 
     NatPunchSocketPool punchSockets(punchSocket, kReceiveTimeoutMs);
-    if (plan.mode == NatPunchPlanMode::RandomReceiver) {
+    if (plan.mode == NatPunchPlanMode::RandomReceiver
+        || plan.mode == NatPunchPlanMode::MixedRandomReceiver) {
         int socketError = 0;
         if (!punchSockets.GrowTo(plan.receiverSocketCount, &socketError)) {
             Log(LogLevel::Warn,
@@ -490,8 +492,10 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     const auto punchBudget = std::chrono::duration_cast<
         std::chrono::milliseconds>(
             deadline - std::chrono::steady_clock::now());
-    const bool randomSender = plan.mode == NatPunchPlanMode::RandomSender;
-    const bool randomReceiver = plan.mode == NatPunchPlanMode::RandomReceiver;
+    const bool randomSender = plan.mode == NatPunchPlanMode::RandomSender
+        || plan.mode == NatPunchPlanMode::MixedRandomSender;
+    const bool randomReceiver = plan.mode == NatPunchPlanMode::RandomReceiver
+        || plan.mode == NatPunchPlanMode::MixedRandomReceiver;
     const size_t datagramsPerWave = randomReceiver
         ? punchSockets.size() * plan.targets.size()
         : plan.targets.size();

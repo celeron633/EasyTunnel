@@ -9,6 +9,7 @@ EasyTunnel 的 IPv4 P2P 穿透使用两台独立 STUN 服务探测 NAT 映射，
 ```text
 stun_client.cpp              RFC 8489 Binding 与映射分类
 nat_punch_plan.cpp           确定性的双方互补打洞计划
+nat_punch_socket_pool.cpp    多 socket 生命周期、轮询和 winner 移交
 adaptive_nat_traversal.cpp   STUN、会合屏障和 PUNCH 状态机
 rendezvous_client.cpp        新 NAT 控制消息的收发与校验
 rendezvous/registry.cpp      session/attempt 及短生命周期屏障状态
@@ -51,7 +52,7 @@ transaction ID，并包含合法的 `XOR-MAPPED-ADDRESS`。
 |---|---|---|
 | 公网 IP、端口均相同 | endpoint-independent | Direct |
 | 公网 IP 相同，端口差绝对值 1～5 | port-dependent-regular | Range/regular sender/dual-range |
-| 公网 IP 相同，端口差大于 5 | port-dependent-random | 与 easy 配对时使用 Random sender/receiver |
+| 公网 IP 相同，端口差大于 5 | port-dependent-random | 与 easy/regular 配对时使用 Random 或 mixed random/range |
 | 公网 IP 不同 | multi-public-IP | 尚未实现，转后续策略 |
 
 这里的分类只描述 mapping behavior，不宣称完成 RFC 5780 的 filtering behavior 测试。
@@ -161,6 +162,24 @@ receiver 同时轮询整个 socket pool，首个收到合法 session/attempt/tok
 只探测一次，receiver 的重复波次仍受 profile 报文预算限制。当前基线不使用低 TTL，
 也不额外等待 frp 的 3 秒 sender delay。
 
+### regular/random
+
+port-dependent-regular 一端固定为 `mixed-random-sender`，按 profile 对 random 端执行
+无重复随机端口探测。port-dependent-random 一端固定为 `mixed-random-receiver`，先
+创建同样受限的 socket pool，再根据 regular 端的两次 STUN 映射计算：
+
+```text
+delta = mapped_B_port - mapped_A_port
+predicted = mapped_B_port + delta
+mixed_span = min(profile_max_span, 2 * attempt_scale)
+```
+
+receiver 从池中每个 socket 扫描 `[predicted-mixed_span,
+predicted+mixed_span]`。Balanced 的 attempt 半径为 2 / 4 / 8 / 16，Aggressive 为
+2 / 8 / 16 / 32；端口边界、单 attempt 报文预算和随机资源数量继续受相同 profile
+限制。会合屏障保证 receiver 创建完 socket pool 后双方才开始，因此基线不额外复制
+frp 的 3 秒 sender delay；低 TTL 预打洞仍待实网评估。
+
 socket pool 由单次 attempt 独占的 RAII 对象管理。成功时只释放 winner 的所有权；
 屏障取消、PUNCH 超时、协议错误和资源不足等其他退出路径都会自动关闭主 socket 与
 全部辅助 socket。自动化测试覆盖连续 12 轮最大 256-socket 池、确定性的中途创建失败、
@@ -168,7 +187,7 @@ socket pool 由单次 attempt 独占的 RAII 对象管理。成功时只释放 w
 
 ### 尚未完成
 
-mixed random/range、random/random 和 multi-public-IP 仍在
+random/random 和 multi-public-IP 仍在
 [新 NAT 穿透 TODO](新NAT穿透TODO.md) 中。遇到
 这些组合会返回明确错误并继续 IPv6/Relay（若已启用），不会调用旧 fixed-offset
 算法。
@@ -206,7 +225,9 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
 
 - `STUN servers must resolve to different public IPv4 addresses`：A/B 实际解析到同一 IP。
 - `STUN server did not respond`：检查 Coturn `stun-only`、UDP 3478 和安全组。
-- `NAT mapping combination requires an unsupported mixed-random strategy`：当前只支持
-  easy/random；random/regular、random/random 和 multi-public-IP 请启用 Relay。
+- `NAT mapping combination requires an unsupported random/random strategy`：双方均为
+  random port-dependent，请启用 Relay。
+- `NAT mapping combination with multi-public-IP is unsupported`：两次 STUN 映射的公网
+  IPv4 不同，当前无法按单地址预测或扫描，请启用 Relay。
 - `Timed out at the NAT synchronization barrier`：检查客户端/会合服务器版本是否一致，
   以及 punch socket 到会合服务器的 UDP 返回流量。

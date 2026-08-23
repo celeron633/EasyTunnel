@@ -11,6 +11,7 @@ namespace {
 constexpr int kRegularPortDeltaLimit = 5;
 constexpr int kRangePredictionMargin = 5;
 constexpr int kInitialMaximumRangeSpan = 10;
+constexpr uint16_t kInitialMixedRangeSpan = 2;
 constexpr uint16_t kFirstRandomPort = 1024;
 constexpr uint32_t kRandomPortCount = 65536u - kFirstRandomPort;
 
@@ -41,6 +42,40 @@ bool EndpointFromAddress(in_addr address, uint16_t port,
     return inet_ntop(AF_INET, &address, addressText,
                      sizeof(addressText)) != nullptr
         && ParseUdpEndpoint(addressText, port, endpoint);
+}
+
+bool BuildPredictedRange(in_addr peerAddress, uint16_t peerPortA,
+                         uint16_t peerPortB, uint16_t span,
+                         NatPunchPlan* plan, std::string* error) {
+    const int delta = static_cast<int>(peerPortB)
+        - static_cast<int>(peerPortA);
+    const int absoluteDelta = std::abs(delta);
+    if (delta == 0 || absoluteDelta > kRegularPortDeltaLimit) {
+        SetError(error, "Peer regular NAT observation has an invalid port delta");
+        return false;
+    }
+    const int predicted = static_cast<int>(peerPortB) + delta;
+    if (predicted < 1 || predicted > 65535) {
+        SetError(error, "Predicted peer port is outside the UDP port range");
+        return false;
+    }
+
+    plan->predictedPort = predicted;
+    plan->portSpan = span;
+    const int firstPort = (std::max)(1, predicted - plan->portSpan);
+    const int lastPort = (std::min)(65535, predicted + plan->portSpan);
+    plan->targets.reserve(static_cast<size_t>(lastPort - firstPort + 1));
+    for (int port = firstPort; port <= lastPort; ++port) {
+        UdpEndpoint target{};
+        if (!EndpointFromAddress(
+                peerAddress, static_cast<uint16_t>(port), &target)) {
+            SetError(error, "Cannot build a predicted peer endpoint");
+            plan->targets.clear();
+            return false;
+        }
+        plan->targets.push_back(target);
+    }
+    return true;
 }
 }  // namespace
 
@@ -190,6 +225,16 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
     plan->predictedPort = 0;
     plan->portSpan = 0;
     plan->receiverSocketCount = 1;
+    if (local.behavior == NatMappingBehavior::MultiPublicIp
+        || peer.behavior == NatMappingBehavior::MultiPublicIp) {
+        SetError(error, "NAT mapping combination with multi-public-IP is unsupported");
+        return false;
+    }
+    if (local.behavior == NatMappingBehavior::Unknown
+        || peer.behavior == NatMappingBehavior::Unknown) {
+        SetError(error, "NAT mapping behavior is unknown");
+        return false;
+    }
 
     in_addr peerAddressA{};
     in_addr peerAddressB{};
@@ -222,9 +267,27 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
         plan->receiverSocketCount = 1;
         return true;
     }
+    const bool localRegular =
+        local.behavior == NatMappingBehavior::PortDependentRegular;
+    const bool peerRegular =
+        peer.behavior == NatMappingBehavior::PortDependentRegular;
+    if (localRegular && peerRandom) {
+        plan->mode = NatPunchPlanMode::MixedRandomSender;
+        return true;
+    }
+    if (localRandom && peerRegular) {
+        plan->mode = NatPunchPlanMode::MixedRandomReceiver;
+        plan->receiverSocketCount = policy.randomReceiverSocketCount;
+        const uint16_t mixedSpan = static_cast<uint16_t>((std::min)(
+            static_cast<uint32_t>(policy.maximumRangeSpan),
+            static_cast<uint32_t>(policy.rangeScale)
+                * kInitialMixedRangeSpan));
+        return BuildPredictedRange(peerAddressB, peerPortA, peerPortB,
+                                   mixedSpan, plan, error);
+    }
     if (!IsSupportedBehavior(local.behavior)
         || !IsSupportedBehavior(peer.behavior)) {
-        SetError(error, "NAT mapping combination requires an unsupported mixed-random strategy");
+        SetError(error, "NAT mapping combination requires an unsupported random/random strategy");
         return false;
     }
 
@@ -236,42 +299,18 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
         return true;
     }
 
-    const int delta = static_cast<int>(peerPortB)
-        - static_cast<int>(peerPortA);
-    const int absoluteDelta = std::abs(delta);
-    if (delta == 0 || absoluteDelta > kRegularPortDeltaLimit) {
-        SetError(error, "Peer regular NAT observation has an invalid port delta");
-        return false;
-    }
-    const int predicted = static_cast<int>(peerPortB) + delta;
-    if (predicted < 1 || predicted > 65535) {
-        SetError(error, "Predicted peer port is outside the UDP port range");
-        return false;
-    }
-
     plan->mode = local.behavior == NatMappingBehavior::PortDependentRegular
         ? NatPunchPlanMode::DualRangeScanner
         : NatPunchPlanMode::RangeScanner;
-    plan->predictedPort = predicted;
+    const int absoluteDelta = std::abs(
+        static_cast<int>(peerPortB) - static_cast<int>(peerPortA));
     const uint32_t initialSpan = static_cast<uint32_t>((std::min)(
         kInitialMaximumRangeSpan, absoluteDelta + kRangePredictionMargin));
     const uint32_t scaledSpan = initialSpan * policy.rangeScale;
-    plan->portSpan = static_cast<uint16_t>((std::min)(
+    const uint16_t rangeSpan = static_cast<uint16_t>((std::min)(
         scaledSpan, static_cast<uint32_t>(policy.maximumRangeSpan)));
-    const int firstPort = (std::max)(1, predicted - plan->portSpan);
-    const int lastPort = (std::min)(65535, predicted + plan->portSpan);
-    plan->targets.reserve(static_cast<size_t>(lastPort - firstPort + 1));
-    for (int port = firstPort; port <= lastPort; ++port) {
-        UdpEndpoint target{};
-        if (!EndpointFromAddress(
-                peerAddressB, static_cast<uint16_t>(port), &target)) {
-            SetError(error, "Cannot build a predicted peer endpoint");
-            plan->targets.clear();
-            return false;
-        }
-        plan->targets.push_back(target);
-    }
-    return true;
+    return BuildPredictedRange(peerAddressB, peerPortA, peerPortB,
+                               rangeSpan, plan, error);
 }
 
 const char* NatPunchPlanModeName(NatPunchPlanMode mode) {
@@ -282,6 +321,10 @@ const char* NatPunchPlanModeName(NatPunchPlanMode mode) {
         case NatPunchPlanMode::DualRangeScanner: return "dual-range-scanner";
         case NatPunchPlanMode::RandomSender: return "random-sender";
         case NatPunchPlanMode::RandomReceiver: return "random-receiver";
+        case NatPunchPlanMode::MixedRandomSender:
+            return "mixed-random-sender";
+        case NatPunchPlanMode::MixedRandomReceiver:
+            return "mixed-random-receiver";
         default: return "unknown";
     }
 }

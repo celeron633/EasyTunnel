@@ -153,8 +153,37 @@ int main() {
                && FormatUdpEndpoint(plan.targets[0])
                     == "203.0.113.20:41000",
            "random side becomes a bounded multi-socket receiver");
-    Expect(!BuildNatPunchPlan(random, regular, &plan, &error),
-           "mixed random/regular remains reserved for the next strategy");
+    Expect(BuildNatPunchPlan(regular, random, &plan, &error)
+               && plan.mode == NatPunchPlanMode::MixedRandomSender
+               && plan.targets.empty()
+               && plan.receiverSocketCount == 1,
+           "regular side becomes the mixed random-port sender");
+    Expect(BuildNatPunchPlan(random, regular, &plan, &error)
+               && plan.mode == NatPunchPlanMode::MixedRandomReceiver
+               && plan.receiverSocketCount == 32
+               && plan.predictedPort == 42006
+               && plan.portSpan == 2
+               && plan.targets.size() == 5
+               && FormatUdpEndpoint(plan.targets.front())
+                    == "198.51.100.30:42004"
+               && FormatUdpEndpoint(plan.targets.back())
+                    == "198.51.100.30:42008",
+           "random side opens sockets and scans a small regular range");
+    Expect(BuildNatPunchPlan(
+               random, regular, balancedThird, &plan, &error)
+               && plan.mode == NatPunchPlanMode::MixedRandomReceiver
+               && plan.receiverSocketCount == 128
+               && plan.portSpan == 8
+               && plan.targets.size() == 17,
+           "mixed receiver expands sockets and range on balanced retries");
+    Expect(BuildNatPunchPlan(
+               random, regular, aggressiveMaximum, &plan, &error)
+               && plan.receiverSocketCount == 256
+               && plan.portSpan == 32
+               && plan.targets.size() == 65,
+           "mixed receiver remains bounded at the aggressive maximum");
+    Expect(!BuildNatPunchPlan(random, random, &plan, &error),
+           "random/random remains unsupported");
 
     const auto decreasing = Observation(
         NatMappingBehavior::PortDependentRegular,
@@ -162,6 +191,15 @@ int main() {
     Expect(BuildNatPunchPlan(easyA, decreasing, &plan, &error)
                && plan.predictedPort == 49999 && plan.portSpan == 7,
            "decreasing regular mappings predict in the observed direction");
+    Expect(BuildNatPunchPlan(random, decreasing, &plan, &error)
+               && plan.mode == NatPunchPlanMode::MixedRandomReceiver
+               && plan.predictedPort == 49999
+               && plan.portSpan == 2
+               && FormatUdpEndpoint(plan.targets.front())
+                    == "198.51.100.50:49997"
+               && FormatUdpEndpoint(plan.targets.back())
+                    == "198.51.100.50:50001",
+           "mixed receiver supports decreasing regular predictions");
 
     const auto boundary = Observation(
         NatMappingBehavior::PortDependentRegular,
@@ -171,6 +209,23 @@ int main() {
                && FormatUdpEndpoint(plan.targets.front())
                     == "198.51.100.60:1",
            "range scan clamps at the minimum UDP port");
+    Expect(BuildNatPunchPlan(random, boundary, &plan, &error)
+               && plan.mode == NatPunchPlanMode::MixedRandomReceiver
+               && plan.predictedPort == 1
+               && plan.targets.size() == 3
+               && FormatUdpEndpoint(plan.targets.front())
+                    == "198.51.100.60:1"
+               && FormatUdpEndpoint(plan.targets.back())
+                    == "198.51.100.60:3",
+           "mixed range clamps at the minimum UDP port");
+
+    const auto multiPublic = NatPunchObservation{
+        NatMappingBehavior::MultiPublicIp,
+        Endpoint("198.51.100.70", 51000),
+        Endpoint("203.0.113.70", 51001)};
+    Expect(!BuildNatPunchPlan(multiPublic, easyB, &plan, &error)
+               && error.find("multi-public-IP") != std::string::npos,
+           "multi-public-IP returns a specific unsupported error");
 
     if (failures != 0) {
         std::cerr << failures << " NAT punch plan test(s) failed\n";

@@ -79,11 +79,14 @@ frp xTCP 的流程、五种模式和源码索引见
 
 ### 阶段 5：frp Mode 4 类 mixed random/range
 
-状态：待开始。
+状态：进行中。
 
-- regular 一端执行范围预测，random 一端使用受控多 socket 策略。
-- 评估低 TTL 预打洞和 sender/receiver 延迟发送组合的实际收益。
-- 保证任一策略失败后都能及时释放 socket 并继续 IPv6/Relay。
+- [x] regular 端固定为随机端口 sender；random 端使用受控多 socket，并扫描 regular
+      端的小范围预测端口。
+- [x] mixed range 按 profile/attempt 从 ±2 渐进扩大，且共享 socket、发送间隔和
+      单 attempt 报文预算上限。
+- [x] 复用 RAII socket pool，失败时释放全部 socket 并继续 IPv6/Relay。
+- [ ] 评估低 TTL 预打洞和 sender/receiver 延迟发送组合的实际收益。
 
 ### 阶段 6：策略学习和发布收敛
 
@@ -124,6 +127,8 @@ frp xTCP 的流程、五种模式和源码索引见
 - [x] 实现 Direct：双方映射稳定时，直接向已知公网端点发送打洞包。
 - [x] 实现 regular/easy Range：根据两次 STUN 端口差计算预测中心和动态扫描范围。
 - [x] 实现 Mode 3 基线 hard/hard regular：双方执行有界 dual-range 扫描。
+- [x] 实现 Mode 4 基线 regular/random：regular 端随机扫描，random 端通过多 socket
+      扫描预测中心附近的小范围。
 - [x] 移除固定 `+20`、固定端口区间和 manual/fixed-offset 回退算法。
 - [x] `PUNCH/PUNCH_ACK` 携带 session、attempt、sender、nonce 和认证 token。
 - [x] 拒绝旧 room/peer 两字段 PUNCH 格式，只接受当前 attempt 的合法报文。
@@ -159,7 +164,7 @@ frp xTCP 的流程、五种模式和源码索引见
 
 #### frp xTCP 困难 NAT 策略
 
-- [ ] 实现 Mode 4 类 mixed random/range：一端范围预测，另一端多 socket 随机探测。
+- [x] 实现 Mode 4 类 mixed random/range，并通过假 STUN + 真实 registry 双端集成测试。
 - [ ] 评估并实现低 TTL 预打洞以及 sender/receiver 延迟发送组合。
 - [ ] 收集打洞成功报告，按 NAT 特征记录策略成功率并动态调整尝试顺序。
 

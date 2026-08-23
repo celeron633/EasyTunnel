@@ -236,6 +236,81 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     CloseSocket(randomControl);
     return result;
 }
+
+struct PairedPunchResult {
+    bool setup = false;
+    bool selected = false;
+    bool firstPunched = false;
+    bool secondPunched = false;
+    NatPunchAttemptResult firstAttempt;
+    NatPunchAttemptResult secondAttempt;
+    std::string firstError;
+    std::string secondError;
+};
+
+PairedPunchResult RunPairedPunch(Config firstConfig, Config secondConfig,
+                                 uint16_t attemptNumber) {
+    PairedPunchResult result;
+    socket_t firstSocket = kInvalidSocket;
+    socket_t secondSocket = kInvalidSocket;
+    UdpEndpoint firstServer{};
+    UdpEndpoint secondServer{};
+    if (!OpenRendezvousSocket(firstConfig, 100, &firstSocket,
+                              &firstServer, &result.firstError)
+        || !OpenRendezvousSocket(secondConfig, 100, &secondSocket,
+                                 &secondServer, &result.secondError)) {
+        CloseSocket(firstSocket);
+        CloseSocket(secondSocket);
+        return result;
+    }
+    result.setup = true;
+
+    std::atomic<bool> running{true};
+    UdpEndpoint firstPeer{};
+    UdpEndpoint secondPeer{};
+    std::string firstPeerId;
+    std::string secondPeerId;
+    std::vector<TraversalMode> firstModes;
+    std::vector<TraversalMode> secondModes;
+    NatPunchSession firstSession;
+    NatPunchSession secondSession;
+    bool firstSelected = false;
+    bool secondSelected = false;
+    std::thread firstSelectThread([&] {
+        firstSelected = SelectPeer(firstSocket, firstConfig, firstServer,
+            running, &firstPeer, &firstPeerId, &firstModes,
+            &firstSession, &result.firstError);
+    });
+    std::thread secondSelectThread([&] {
+        secondSelected = SelectPeer(secondSocket, secondConfig,
+            secondServer, running, &secondPeer, &secondPeerId,
+            &secondModes, &secondSession, &result.secondError);
+    });
+    firstSelectThread.join();
+    secondSelectThread.join();
+    result.selected = firstSelected && secondSelected;
+    if (result.selected) {
+        std::thread firstPunchThread([&] {
+            result.firstPunched = PunchAdaptiveNat(&firstSocket,
+                firstConfig, firstServer, running, firstPeerId,
+                firstSession, &firstPeer, &result.firstError,
+                &result.firstAttempt, attemptNumber);
+        });
+        std::thread secondPunchThread([&] {
+            result.secondPunched = PunchAdaptiveNat(&secondSocket,
+                secondConfig, secondServer, running, secondPeerId,
+                secondSession, &secondPeer, &result.secondError,
+                &result.secondAttempt, attemptNumber);
+        });
+        firstPunchThread.join();
+        secondPunchThread.join();
+    }
+
+    running.store(false);
+    CloseSocket(firstSocket);
+    CloseSocket(secondSocket);
+    return result;
+}
 }  // namespace
 
 int main() {
@@ -251,22 +326,28 @@ int main() {
     UdpEndpoint stunAEndpoint{};
     UdpEndpoint stunBEndpoint{};
     UdpEndpoint stunRandomEndpoint{};
+    UdpEndpoint stunRegularEndpoint{};
     socket_t rendezvousSocket =
         OpenBoundSocket("127.0.0.1", &rendezvousEndpoint);
     socket_t stunA = OpenBoundSocket("127.0.0.1", &stunAEndpoint);
     socket_t stunB = OpenBoundSocket("127.0.0.2", &stunBEndpoint);
     socket_t stunRandom = OpenBoundSocket(
         "127.0.0.3", &stunRandomEndpoint);
+    socket_t stunRegular = OpenBoundSocket(
+        "127.0.0.4", &stunRegularEndpoint);
     Expect(rendezvousSocket != kInvalidSocket && stunA != kInvalidSocket
                && stunB != kInvalidSocket
-               && stunRandom != kInvalidSocket,
+               && stunRandom != kInvalidSocket
+               && stunRegular != kInvalidSocket,
            "local rendezvous and STUN sockets open");
     if (rendezvousSocket == kInvalidSocket || stunA == kInvalidSocket
-        || stunB == kInvalidSocket || stunRandom == kInvalidSocket) {
+        || stunB == kInvalidSocket || stunRandom == kInvalidSocket
+        || stunRegular == kInvalidSocket) {
         CloseSocket(rendezvousSocket);
         CloseSocket(stunA);
         CloseSocket(stunB);
         CloseSocket(stunRandom);
+        CloseSocket(stunRegular);
 #ifdef _WIN32
         WSACleanup();
 #endif
@@ -328,6 +409,7 @@ int main() {
     std::thread stunAThread(runStun, stunA, 0);
     std::thread stunBThread(runStun, stunB, 0);
     std::thread stunRandomThread(runStun, stunRandom, 1000);
+    std::thread stunRegularThread(runStun, stunRegular, 1);
 
     Config aConfig;
     aConfig.rendezvous_addr = "127.0.0.1";
@@ -516,6 +598,46 @@ int main() {
     if (timedOut.attempt.outcome != NatPunchAttemptOutcome::PunchTimeout) {
         std::cerr << "Timeout error: " << timedOut.error << '\n';
     }
+
+    Config regularConfig = aConfig;
+    regularConfig.room_id = "mixed-integration";
+    regularConfig.peer_id = "regular";
+    regularConfig.target_peer_id = "random";
+    regularConfig.stun_servers[1] = {
+        "127.0.0.4", EndpointPort(stunRegularEndpoint)};
+    Config randomConfig = bConfig;
+    randomConfig.room_id = regularConfig.room_id;
+    randomConfig.peer_id = "random";
+    randomConfig.target_peer_id.clear();
+    const PairedPunchResult mixed = RunPairedPunch(
+        regularConfig, randomConfig, 1);
+    Expect(mixed.setup && mixed.selected
+               && mixed.firstPunched && mixed.secondPunched,
+           "regular/random peers complete mixed random-range punching");
+    if (!mixed.firstPunched) {
+        std::cerr << "Mixed regular error: " << mixed.firstError << '\n';
+    }
+    if (!mixed.secondPunched) {
+        std::cerr << "Mixed random error: " << mixed.secondError << '\n';
+    }
+    Expect(mixed.firstAttempt.localBehavior
+                  == NatMappingBehavior::PortDependentRegular
+               && mixed.firstAttempt.peerBehavior
+                  == NatMappingBehavior::PortDependentRandom
+               && mixed.firstAttempt.plan == "mixed-random-sender"
+               && mixed.firstAttempt.targetCount == 512
+               && mixed.firstAttempt.socketCount == 1
+               && mixed.secondAttempt.localBehavior
+                  == NatMappingBehavior::PortDependentRandom
+               && mixed.secondAttempt.peerBehavior
+                  == NatMappingBehavior::PortDependentRegular
+               && mixed.secondAttempt.plan == "mixed-random-receiver"
+               && mixed.secondAttempt.targetCount == 5
+               && mixed.secondAttempt.socketCount == 64
+               && mixed.secondAttempt.portSpan == 2
+               && mixed.firstAttempt.datagramsSent > 0
+               && mixed.secondAttempt.datagramsSent > 0,
+           "mixed attempt summaries expose complementary bounded plans");
     if (aPunched) {
         const std::string legacyPunch = MakeControlMessage(
             "PUNCH", {aConfig.room_id, aPeerId});
@@ -545,10 +667,12 @@ int main() {
     stunAThread.join();
     stunBThread.join();
     stunRandomThread.join();
+    stunRegularThread.join();
     CloseSocket(rendezvousSocket);
     CloseSocket(stunA);
     CloseSocket(stunB);
     CloseSocket(stunRandom);
+    CloseSocket(stunRegular);
 #ifdef _WIN32
     WSACleanup();
 #endif
