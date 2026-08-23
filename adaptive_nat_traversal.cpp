@@ -16,6 +16,55 @@ constexpr int kStunAttempts = 3;
 constexpr auto kControlRetryInterval = std::chrono::milliseconds(500);
 constexpr auto kPunchInterval = std::chrono::milliseconds(200);
 
+const char* NatPunchRoleName(NatPunchRole role) {
+    switch (role) {
+        case NatPunchRole::Initiator: return "initiator";
+        case NatPunchRole::Responder: return "responder";
+        default: return "unknown";
+    }
+}
+
+bool IsStunTimeoutFailure(const std::string& error) {
+    return error.find("timeout") != std::string::npos
+        || error.find("timed out") != std::string::npos
+        || error.find("did not respond") != std::string::npos;
+}
+
+std::string SingleLine(std::string value) {
+    for (char& character : value) {
+        if (character == '\r' || character == '\n' || character == '\t') {
+            character = ' ';
+        }
+    }
+    return value;
+}
+
+class AttemptResultScope {
+public:
+    AttemptResultScope(NatPunchAttemptResult* result,
+                       NatPunchAttemptResult* output)
+        : result_(result), output_(output), startedAt_(
+              std::chrono::steady_clock::now()) {}
+
+    ~AttemptResultScope() {
+        result_->elapsedMs = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - startedAt_).count();
+        if (output_ != nullptr) *output_ = *result_;
+        const LogLevel level = result_->outcome == NatPunchAttemptOutcome::Success
+            ? LogLevel::Info
+            : result_->outcome == NatPunchAttemptOutcome::Stopped
+                ? LogLevel::Debug
+                : LogLevel::Warn;
+        Log(level, FormatNatPunchAttemptResult(*result_));
+    }
+
+private:
+    NatPunchAttemptResult* result_;
+    NatPunchAttemptResult* output_;
+    std::chrono::steady_clock::time_point startedAt_;
+};
+
 bool Send(socket_t sock, const UdpEndpoint& endpoint,
           const std::string& data) {
     return sendto(sock, data.data(), static_cast<int>(data.size()), 0,
@@ -69,48 +118,112 @@ bool ReceiveDatagram(socket_t sock, std::vector<uint8_t>* buffer,
 }
 }  // namespace
 
+const char* NatPunchAttemptOutcomeName(NatPunchAttemptOutcome outcome) {
+    switch (outcome) {
+        case NatPunchAttemptOutcome::InvalidInput: return "invalid-input";
+        case NatPunchAttemptOutcome::SocketError: return "socket-error";
+        case NatPunchAttemptOutcome::StunTimeout: return "stun-timeout";
+        case NatPunchAttemptOutcome::StunFailure: return "stun-failure";
+        case NatPunchAttemptOutcome::PeerInfoTimeout:
+            return "peer-info-timeout";
+        case NatPunchAttemptOutcome::StrategyUnsupported:
+            return "strategy-unsupported";
+        case NatPunchAttemptOutcome::BarrierTimeout: return "barrier-timeout";
+        case NatPunchAttemptOutcome::PunchTimeout: return "punch-timeout";
+        case NatPunchAttemptOutcome::ControlError: return "control-error";
+        case NatPunchAttemptOutcome::Stopped: return "stopped";
+        case NatPunchAttemptOutcome::Success: return "success";
+        default: return "unknown";
+    }
+}
+
+std::string FormatNatPunchAttemptResult(
+    const NatPunchAttemptResult& result) {
+    const std::string endpoint = result.confirmedPeer.family == AF_UNSPEC
+        ? "-" : FormatUdpEndpoint(result.confirmedPeer);
+    return "NAT punch attempt summary: session="
+        + (result.sessionId.empty() ? "-" : result.sessionId)
+        + ", attempt=" + std::to_string(result.attemptId)
+        + ", local_peer="
+        + (result.localPeerId.empty() ? "-" : result.localPeerId)
+        + ", remote_peer="
+        + (result.remotePeerId.empty() ? "-" : result.remotePeerId)
+        + ", role=" + NatPunchRoleName(result.role)
+        + ", outcome=" + NatPunchAttemptOutcomeName(result.outcome)
+        + ", local=" + NatMappingBehaviorName(result.localBehavior)
+        + ", peer=" + NatMappingBehaviorName(result.peerBehavior)
+        + ", plan=" + result.plan
+        + ", targets=" + std::to_string(result.targetCount)
+        + ", endpoint=" + endpoint
+        + ", elapsed_ms=" + std::to_string(result.elapsedMs)
+        + ", detail=" + SingleLine(result.detail.empty() ? "-" : result.detail);
+}
+
 bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server,
                       const std::atomic<bool>& running,
                       const std::string& matchedPeerId,
                       const NatPunchSession& session,
-                      UdpEndpoint* peer, std::string* error) {
+                      UdpEndpoint* peer, std::string* error,
+                      NatPunchAttemptResult* attemptResult) {
+    NatPunchAttemptResult attempt;
+    attempt.sessionId = session.sessionId;
+    attempt.attemptId = session.attemptId;
+    attempt.localPeerId = cfg.peer_id;
+    attempt.remotePeerId = matchedPeerId;
+    attempt.role = session.role;
+    attempt.detail = "Adaptive NAT traversal did not start";
+    AttemptResultScope attemptScope(&attempt, attemptResult);
+    std::string ignoredError;
+    if (error == nullptr) error = &ignoredError;
+    const auto fail = [&](NatPunchAttemptOutcome outcome,
+                          const std::string& detail) {
+        attempt.outcome = outcome;
+        attempt.detail = detail;
+        *error = detail;
+        return false;
+    };
+
     if (sock == nullptr || peer == nullptr || matchedPeerId.empty()
         || session.sessionId.empty() || session.attemptId == 0
         || session.protocolVersion != 2 || session.punchToken.empty()) {
-        *error = "Adaptive NAT traversal has no valid rendezvous session";
-        return false;
+        return fail(NatPunchAttemptOutcome::InvalidInput,
+                    "Adaptive NAT traversal has no valid rendezvous session");
     }
     if (cfg.stun_servers.size() != 2) {
-        *error = "Adaptive NAT traversal requires exactly two STUN servers";
-        return false;
+        return fail(NatPunchAttemptOutcome::InvalidInput,
+                    "Adaptive NAT traversal requires exactly two STUN servers");
     }
 
     const auto deadline = std::chrono::steady_clock::now()
         + std::chrono::seconds(cfg.punch_timeout);
     socket_t punchSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (punchSocket == kInvalidSocket) {
-        *error = "Cannot create the NAT punch socket. err="
-            + std::to_string(GetSocketError());
-        return false;
+        return fail(NatPunchAttemptOutcome::SocketError,
+                    "Cannot create the NAT punch socket. err="
+                        + std::to_string(GetSocketError()));
     }
     SetSocketRecvTimeoutMs(punchSocket, kReceiveTimeoutMs);
 
     std::vector<StunProbeResult> probes;
     if (!ProbeStunServers(punchSocket, cfg.stun_servers, kStunTimeoutMs,
                           kStunAttempts, &probes, error)) {
+        const NatPunchAttemptOutcome outcome = IsStunTimeoutFailure(*error)
+            ? NatPunchAttemptOutcome::StunTimeout
+            : NatPunchAttemptOutcome::StunFailure;
         CloseSocket(punchSocket);
-        return false;
+        return fail(outcome, *error);
     }
     if (std::chrono::steady_clock::now() >= deadline) {
-        *error = "Adaptive NAT traversal timed out during STUN discovery";
         CloseSocket(punchSocket);
-        return false;
+        return fail(NatPunchAttemptOutcome::StunTimeout,
+                    "Adaptive NAT traversal timed out during STUN discovery");
     }
     SetSocketRecvTimeoutMs(punchSocket, kReceiveTimeoutMs);
 
     const NatMappingAnalysis localAnalysis = ClassifyNatMapping(
         probes[0].mappedEndpoint, probes[1].mappedEndpoint);
+    attempt.localBehavior = localAnalysis.behavior;
     NatPunchObservation localObservation{
         localAnalysis.behavior,
         probes[0].mappedEndpoint,
@@ -144,15 +257,14 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         int received = -1;
         if (!ReceiveDatagram(punchSocket, &buffer, &source, &received, error)) {
             CloseSocket(punchSocket);
-            return false;
+            return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
         if (received < 0) continue;
         const RendezvousEvent event = rendezvous.HandlePacket(
             source, buffer.data(), static_cast<size_t>(received));
         if (event.type == RendezvousEventType::Error) {
-            *error = event.error;
             CloseSocket(punchSocket);
-            return false;
+            return fail(NatPunchAttemptOutcome::ControlError, event.error);
         }
         if (event.type == RendezvousEventType::NatPeerInfo
             && MatchesSession(event, session)
@@ -164,19 +276,23 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         }
     }
     if (peerInfoEvent.type != RendezvousEventType::NatPeerInfo) {
-        *error = running.load() ? "Timed out waiting for peer NAT information"
-                                : "Adaptive NAT traversal stopped";
+        const bool stillRunning = running.load();
         CloseSocket(punchSocket);
-        return false;
+        return fail(stillRunning
+                        ? NatPunchAttemptOutcome::PeerInfoTimeout
+                        : NatPunchAttemptOutcome::Stopped,
+                    stillRunning ? "Timed out waiting for peer NAT information"
+                                 : "Adaptive NAT traversal stopped");
     }
 
     NatMappingBehavior peerBehavior = NatMappingBehavior::Unknown;
     if (!ParseNatMappingBehavior(peerInfoEvent.natPeerInfo.mappingBehavior,
                                  &peerBehavior)) {
-        *error = "Rendezvous returned an invalid peer NAT behavior";
         CloseSocket(punchSocket);
-        return false;
+        return fail(NatPunchAttemptOutcome::ControlError,
+                    "Rendezvous returned an invalid peer NAT behavior");
     }
+    attempt.peerBehavior = peerBehavior;
     const NatPunchObservation peerObservation{
         peerBehavior,
         peerInfoEvent.natPeerInfo.mappedA,
@@ -185,8 +301,10 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     NatPunchPlan plan;
     if (!BuildNatPunchPlan(localObservation, peerObservation, &plan, error)) {
         CloseSocket(punchSocket);
-        return false;
+        return fail(NatPunchAttemptOutcome::StrategyUnsupported, *error);
     }
+    attempt.plan = NatPunchPlanModeName(plan.mode);
+    attempt.targetCount = plan.targets.size();
     Log(LogLevel::Info, "NAT punch plan="
         + std::string(NatPunchPlanModeName(plan.mode))
         + ", targets=" + std::to_string(plan.targets.size())
@@ -211,15 +329,14 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         int received = -1;
         if (!ReceiveDatagram(punchSocket, &buffer, &source, &received, error)) {
             CloseSocket(punchSocket);
-            return false;
+            return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
         if (received < 0) continue;
         const RendezvousEvent event = rendezvous.HandlePacket(
             source, buffer.data(), static_cast<size_t>(received));
         if (event.type == RendezvousEventType::Error) {
-            *error = event.error;
             CloseSocket(punchSocket);
-            return false;
+            return fail(NatPunchAttemptOutcome::ControlError, event.error);
         }
         if (event.type == RendezvousEventType::NatStart
             && MatchesSession(event, session)) {
@@ -228,18 +345,22 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         }
     }
     if (!startReceived) {
-        *error = running.load() ? "Timed out at the NAT synchronization barrier"
-                                : "Adaptive NAT traversal stopped";
+        const bool stillRunning = running.load();
         CloseSocket(punchSocket);
-        return false;
+        return fail(stillRunning
+                        ? NatPunchAttemptOutcome::BarrierTimeout
+                        : NatPunchAttemptOutcome::Stopped,
+                    stillRunning
+                        ? "Timed out at the NAT synchronization barrier"
+                        : "Adaptive NAT traversal stopped");
     }
 
     std::string randomError;
     const std::string nonce = SecureRandomHex(16, &randomError);
     if (nonce.empty()) {
-        *error = "Cannot create NAT punch nonce: " + randomError;
         CloseSocket(punchSocket);
-        return false;
+        return fail(NatPunchAttemptOutcome::ControlError,
+                    "Cannot create NAT punch nonce: " + randomError);
     }
     const std::string punch = MakeControlMessage("PUNCH",
         {session.sessionId, std::to_string(session.attemptId),
@@ -258,16 +379,16 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         int received = -1;
         if (!ReceiveDatagram(punchSocket, &buffer, &source, &received, error)) {
             CloseSocket(punchSocket);
-            return false;
+            return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
         if (received < 0) continue;
 
         const RendezvousEvent rendezvousEvent = rendezvous.HandlePacket(
             source, buffer.data(), static_cast<size_t>(received));
         if (rendezvousEvent.type == RendezvousEventType::Error) {
-            *error = rendezvousEvent.error;
             CloseSocket(punchSocket);
-            return false;
+            return fail(NatPunchAttemptOutcome::ControlError,
+                        rendezvousEvent.error);
         }
         if (rendezvousEvent.type != RendezvousEventType::None) continue;
 
@@ -298,13 +419,18 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         *peer = source;
         CloseSocket(*sock);
         *sock = punchSocket;
+        attempt.outcome = NatPunchAttemptOutcome::Success;
+        attempt.confirmedPeer = source;
+        attempt.detail = "Authenticated PUNCH/PUNCH_ACK confirmed";
         Log(LogLevel::Info, "Adaptive NAT traversal confirmed with "
             + FormatUdpEndpoint(*peer));
         return true;
     }
 
-    *error = running.load() ? "Adaptive NAT punch timed out"
-                            : "Adaptive NAT traversal stopped";
+    const bool stillRunning = running.load();
     CloseSocket(punchSocket);
-    return false;
+    return fail(stillRunning ? NatPunchAttemptOutcome::PunchTimeout
+                             : NatPunchAttemptOutcome::Stopped,
+                stillRunning ? "Adaptive NAT punch timed out"
+                             : "Adaptive NAT traversal stopped");
 }

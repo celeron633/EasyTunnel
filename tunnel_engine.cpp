@@ -172,11 +172,14 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		if (traversalConnected) {
 			traversalConnected = false;
 			std::string traversalErrors;
-			for (const TraversalMode mode : traversalModes) {
+			for (size_t traversalIndex = 0;
+				 traversalIndex < traversalModes.size(); ++traversalIndex) {
+				const TraversalMode mode = traversalModes[traversalIndex];
 				if (!running_.load()) continue;
 				const std::string displayName = TraversalModeDisplayName(mode);
 				SetState(TunnelState::Connecting, "Trying " + displayName);
 				std::string strategyError;
+				const auto strategyStartedAt = std::chrono::steady_clock::now();
 				switch (mode) {
 					case TraversalMode::NatPunch:
 						traversalConnected = PunchAdaptiveNat(
@@ -194,7 +197,28 @@ void TunnelEngine::WorkerThread(Config cfg) {
 							&peer, &strategyError);
 						break;
 				}
-				if (traversalConnected) break;
+				const auto strategyElapsedMs = std::chrono::duration_cast<
+					std::chrono::milliseconds>(std::chrono::steady_clock::now()
+						- strategyStartedAt).count();
+				if (traversalConnected) {
+					Log(LogLevel::Info, "Traversal strategy result: mode="
+						+ displayName + ", outcome=success, endpoint="
+						+ FormatUdpEndpoint(peer) + ", elapsed_ms="
+						+ std::to_string(strategyElapsedMs));
+					break;
+				}
+				const bool stopped = !running_.load();
+				const std::string fallback = !stopped
+					&& traversalIndex + 1 < traversalModes.size()
+						? TraversalModeDisplayName(
+							traversalModes[traversalIndex + 1])
+						: "none";
+				Log(stopped ? LogLevel::Debug : LogLevel::Warn,
+					"Traversal strategy result: mode=" + displayName
+					+ ", outcome=" + (stopped ? "stopped" : "failed")
+					+ ", fallback=" + fallback + ", elapsed_ms="
+					+ std::to_string(strategyElapsedMs) + ", detail="
+					+ (strategyError.empty() ? "-" : strategyError));
 				if (!traversalErrors.empty()) traversalErrors += "; ";
 				traversalErrors += displayName + ": " + strategyError;
 			}

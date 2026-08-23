@@ -1,11 +1,48 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "config.h"
 #include "rendezvous_client.h"
+#include "stun_client.h"
 #include "util.h"
+
+enum class NatPunchAttemptOutcome {
+    InvalidInput,
+    SocketError,
+    StunTimeout,
+    StunFailure,
+    PeerInfoTimeout,
+    StrategyUnsupported,
+    BarrierTimeout,
+    PunchTimeout,
+    ControlError,
+    Stopped,
+    Success,
+};
+
+struct NatPunchAttemptResult {
+    std::string sessionId;
+    uint64_t attemptId = 0;
+    std::string localPeerId;
+    std::string remotePeerId;
+    NatPunchRole role = NatPunchRole::Unknown;
+    NatPunchAttemptOutcome outcome = NatPunchAttemptOutcome::InvalidInput;
+    NatMappingBehavior localBehavior = NatMappingBehavior::Unknown;
+    NatMappingBehavior peerBehavior = NatMappingBehavior::Unknown;
+    std::string plan = "-";
+    size_t targetCount = 0;
+    UdpEndpoint confirmedPeer{};
+    int64_t elapsedMs = 0;
+    std::string detail;
+};
+
+const char* NatPunchAttemptOutcomeName(NatPunchAttemptOutcome outcome);
+std::string FormatNatPunchAttemptResult(
+    const NatPunchAttemptResult& result);
 
 // Runs the STUN-based adaptive NAT punch on a dedicated UDP socket. The
 // existing rendezvous socket is replaced only after the punch succeeds; on
@@ -15,5 +52,5 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                       const std::atomic<bool>& running,
                       const std::string& matchedPeerId,
                       const NatPunchSession& session,
-                      UdpEndpoint* peer, std::string* error);
-
+                      UdpEndpoint* peer, std::string* error,
+                      NatPunchAttemptResult* attemptResult = nullptr);

@@ -234,14 +234,18 @@ int main() {
 
     bool aPunched = false;
     bool bPunched = false;
+    NatPunchAttemptResult aAttempt;
+    NatPunchAttemptResult bAttempt;
     if (aSelected && bSelected) {
         std::thread aPunchThread([&] {
             aPunched = PunchAdaptiveNat(&aSocket, aConfig, aServer,
-                clientsRunning, aPeerId, aSession, &aPeer, &aError);
+                clientsRunning, aPeerId, aSession, &aPeer, &aError,
+                &aAttempt);
         });
         std::thread bPunchThread([&] {
             bPunched = PunchAdaptiveNat(&bSocket, bConfig, bServer,
-                clientsRunning, bPeerId, bSession, &bPeer, &bError);
+                clientsRunning, bPeerId, bSession, &bPeer, &bError,
+                &bAttempt);
         });
         aPunchThread.join();
         bPunchThread.join();
@@ -252,6 +256,41 @@ int main() {
     if (!bPunched) std::cerr << "B error: " << bError << '\n';
     Expect(aPeer.family == AF_INET && bPeer.family == AF_INET,
            "winner sockets retain confirmed IPv4 peer endpoints");
+    Expect(aAttempt.outcome == NatPunchAttemptOutcome::Success
+               && bAttempt.outcome == NatPunchAttemptOutcome::Success
+               && aAttempt.sessionId == aSession.sessionId
+               && bAttempt.attemptId == bSession.attemptId,
+           "attempt results correlate success with session and attempt IDs");
+    Expect(aAttempt.localBehavior == NatMappingBehavior::EndpointIndependent
+               && aAttempt.peerBehavior
+                   == NatMappingBehavior::EndpointIndependent
+               && aAttempt.plan == "direct" && aAttempt.targetCount == 1
+               && aAttempt.confirmedPeer.family == AF_INET,
+           "successful attempt summary retains mapping, plan and endpoint");
+    const std::string attemptSummary = FormatNatPunchAttemptResult(aAttempt);
+    Expect(attemptSummary.find("outcome=success") != std::string::npos
+               && attemptSummary.find("plan=direct") != std::string::npos
+               && attemptSummary.find("attempt="
+                   + std::to_string(aSession.attemptId)) != std::string::npos,
+           "formatted attempt summary exposes correlated result fields");
+
+    NatPunchAttemptResult failureSummary;
+    failureSummary.outcome = NatPunchAttemptOutcome::BarrierTimeout;
+    failureSummary.detail = "barrier timed out\nfalling back";
+    const std::string formattedFailure =
+        FormatNatPunchAttemptResult(failureSummary);
+    Expect(formattedFailure.find("outcome=barrier-timeout")
+               != std::string::npos
+               && formattedFailure.find('\n') == std::string::npos,
+           "failure summary has a stable category and remains one line");
+    Expect(std::string(NatPunchAttemptOutcomeName(
+                      NatPunchAttemptOutcome::StunTimeout)) == "stun-timeout"
+               && std::string(NatPunchAttemptOutcomeName(
+                      NatPunchAttemptOutcome::StrategyUnsupported))
+                      == "strategy-unsupported"
+               && std::string(NatPunchAttemptOutcomeName(
+                      NatPunchAttemptOutcome::PunchTimeout)) == "punch-timeout",
+           "diagnostic outcome names stay stable for log analysis");
     if (aPunched) {
         const std::string legacyPunch = MakeControlMessage(
             "PUNCH", {aConfig.room_id, aPeerId});
