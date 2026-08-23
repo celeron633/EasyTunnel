@@ -6,6 +6,9 @@
 实现。新方案参考 frp xTCP 的 NAT 探测和自适应打洞思路，但保持 EasyTunnel 的
 TUN-over-UDP 数据面不变。
 
+frp xTCP 的流程、五种模式和源码索引见
+[frp xTCP NAT 穿透逻辑参考](frp-xtcp-nat-traversal.md)。
+
 具体目标：
 
 - 使用两台独立公网 IPv4 STUN 服务探测真实 NAT 映射行为。
