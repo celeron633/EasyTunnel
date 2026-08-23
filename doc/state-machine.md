@@ -148,5 +148,6 @@ liveness，不影响打洞计划。
 | 已连接 Peer liveness | `peer_timeout` | Error |
 
 Adaptive NAT 最多执行 `nat_punch_attempt_limit` 次 attempt（默认 3，最大 10），
-每次使用新的 attempt ID 和 punch token。逐轮扩大 Range 以及 balanced/aggressive
-profile 仍在 [新 NAT 穿透 TODO](新NAT穿透TODO.md)。
+每次使用新的 attempt ID 和 punch token。`nat_punch_profile` 控制 Range 扩大速度、
+发送间隔和单 attempt 报文预算；Random receiver 仍在
+[新 NAT 穿透 TODO](新NAT穿透TODO.md)。

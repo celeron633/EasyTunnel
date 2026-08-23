@@ -12,6 +12,11 @@ enum class TraversalMode {
     Ipv4Relay,
 };
 
+enum class NatPunchProfile {
+    Balanced,
+    Aggressive,
+};
+
 struct TraversalModeSetting {
     TraversalMode mode;
     bool enabled;
@@ -43,6 +48,10 @@ bool ParseTraversalModeSequence(const std::string& text,
 std::vector<TraversalMode> IntersectTraversalModes(
     const std::vector<TraversalMode>& preferred,
     const std::vector<TraversalMode>& supported);
+const char* NatPunchProfileName(NatPunchProfile profile);
+const char* NatPunchProfileDisplayName(NatPunchProfile profile);
+bool ParseNatPunchProfile(const std::string& text,
+                          NatPunchProfile* profile);
 
 struct Config {
     std::string rendezvous_addr;
@@ -56,6 +65,7 @@ struct Config {
     bool dummy_traffic_enabled = false;
     uint16_t punch_timeout = 30;
     uint16_t nat_punch_attempt_limit = 3;
+    NatPunchProfile nat_punch_profile = NatPunchProfile::Balanced;
     std::vector<StunServerConfig> stun_servers;
     std::vector<TraversalModeSetting> traversal_modes = DefaultTraversalModes();
     bool ipv6_accept_inbound = false;

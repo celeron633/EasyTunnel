@@ -129,6 +129,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ ", punch_timeout=" + std::to_string(cfg.punch_timeout) + "s"
 		+ ", nat_punch_attempt_limit="
 		+ std::to_string(cfg.nat_punch_attempt_limit)
+		+ ", nat_punch_profile="
+		+ NatPunchProfileName(cfg.nat_punch_profile)
 		+ ", traversal_modes=" + SerializeTraversalModes(cfg.traversal_modes)
 		+ ", ipv6_accept_inbound=" + (cfg.ipv6_accept_inbound ? "true" : "false")
 		+ ", ipv6_probe=" + cfg.ipv6_probe_host + ":"
@@ -201,7 +203,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 							traversalConnected = PunchAdaptiveNat(
 								&sock, cfg, server, running_, matchedPeerId,
 								natPunchSession, &peer, &strategyError,
-								&attemptResult);
+								&attemptResult, attemptNumber);
 							if (traversalConnected || !running_.load()
 								|| attemptNumber >= cfg.nat_punch_attempt_limit
 								|| !IsRetryableNatPunchOutcome(

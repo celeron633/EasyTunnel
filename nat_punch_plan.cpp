@@ -2,11 +2,12 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 constexpr int kRegularPortDeltaLimit = 5;
 constexpr int kRangePredictionMargin = 5;
-constexpr int kMaximumRangeSpan = 10;
+constexpr int kInitialMaximumRangeSpan = 10;
 
 bool Ipv4AddressAndPort(const UdpEndpoint& endpoint, in_addr* address,
                         uint16_t* port) {
@@ -30,8 +31,60 @@ bool IsSupportedBehavior(NatMappingBehavior behavior) {
 }
 }  // namespace
 
+NatPunchAttemptPolicy ResolveNatPunchAttemptPolicy(
+        NatPunchProfile profile, uint16_t attemptNumber) {
+    const uint16_t attempt = (std::max)(uint16_t{1}, attemptNumber);
+    NatPunchAttemptPolicy policy;
+    if (profile == NatPunchProfile::Aggressive) {
+        const unsigned exponent = attempt == 1
+            ? 0u : (std::min)(static_cast<unsigned>(attempt), 4u);
+        policy.rangeScale = static_cast<uint16_t>(1u << exponent);
+        policy.maximumRangeSpan = 128;
+        policy.minimumWaveIntervalMs = 75;
+        policy.datagramBudget = 131072;
+        return policy;
+    }
+
+    const unsigned exponent = (std::min)(
+        static_cast<unsigned>(attempt - 1), 3u);
+    policy.rangeScale = static_cast<uint16_t>(1u << exponent);
+    policy.maximumRangeSpan = 48;
+    policy.minimumWaveIntervalMs = 200;
+    policy.datagramBudget = 16384;
+    return policy;
+}
+
+uint32_t ComputeNatPunchWaveIntervalMs(
+        const NatPunchAttemptPolicy& policy, size_t targetCount,
+        uint64_t punchBudgetMs) {
+    if (targetCount == 0 || punchBudgetMs == 0
+        || policy.datagramBudget == 0) {
+        return policy.minimumWaveIntervalMs;
+    }
+    const uint64_t allowedWaves = (std::max)(
+        uint64_t{1}, static_cast<uint64_t>(policy.datagramBudget)
+            / static_cast<uint64_t>(targetCount));
+    const uint64_t budgetLimitedInterval =
+        (punchBudgetMs + allowedWaves - 1) / allowedWaves;
+    const uint64_t interval = (std::max)(
+        static_cast<uint64_t>(policy.minimumWaveIntervalMs),
+        budgetLimitedInterval);
+    return static_cast<uint32_t>((std::min)(
+        interval, static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())));
+}
+
 bool BuildNatPunchPlan(const NatPunchObservation& local,
                        const NatPunchObservation& peer,
+                       NatPunchPlan* plan, std::string* error) {
+    return BuildNatPunchPlan(
+        local, peer,
+        ResolveNatPunchAttemptPolicy(NatPunchProfile::Balanced, 1),
+        plan, error);
+}
+
+bool BuildNatPunchPlan(const NatPunchObservation& local,
+                       const NatPunchObservation& peer,
+                       const NatPunchAttemptPolicy& policy,
                        NatPunchPlan* plan, std::string* error) {
     if (plan == nullptr) {
         SetError(error, "NAT punch plan output is required");
@@ -82,8 +135,11 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
         ? NatPunchPlanMode::DualRangeScanner
         : NatPunchPlanMode::RangeScanner;
     plan->predictedPort = predicted;
+    const uint32_t initialSpan = static_cast<uint32_t>((std::min)(
+        kInitialMaximumRangeSpan, absoluteDelta + kRangePredictionMargin));
+    const uint32_t scaledSpan = initialSpan * policy.rangeScale;
     plan->portSpan = static_cast<uint16_t>((std::min)(
-        kMaximumRangeSpan, absoluteDelta + kRangePredictionMargin));
+        scaledSpan, static_cast<uint32_t>(policy.maximumRangeSpan)));
     const int firstPort = (std::max)(1, predicted - plan->portSpan);
     const int lastPort = (std::min)(65535, predicted + plan->portSpan);
     plan->targets.reserve(static_cast<size_t>(lastPort - firstPort + 1));

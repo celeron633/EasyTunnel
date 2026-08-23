@@ -27,14 +27,20 @@ enum class NatPunchAttemptOutcome {
 struct NatPunchAttemptResult {
     std::string sessionId;
     uint64_t attemptId = 0;
+    uint16_t attemptNumber = 1;
     std::string localPeerId;
     std::string remotePeerId;
     NatPunchRole role = NatPunchRole::Unknown;
+    NatPunchProfile profile = NatPunchProfile::Balanced;
     NatPunchAttemptOutcome outcome = NatPunchAttemptOutcome::InvalidInput;
     NatMappingBehavior localBehavior = NatMappingBehavior::Unknown;
     NatMappingBehavior peerBehavior = NatMappingBehavior::Unknown;
     std::string plan = "-";
     size_t targetCount = 0;
+    uint16_t portSpan = 0;
+    uint32_t waveIntervalMs = 0;
+    uint32_t datagramBudget = 0;
+    uint32_t datagramsSent = 0;
     UdpEndpoint confirmedPeer{};
     int64_t elapsedMs = 0;
     std::string detail;
@@ -63,4 +69,5 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                       const std::string& matchedPeerId,
                       const NatPunchSession& session,
                       UdpEndpoint* peer, std::string* error,
-                      NatPunchAttemptResult* attemptResult = nullptr);
+                      NatPunchAttemptResult* attemptResult = nullptr,
+                      uint16_t attemptNumber = 1);

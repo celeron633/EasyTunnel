@@ -78,7 +78,7 @@ ftxui::screen
 
 - Rendezvous：Server address/port、Room ID、My peer ID、Auth token、Retry delay、Auto wait for peer
 - NAT liveness：Keepalive、Peer timeout
-- NAT Punch：Punch timeout、Attempt limit、STUN A/B 地址和端口
+- NAT Punch：Punch timeout、Attempt limit、Balanced/Aggressive Profile、STUN A/B 地址和端口
 - Log and misc：日志级别（横向 Toggle，占一行）、1 KiB/s dummy traffic
 
 右列

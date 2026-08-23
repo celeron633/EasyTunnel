@@ -101,6 +101,14 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
     ReadBool(root, "dummy_traffic_enabled", &config->dummyTrafficEnabled);
     ReadInt(root, "punch_timeout", &config->punchTimeout);
     ReadInt(root, "nat_punch_attempt_limit", &config->natPunchAttemptLimit);
+    if (root.isMember("nat_punch_profile")) {
+        if (!root["nat_punch_profile"].isString()
+            || !ParseNatPunchProfile(root["nat_punch_profile"].asString(),
+                                     &config->natPunchProfile)) {
+            *error = "nat_punch_profile must be balanced or aggressive";
+            return false;
+        }
+    }
     if (!ReadStunServers(root, &config->stunServers, error)) return false;
     if (root.isMember("traversal_modes") && root["traversal_modes"].isString()
         && !ParseTraversalModes(root["traversal_modes"].asString(),
@@ -155,6 +163,7 @@ bool SaveClientConfig(const std::string& path, const ClientConfig& config,
     root["dummy_traffic_enabled"] = config.dummyTrafficEnabled;
     root["punch_timeout"] = config.punchTimeout;
     root["nat_punch_attempt_limit"] = config.natPunchAttemptLimit;
+    root["nat_punch_profile"] = NatPunchProfileName(config.natPunchProfile);
     Json::Value stunServers(Json::arrayValue);
     for (const auto& server : config.stunServers) {
         Json::Value item(Json::objectValue);
@@ -269,6 +278,7 @@ Config ToEngineConfig(const ClientConfig& config,
         std::clamp(config.punchTimeout, 1, 600));
     output.nat_punch_attempt_limit = static_cast<uint16_t>(
         std::clamp(config.natPunchAttemptLimit, 1, 10));
+    output.nat_punch_profile = config.natPunchProfile;
     output.stun_servers = config.stunServers;
     output.traversal_modes = config.traversalModes;
     output.ipv6_accept_inbound = config.ipv6AcceptInbound;

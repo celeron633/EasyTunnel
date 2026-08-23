@@ -25,6 +25,7 @@ TUN 适配器、TUN IPv4 数据格式和连接后的收发循环没有变化。�
 ```json
 "punch_timeout": 30,
 "nat_punch_attempt_limit": 3,
+"nat_punch_profile": "balanced",
 "stun_servers": [
   { "host": "stun-a.example.com", "port": 3478 },
   { "host": "stun-b.example.com", "port": 3478 }
@@ -109,7 +110,13 @@ regular 一端只向 easy 端稳定端点发送，从而为这个目的地址创
 ```text
 delta = mapped_B_port - mapped_A_port
 predicted = mapped_B_port + delta
-span = min(10, abs(delta) + 5)
+initial_span = min(10, abs(delta) + 5)
+```
+
+这是第一 attempt 的基础半径。重试时根据 profile 计算：
+
+```text
+span = min(profile_max_span, initial_span * attempt_scale)
 ```
 
 然后扫描 `[predicted-span, predicted+span]`，并在 UDP 端口边界处截断。这里没有
@@ -118,9 +125,22 @@ span = min(10, abs(delta) + 5)
 ### hard/hard regular
 
 双方都根据对端两次 STUN 映射的端口差计算预测中心，并同时执行上述 Range 扫描。
-每端范围半径最多为 10，即每轮最多向 21 个目标端口发送 PUNCH；所有目标仍由同一个
-punch socket 发送。该策略是 frp Mode 3 的有界 dual-range 基线，暂不包含低 TTL
+每端第一 attempt 的范围半径最多为 10；后续 attempt 按 profile 扩大。所有目标仍由
+同一个 punch socket 发送。该策略是 frp Mode 3 的有界 dual-range 基线，暂不包含低 TTL
 预打洞和延迟发送变体。
+
+### Profile 和资源上限
+
+| Profile | attempt scale（1/2/3/4+） | 最大半径 | 最小发送波次间隔 | 单 attempt 报文预算 |
+|---|---:|---:|---:|---:|
+| `balanced`（默认） | 1 / 2 / 4 / 8 | 48 | 200 ms | 16,384 |
+| `aggressive` | 1 / 4 / 8 / 16 | 128 | 75 ms | 131,072 |
+
+Direct 和 regular sender 仍只有一个目标，不会因为 profile 无意义地扩展。Range 与
+dual-range 首轮保持原来的小范围，只有同步到新 attempt 后才扩大。一次发送波次会
+遍历当前全部目标；如果 `punch_timeout` 很长，实际波次间隔会自动增加，保证发送量
+不超过对应 profile 的单 attempt 报文预算。`aggressive` 只扩大当前 regular Range
+策略，不代表已经支持 random 或 multi-public-IP NAT。
 
 ### 尚未完成
 
@@ -152,7 +172,9 @@ Punch token 用于阻止无关 UDP 包误接管连接，不加密后续 TUN 流�
 每次重试重新创建 punch socket、重新执行 STUN，并使用新 attempt ID 和 token。
 STUN 超时、Peer 信息超时、屏障超时和 PUNCH 超时允许重试；无效配置、确定不支持的
 NAT 组合和控制协议错误不会盲目重试。达到上限后按 `traversal_modes` 继续 IPv6 或
-IPv4 Relay。balanced/aggressive profile 和逐轮扩大 Range 尚未实现。
+IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟时间由
+每次 attempt 的 `punch_timeout` 和相邻 attempt 间的重试同步等待共同限制，实际发送量
+另受 profile 报文预算限制。
 
 `keepalive_interval` 和 `peer_timeout` 仅属于连接后的 NAT liveness，不参与打洞计划。
 
@@ -161,6 +183,6 @@ IPv4 Relay。balanced/aggressive profile 和逐轮扩大 Range 尚未实现。
 - `STUN servers must resolve to different public IPv4 addresses`：A/B 实际解析到同一 IP。
 - `STUN server did not respond`：检查 Coturn `stun-only`、UDP 3478 和安全组。
 - `Random or multi-public-IP NAT plan is not implemented yet`：启用 Relay，或等待
-  aggressive 模式完成。
+  Random receiver 策略完成；当前 aggressive profile 只扩大 regular Range。
 - `Timed out at the NAT synchronization barrier`：检查客户端/会合服务器版本是否一致，
   以及 punch socket 到会合服务器的 UDP 返回流量。

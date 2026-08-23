@@ -52,6 +52,47 @@ int main() {
                     == "198.51.100.30:42014",
            "easy peer scans a dynamic range around the regular prediction");
 
+    const NatPunchAttemptPolicy balancedSecond =
+        ResolveNatPunchAttemptPolicy(NatPunchProfile::Balanced, 2);
+    Expect(BuildNatPunchPlan(
+               easyA, regular, balancedSecond, &plan, &error)
+               && balancedSecond.rangeScale == 2
+               && balancedSecond.maximumRangeSpan == 48
+               && plan.portSpan == 16 && plan.targets.size() == 33,
+           "balanced retry doubles the initial regular range");
+    const NatPunchAttemptPolicy balancedThird =
+        ResolveNatPunchAttemptPolicy(NatPunchProfile::Balanced, 3);
+    Expect(BuildNatPunchPlan(
+               easyA, regular, balancedThird, &plan, &error)
+               && plan.portSpan == 32 && plan.targets.size() == 65,
+           "later balanced retries continue expanding the range");
+
+    const NatPunchAttemptPolicy aggressiveSecond =
+        ResolveNatPunchAttemptPolicy(NatPunchProfile::Aggressive, 2);
+    Expect(BuildNatPunchPlan(
+               easyA, regular, aggressiveSecond, &plan, &error)
+               && aggressiveSecond.rangeScale == 4
+               && aggressiveSecond.maximumRangeSpan == 128
+               && plan.portSpan == 32 && plan.targets.size() == 65,
+           "aggressive retry expands the regular range faster");
+    const NatPunchAttemptPolicy aggressiveMaximum =
+        ResolveNatPunchAttemptPolicy(NatPunchProfile::Aggressive, 10);
+    Expect(BuildNatPunchPlan(
+               easyA, regular, aggressiveMaximum, &plan, &error)
+               && plan.portSpan == 128 && plan.targets.size() == 257,
+           "aggressive range remains bounded at 257 target ports");
+    Expect(ComputeNatPunchWaveIntervalMs(
+               balancedThird, 65, 30000) == 200
+               && ComputeNatPunchWaveIntervalMs(
+                   aggressiveMaximum, 257, 30000) == 75,
+           "default timeout uses each profile's wave interval");
+    const uint32_t longInterval = ComputeNatPunchWaveIntervalMs(
+        aggressiveMaximum, 257, 600000);
+    const uint64_t longWaves = (600000 + longInterval - 1) / longInterval;
+    Expect(longInterval > aggressiveMaximum.minimumWaveIntervalMs
+               && longWaves * 257 <= aggressiveMaximum.datagramBudget,
+           "long timeouts slow down to preserve the datagram budget");
+
     Expect(BuildNatPunchPlan(regular, easyB, &plan, &error)
                && plan.mode == NatPunchPlanMode::RegularSender
                && plan.targets.size() == 1

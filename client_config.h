@@ -26,6 +26,7 @@ struct ClientConfig {
     bool dummyTrafficEnabled = false;
     int punchTimeout = 30;
     int natPunchAttemptLimit = 3;
+    NatPunchProfile natPunchProfile = NatPunchProfile::Balanced;
     std::vector<StunServerConfig> stunServers{
         {"", 3478},
         {"", 3478},

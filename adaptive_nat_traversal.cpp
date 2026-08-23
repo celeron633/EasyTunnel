@@ -1,5 +1,6 @@
 #include "adaptive_nat_traversal.h"
 
+#include <algorithm>
 #include <chrono>
 #include <vector>
 
@@ -14,7 +15,6 @@ constexpr int kReceiveTimeoutMs = 100;
 constexpr int kStunTimeoutMs = 800;
 constexpr int kStunAttempts = 3;
 constexpr auto kControlRetryInterval = std::chrono::milliseconds(500);
-constexpr auto kPunchInterval = std::chrono::milliseconds(200);
 constexpr auto kAttemptRetryGrace = std::chrono::seconds(5);
 
 const char* NatPunchRoleName(NatPunchRole role) {
@@ -152,16 +152,22 @@ std::string FormatNatPunchAttemptResult(
     return "NAT punch attempt summary: session="
         + (result.sessionId.empty() ? "-" : result.sessionId)
         + ", attempt=" + std::to_string(result.attemptId)
+        + ", attempt_index=" + std::to_string(result.attemptNumber)
         + ", local_peer="
         + (result.localPeerId.empty() ? "-" : result.localPeerId)
         + ", remote_peer="
         + (result.remotePeerId.empty() ? "-" : result.remotePeerId)
         + ", role=" + NatPunchRoleName(result.role)
+        + ", profile=" + NatPunchProfileName(result.profile)
         + ", outcome=" + NatPunchAttemptOutcomeName(result.outcome)
         + ", local=" + NatMappingBehaviorName(result.localBehavior)
         + ", peer=" + NatMappingBehaviorName(result.peerBehavior)
         + ", plan=" + result.plan
         + ", targets=" + std::to_string(result.targetCount)
+        + ", span=" + std::to_string(result.portSpan)
+        + ", wave_interval_ms=" + std::to_string(result.waveIntervalMs)
+        + ", datagrams=" + std::to_string(result.datagramsSent)
+        + "/" + std::to_string(result.datagramBudget)
         + ", endpoint=" + endpoint
         + ", elapsed_ms=" + std::to_string(result.elapsedMs)
         + ", detail=" + SingleLine(result.detail.empty() ? "-" : result.detail);
@@ -249,13 +255,16 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                       const std::string& matchedPeerId,
                       const NatPunchSession& session,
                       UdpEndpoint* peer, std::string* error,
-                      NatPunchAttemptResult* attemptResult) {
+                      NatPunchAttemptResult* attemptResult,
+                      uint16_t attemptNumber) {
     NatPunchAttemptResult attempt;
     attempt.sessionId = session.sessionId;
     attempt.attemptId = session.attemptId;
+    attempt.attemptNumber = (std::max)(uint16_t{1}, attemptNumber);
     attempt.localPeerId = cfg.peer_id;
     attempt.remotePeerId = matchedPeerId;
     attempt.role = session.role;
+    attempt.profile = cfg.nat_punch_profile;
     attempt.detail = "Adaptive NAT traversal did not start";
     AttemptResultScope attemptScope(&attempt, attemptResult);
     std::string ignoredError;
@@ -382,18 +391,27 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         peerInfoEvent.natPeerInfo.mappedA,
         peerInfoEvent.natPeerInfo.mappedB,
     };
+    const NatPunchAttemptPolicy policy = ResolveNatPunchAttemptPolicy(
+        cfg.nat_punch_profile, attempt.attemptNumber);
     NatPunchPlan plan;
-    if (!BuildNatPunchPlan(localObservation, peerObservation, &plan, error)) {
+    if (!BuildNatPunchPlan(
+            localObservation, peerObservation, policy, &plan, error)) {
         CloseSocket(punchSocket);
         return fail(NatPunchAttemptOutcome::StrategyUnsupported, *error);
     }
     attempt.plan = NatPunchPlanModeName(plan.mode);
     attempt.targetCount = plan.targets.size();
+    attempt.portSpan = plan.portSpan;
+    attempt.datagramBudget = policy.datagramBudget;
     Log(LogLevel::Info, "NAT punch plan="
         + std::string(NatPunchPlanModeName(plan.mode))
+        + ", profile=" + NatPunchProfileName(cfg.nat_punch_profile)
+        + ", attempt_index=" + std::to_string(attempt.attemptNumber)
         + ", targets=" + std::to_string(plan.targets.size())
         + ", predicted_port=" + std::to_string(plan.predictedPort)
-        + ", span=" + std::to_string(plan.portSpan));
+        + ", span=" + std::to_string(plan.portSpan)
+        + ", range_scale=" + std::to_string(policy.rangeScale)
+        + ", datagram_budget=" + std::to_string(policy.datagramBudget));
 
     nextControlSend = std::chrono::steady_clock::time_point{};
     bool startReceived = false;
@@ -449,14 +467,29 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     const std::string punch = MakeControlMessage("PUNCH",
         {session.sessionId, std::to_string(session.attemptId),
          cfg.peer_id, nonce, session.punchToken});
+    const auto punchBudget = std::chrono::duration_cast<
+        std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+    attempt.waveIntervalMs = ComputeNatPunchWaveIntervalMs(
+        policy, plan.targets.size(), static_cast<uint64_t>((std::max)(
+            int64_t{1}, punchBudget.count())));
+    const auto punchInterval = std::chrono::milliseconds(
+        attempt.waveIntervalMs);
+    SetSocketRecvTimeoutMs(punchSocket, static_cast<int>((std::min)(
+        static_cast<uint32_t>(kReceiveTimeoutMs), attempt.waveIntervalMs)));
+    Log(LogLevel::Info, "NAT punch sender interval="
+        + std::to_string(attempt.waveIntervalMs)
+        + "ms, datagram_budget=" + std::to_string(policy.datagramBudget));
     auto nextPunch = std::chrono::steady_clock::time_point{};
     while (running.load() && std::chrono::steady_clock::now() < deadline) {
         const auto now = std::chrono::steady_clock::now();
-        if (now >= nextPunch) {
+        if (now >= nextPunch && attempt.datagramsSent < policy.datagramBudget) {
             for (const UdpEndpoint& target : plan.targets) {
+                if (attempt.datagramsSent >= policy.datagramBudget) break;
                 Send(punchSocket, target, punch);
+                ++attempt.datagramsSent;
             }
-            nextPunch = now + kPunchInterval;
+            nextPunch = now + punchInterval;
         }
 
         UdpEndpoint source{};

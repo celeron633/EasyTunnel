@@ -76,6 +76,7 @@ private:
     std::string peerTimeoutText_;
     std::string punchTimeoutText_;
     std::string natPunchAttemptLimitText_;
+    int natPunchProfileIndex_ = 0;
     std::string stunAPortText_;
     std::string stunBPortText_;
     std::string ipv6ListenPortText_;
@@ -90,6 +91,9 @@ private:
     std::vector<std::string> tabs_{"Connection", "Settings", "Log"};
     int selectedTab_ = 0;
     std::vector<std::string> logLevels_{"Debug", "Info", "Warn", "Error"};
+    std::vector<std::string> natPunchProfiles_{
+        NatPunchProfileDisplayName(NatPunchProfile::Balanced),
+        NatPunchProfileDisplayName(NatPunchProfile::Aggressive)};
 
     std::mutex statusMutex_;
     std::string status_ = "Disconnected";

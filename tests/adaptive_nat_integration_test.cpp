@@ -266,12 +266,12 @@ int main() {
         std::thread aPunchThread([&] {
             aPunched = PunchAdaptiveNat(&aSocket, aConfig, aServer,
                 clientsRunning, aPeerId, aSession, &aPeer, &aError,
-                &aAttempt);
+                &aAttempt, 2);
         });
         std::thread bPunchThread([&] {
             bPunched = PunchAdaptiveNat(&bSocket, bConfig, bServer,
                 clientsRunning, bPeerId, bSession, &bPeer, &bError,
-                &bAttempt);
+                &bAttempt, 2);
         });
         aPunchThread.join();
         bPunchThread.join();
@@ -285,12 +285,17 @@ int main() {
     Expect(aAttempt.outcome == NatPunchAttemptOutcome::Success
                && bAttempt.outcome == NatPunchAttemptOutcome::Success
                && aAttempt.sessionId == aSession.sessionId
-               && bAttempt.attemptId == bSession.attemptId,
+               && bAttempt.attemptId == bSession.attemptId
+               && aAttempt.attemptNumber == 2
+               && bAttempt.attemptNumber == 2,
            "attempt results correlate success with session and attempt IDs");
     Expect(aAttempt.localBehavior == NatMappingBehavior::EndpointIndependent
                && aAttempt.peerBehavior
                    == NatMappingBehavior::EndpointIndependent
                && aAttempt.plan == "direct" && aAttempt.targetCount == 1
+               && aAttempt.profile == NatPunchProfile::Balanced
+               && aAttempt.waveIntervalMs == 200
+               && aAttempt.datagramsSent > 0
                && aAttempt.confirmedPeer.family == AF_INET,
            "successful attempt summary retains mapping, plan and endpoint");
     const std::string attemptSummary = FormatNatPunchAttemptResult(aAttempt);

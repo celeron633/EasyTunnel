@@ -125,6 +125,17 @@ void GuiApp::RenderSettingsTab() {
             "##NatPunchAttemptLimit", &config_.natPunchAttemptLimit);
         config_.natPunchAttemptLimit = std::clamp(
             config_.natPunchAttemptLimit, 1, 10);
+        FormField("Profile");
+        const char* natPunchProfiles[] = {
+            NatPunchProfileDisplayName(NatPunchProfile::Balanced),
+            NatPunchProfileDisplayName(NatPunchProfile::Aggressive)};
+        int natPunchProfile = static_cast<int>(config_.natPunchProfile);
+        if (ImGui::Combo("##NatPunchProfile", &natPunchProfile,
+                         natPunchProfiles, 2)) {
+            config_.natPunchProfile = static_cast<NatPunchProfile>(
+                std::clamp(natPunchProfile, 0, 1));
+            configChanged = true;
+        }
         FormField("STUN A host");
         configChanged |= ImGui::InputText("##StunAHost",
                                           &config_.stunServers[0].host);

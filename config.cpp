@@ -17,6 +17,36 @@ std::string Trim(const std::string& s) {
 
 }  // namespace
 
+const char* NatPunchProfileName(NatPunchProfile profile) {
+    switch (profile) {
+        case NatPunchProfile::Balanced: return "balanced";
+        case NatPunchProfile::Aggressive: return "aggressive";
+        default: return "balanced";
+    }
+}
+
+const char* NatPunchProfileDisplayName(NatPunchProfile profile) {
+    switch (profile) {
+        case NatPunchProfile::Balanced: return "Balanced";
+        case NatPunchProfile::Aggressive: return "Aggressive";
+        default: return "Balanced";
+    }
+}
+
+bool ParseNatPunchProfile(const std::string& text,
+                          NatPunchProfile* profile) {
+    if (profile == nullptr) return false;
+    if (text == "balanced") {
+        *profile = NatPunchProfile::Balanced;
+        return true;
+    }
+    if (text == "aggressive") {
+        *profile = NatPunchProfile::Aggressive;
+        return true;
+    }
+    return false;
+}
+
 std::vector<TraversalModeSetting> DefaultTraversalModes() {
     return {
         {TraversalMode::NatPunch, true},

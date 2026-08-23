@@ -83,6 +83,15 @@ int main(int argc, char** argv) {
     Expect(!ParseTraversalModes(
                "nat_punch:true,ipv6:false", &parsed, &error),
            "missing traversal mode is rejected");
+    NatPunchProfile profile = NatPunchProfile::Aggressive;
+    Expect(ParseNatPunchProfile("balanced", &profile)
+               && profile == NatPunchProfile::Balanced
+               && std::string(NatPunchProfileName(profile)) == "balanced",
+           "balanced NAT punch profile parses");
+    Expect(ParseNatPunchProfile("aggressive", &profile)
+               && profile == NatPunchProfile::Aggressive
+               && !ParseNatPunchProfile("unbounded", &profile),
+           "aggressive profile parses and unknown profiles are rejected");
     Expect(ParseTraversalModes(
                "nat_punch:false,ipv6:false,ipv4_relay:false",
                &parsed, &error),
@@ -107,7 +116,8 @@ int main(int argc, char** argv) {
         Expect(example.stunServers.size() == 2
                    && example.stunServers[0].host == "198.51.100.10"
                    && example.stunServers[1].port == 3478
-                   && example.natPunchAttemptLimit == 3,
+                   && example.natPunchAttemptLimit == 3
+                   && example.natPunchProfile == NatPunchProfile::Balanced,
                "shared example NAT Punch settings");
         Expect(ValidateClientConfig(example, &error),
                "shared example config validates");
@@ -120,6 +130,7 @@ int main(int argc, char** argv) {
                    && engine.target_peer_id == "node-b"
                    && engine.tun_mtu == 1452
                    && engine.nat_punch_attempt_limit == 3
+                   && engine.nat_punch_profile == NatPunchProfile::Balanced
                    && engine.stun_servers.size() == 2,
                "engine config mapping");
         example.natPunchAttemptLimit = 0;
