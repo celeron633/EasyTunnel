@@ -62,10 +62,11 @@ socket，再绑定同一个本地 UDP 地址创建打洞 socket。
 - EasyTunnel regular/easy Range 对应 Mode 1。
 - EasyTunnel hard/hard regular dual-range 对应 Mode 3。
 - EasyTunnel 已实现 frp Mode 2 的有界基线：“多 socket receiver + 随机 sender”；
-  暂不包含 frp 的低 TTL 和 3 秒 sender 延迟。
+  第 2/3 次 attempt 分别使用 TTL 7/TTL 4 receiver 预打洞。
 - EasyTunnel 已实现 Mode 4 的有界基线：regular 端随机扫描，random 端创建多 socket
   并扫描 regular 端预测中心附近的小范围；范围随 attempt/profile 从 ±2 渐进扩大。
-  `NAT_ARMED` 屏障保证 receiver 先完成资源准备，因此当前没有固定 3 秒 sender 延迟。
+  `NAT_ARMED` 屏障保证 receiver 先完成资源准备；重试 attempt 的 sender delay 最大
+  1 秒且不超过剩余时间的四分之一，不复制 frp 固定 3 秒等待。
 - EasyTunnel 会合服务目前只配对、交换观察结果和同步开始；frp 则由 frps 集中
   分类、分配双方动作并根据成功报告学习策略。
 - 可借鉴的边界包括：随机监听 256 个 socket、随机探测 1000 个端口、范围半径

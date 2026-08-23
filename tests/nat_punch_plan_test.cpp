@@ -227,6 +227,60 @@ int main() {
                && error.find("multi-public-IP") != std::string::npos,
            "multi-public-IP returns a specific unsupported error");
 
+    const NatPunchExecutionPolicy firstSender =
+        ResolveNatPunchExecutionPolicy(
+            NatPunchPlanMode::MixedRandomSender, true, 1);
+    const NatPunchExecutionPolicy secondSender =
+        ResolveNatPunchExecutionPolicy(
+            NatPunchPlanMode::MixedRandomSender, true, 2);
+    const NatPunchExecutionPolicy secondReceiver =
+        ResolveNatPunchExecutionPolicy(
+            NatPunchPlanMode::MixedRandomReceiver, false, 2);
+    const NatPunchExecutionPolicy thirdReceiver =
+        ResolveNatPunchExecutionPolicy(
+            NatPunchPlanMode::MixedRandomReceiver, false, 3);
+    const NatPunchExecutionPolicy fourthReceiver =
+        ResolveNatPunchExecutionPolicy(
+            NatPunchPlanMode::MixedRandomReceiver, false, 4);
+    Expect(firstSender.role == NatPunchExecutionRole::Sender
+               && firstSender.senderDelayMs == 0
+               && firstSender.prePunchTtl == 0
+               && secondSender.senderDelayMs == 1000
+               && secondSender.prePunchTtl == 0
+               && secondReceiver.role == NatPunchExecutionRole::Receiver
+               && secondReceiver.prePunchTtl == 7
+               && secondReceiver.senderDelayMs == 0
+               && thirdReceiver.prePunchTtl == 4
+               && fourthReceiver.prePunchTtl == 0,
+           "attempts rotate baseline, TTL 7 and TTL 4 timing variants");
+    Expect(ResolveNatPunchExecutionPolicy(
+               NatPunchPlanMode::Direct, true, 2).role
+                  == NatPunchExecutionRole::Sender
+               && ResolveNatPunchExecutionPolicy(
+                   NatPunchPlanMode::Direct, false, 2).role
+                  == NatPunchExecutionRole::Receiver
+               && ResolveNatPunchExecutionPolicy(
+                   NatPunchPlanMode::DualRangeScanner, true, 3).senderDelayMs
+                  == 1000
+               && ResolveNatPunchExecutionPolicy(
+                   NatPunchPlanMode::DualRangeScanner, false, 3).prePunchTtl
+                  == 4
+               && ResolveNatPunchExecutionPolicy(
+                   NatPunchPlanMode::RegularSender, false, 2).role
+                  == NatPunchExecutionRole::Sender
+               && ResolveNatPunchExecutionPolicy(
+                   NatPunchPlanMode::RangeScanner, true, 2).role
+                  == NatPunchExecutionRole::Receiver,
+           "symmetric plans use session role and asymmetric plans keep fixed roles");
+    Expect(std::string(NatPunchExecutionRoleName(
+                      NatPunchExecutionRole::Sender)) == "sender"
+               && std::string(NatPunchExecutionRoleName(
+                      NatPunchExecutionRole::Receiver)) == "receiver"
+               && LimitNatPunchSenderDelayMs(1000, 8000) == 1000
+               && LimitNatPunchSenderDelayMs(1000, 2000) == 500
+               && LimitNatPunchSenderDelayMs(1000, 3) == 0,
+           "sender delay preserves at least three quarters of attempt time");
+
     if (failures != 0) {
         std::cerr << failures << " NAT punch plan test(s) failed\n";
         return 1;

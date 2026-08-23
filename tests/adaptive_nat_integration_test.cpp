@@ -534,6 +534,13 @@ int main() {
                && aAttempt.targetCount == 1000
                && bAttempt.plan == "random-receiver"
                && bAttempt.socketCount == 256
+               && aAttempt.executionRole == "sender"
+               && aAttempt.prePunchTtl == 0
+               && aAttempt.senderDelayMs == 1000
+               && bAttempt.executionRole == "receiver"
+               && bAttempt.prePunchTtl == 4
+               && bAttempt.senderDelayMs == 0
+               && bAttempt.prePunchDatagrams == 256
                && aAttempt.profile == NatPunchProfile::Aggressive
                && aAttempt.waveIntervalMs == 5
                && aAttempt.datagramsSent > 0
@@ -542,6 +549,10 @@ int main() {
     const std::string attemptSummary = FormatNatPunchAttemptResult(aAttempt);
     Expect(attemptSummary.find("outcome=success") != std::string::npos
                && attemptSummary.find("plan=random-sender") != std::string::npos
+               && attemptSummary.find("execution_role=sender")
+                    != std::string::npos
+               && attemptSummary.find("sender_delay_ms=1000")
+                    != std::string::npos
                && attemptSummary.find("attempt="
                    + std::to_string(aSession.attemptId)) != std::string::npos,
            "formatted attempt summary exposes correlated result fields");
@@ -610,7 +621,7 @@ int main() {
     randomConfig.peer_id = "random";
     randomConfig.target_peer_id.clear();
     const PairedPunchResult mixed = RunPairedPunch(
-        regularConfig, randomConfig, 1);
+        regularConfig, randomConfig, 2);
     Expect(mixed.setup && mixed.selected
                && mixed.firstPunched && mixed.secondPunched,
            "regular/random peers complete mixed random-range punching");
@@ -625,16 +636,23 @@ int main() {
                && mixed.firstAttempt.peerBehavior
                   == NatMappingBehavior::PortDependentRandom
                && mixed.firstAttempt.plan == "mixed-random-sender"
-               && mixed.firstAttempt.targetCount == 512
+               && mixed.firstAttempt.targetCount == 1000
                && mixed.firstAttempt.socketCount == 1
+               && mixed.firstAttempt.executionRole == "sender"
+               && mixed.firstAttempt.prePunchTtl == 0
+               && mixed.firstAttempt.senderDelayMs == 1000
                && mixed.secondAttempt.localBehavior
                   == NatMappingBehavior::PortDependentRandom
                && mixed.secondAttempt.peerBehavior
                   == NatMappingBehavior::PortDependentRegular
                && mixed.secondAttempt.plan == "mixed-random-receiver"
-               && mixed.secondAttempt.targetCount == 5
-               && mixed.secondAttempt.socketCount == 64
-               && mixed.secondAttempt.portSpan == 2
+               && mixed.secondAttempt.targetCount == 17
+               && mixed.secondAttempt.socketCount == 128
+               && mixed.secondAttempt.portSpan == 8
+               && mixed.secondAttempt.executionRole == "receiver"
+               && mixed.secondAttempt.prePunchTtl == 7
+               && mixed.secondAttempt.senderDelayMs == 0
+               && mixed.secondAttempt.prePunchDatagrams == 2176
                && mixed.firstAttempt.datagramsSent > 0
                && mixed.secondAttempt.datagramsSent > 0,
            "mixed attempt summaries expose complementary bounded plans");

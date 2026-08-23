@@ -86,7 +86,9 @@ frp xTCP 的流程、五种模式和源码索引见
 - [x] mixed range 按 profile/attempt 从 ±2 渐进扩大，且共享 socket、发送间隔和
       单 attempt 报文预算上限。
 - [x] 复用 RAII socket pool，失败时释放全部 socket 并继续 IPv6/Relay。
-- [ ] 评估低 TTL 预打洞和 sender/receiver 延迟发送组合的实际收益。
+- [x] attempt 2/3 分别实现 TTL 7/TTL 4 receiver 预打洞，以及最大 1 秒且受剩余
+      attempt 时间约束的可取消 sender delay。
+- [ ] 在公网 regular/random 样本上对比无延迟、TTL 7 和 TTL 4 的实际收益。
 
 ### 阶段 6：策略学习和发布收敛
 
@@ -159,13 +161,17 @@ frp xTCP 的流程、五种模式和源码索引见
       attempt/token 校验和 winner 接管。
 - [x] socket pool 测试连续 12 轮创建/释放 256 socket，并注入辅助 socket 创建失败；
       集成测试覆盖最大池在 barrier 取消和 PUNCH 超时后的自动回收。
+- [x] 增加低 TTL unit test，覆盖 `IP_TTL` 设置、显式/析构恢复、无效 socket 和可取消
+      sender delay；集成测试覆盖 Mode 2 TTL 4 与 Mode 4 TTL 7 双端成功路径。
 
 ### 待完成
 
 #### frp xTCP 困难 NAT 策略
 
 - [x] 实现 Mode 4 类 mixed random/range，并通过假 STUN + 真实 registry 双端集成测试。
-- [ ] 评估并实现低 TTL 预打洞以及 sender/receiver 延迟发送组合。
+- [x] 实现低 TTL 预打洞以及 sender/receiver 延迟发送组合；TTL 设置/恢复、角色轮换、
+      短超时上限和取消等待均有 unit test。
+- [ ] 收集公网样本，评估低 TTL 与 sender delay 的实际收益并决定最终默认轮换顺序。
 - [ ] 收集打洞成功报告，按 NAT 特征记录策略成功率并动态调整尝试顺序。
 
 #### 会合与候选地址

@@ -39,6 +39,10 @@ struct NatPunchAttemptResult {
     size_t targetCount = 0;
     size_t socketCount = 1;
     uint16_t portSpan = 0;
+    std::string executionRole = "-";
+    uint8_t prePunchTtl = 0;
+    uint32_t senderDelayMs = 0;
+    uint32_t prePunchDatagrams = 0;
     uint32_t waveIntervalMs = 0;
     uint32_t datagramBudget = 0;
     uint32_t datagramsSent = 0;

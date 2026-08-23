@@ -78,6 +78,10 @@ sequenceDiagram
     B-->>A: PUNCH_ACK(echo nonce)
 ```
 
+attempt 1 直接进入屏障；attempt 2/3 的 receiver 分别以 TTL 7/TTL 4 发送一轮预算内
+预打洞包，恢复 socket 原 TTL 后再发送 `NAT_ARMED`。收到 `NAT_START` 后，sender
+执行最多 1 秒且不超过剩余 attempt 时间四分之一的可取消延迟，然后进入正常 PUNCH。
+
 控制 socket 负责 REG/CONNECT；独立 punch socket 负责 STUN、`NAT_INFO` 和 Peer 打洞。
 成功时关闭控制 socket，并让 punch socket 直接进入数据面；失败时关闭 punch socket，
 控制 socket 仍可继续 IPv6/Relay。
@@ -151,4 +155,5 @@ liveness，不影响打洞计划。
 Adaptive NAT 最多执行 `nat_punch_attempt_limit` 次 attempt（默认 3，最大 10），
 每次使用新的 attempt ID 和 punch token。`nat_punch_profile` 控制 Range 扩大速度、
 发送间隔、随机 socket/目标规模和单 attempt 报文预算；mixed random/range 使用相同
-资源上限，低 TTL 和发送延迟变体仍在[新 NAT 穿透 TODO](新NAT穿透TODO.md)。
+资源上限。attempt 2/3 的低 TTL 预打洞报文也计入该预算，sender delay 受 attempt
+剩余时间约束。

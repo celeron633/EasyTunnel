@@ -135,6 +135,63 @@ uint32_t ComputeNatPunchWaveIntervalMs(
         interval, static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())));
 }
 
+NatPunchExecutionPolicy ResolveNatPunchExecutionPolicy(
+        NatPunchPlanMode mode, bool localIsInitiator,
+        uint16_t attemptNumber) {
+    NatPunchExecutionPolicy policy;
+    switch (mode) {
+        case NatPunchPlanMode::RegularSender:
+        case NatPunchPlanMode::RandomSender:
+        case NatPunchPlanMode::MixedRandomSender:
+            policy.role = NatPunchExecutionRole::Sender;
+            break;
+        case NatPunchPlanMode::RangeScanner:
+        case NatPunchPlanMode::RandomReceiver:
+        case NatPunchPlanMode::MixedRandomReceiver:
+            policy.role = NatPunchExecutionRole::Receiver;
+            break;
+        case NatPunchPlanMode::Direct:
+        case NatPunchPlanMode::DualRangeScanner:
+            policy.role = localIsInitiator
+                ? NatPunchExecutionRole::Sender
+                : NatPunchExecutionRole::Receiver;
+            break;
+        default:
+            policy.role = NatPunchExecutionRole::Sender;
+            break;
+    }
+
+    const uint16_t attempt = (std::max)(uint16_t{1}, attemptNumber);
+    if (attempt == 2) {
+        policy.prePunchTtl = policy.role == NatPunchExecutionRole::Receiver
+            ? 7 : 0;
+        policy.senderDelayMs = policy.role == NatPunchExecutionRole::Sender
+            ? 1000 : 0;
+    } else if (attempt == 3) {
+        policy.prePunchTtl = policy.role == NatPunchExecutionRole::Receiver
+            ? 4 : 0;
+        policy.senderDelayMs = policy.role == NatPunchExecutionRole::Sender
+            ? 1000 : 0;
+    }
+    return policy;
+}
+
+const char* NatPunchExecutionRoleName(NatPunchExecutionRole role) {
+    switch (role) {
+        case NatPunchExecutionRole::Sender: return "sender";
+        case NatPunchExecutionRole::Receiver: return "receiver";
+        default: return "unknown";
+    }
+}
+
+uint32_t LimitNatPunchSenderDelayMs(uint32_t requestedDelayMs,
+                                    uint64_t remainingAttemptMs) {
+    if (requestedDelayMs == 0 || remainingAttemptMs < 4) return 0;
+    return static_cast<uint32_t>((std::min)(
+        static_cast<uint64_t>(requestedDelayMs),
+        remainingAttemptMs / 4));
+}
+
 bool BuildRandomPortTargets(const NatPunchObservation& peer,
                             size_t targetCount,
                             std::vector<UdpEndpoint>* targets,

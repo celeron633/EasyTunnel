@@ -8,6 +8,7 @@
 #include "nat_protocol.h"
 #include "nat_punch_plan.h"
 #include "nat_punch_socket_pool.h"
+#include "nat_punch_transport.h"
 #include "secure_random.h"
 #include "stun_client.h"
 
@@ -91,6 +92,46 @@ bool SameIpv4Address(const UdpEndpoint& first, const UdpEndpoint& second) {
     return firstAddress->sin_addr.s_addr == secondAddress->sin_addr.s_addr;
 }
 
+bool SendPrePunchWave(const NatPunchSocketPool& sockets,
+                      const std::vector<UdpEndpoint>& targets,
+                      const std::string& punch, uint8_t ttl,
+                      uint32_t datagramBudget,
+                      const std::atomic<bool>& running, uint32_t* sent,
+                      size_t* ttlSocketCount, std::string* error) {
+    *sent = 0;
+    *ttlSocketCount = 0;
+    int firstApplyError = 0;
+    for (const socket_t sock : sockets.sockets()) {
+        if (!running.load() || *sent >= datagramBudget) break;
+        int socketError = 0;
+        ScopedIpv4SocketTtl ttlScope(sock, ttl, &socketError);
+        if (!ttlScope.applied()) {
+            if (firstApplyError == 0) firstApplyError = socketError;
+            continue;
+        }
+        ++*ttlSocketCount;
+        for (const UdpEndpoint& target : targets) {
+            if (!running.load() || *sent >= datagramBudget) break;
+            if (Send(sock, target, punch)) ++*sent;
+        }
+        if (!ttlScope.Restore(&socketError)) {
+            *error = "Cannot restore NAT punch socket TTL. err="
+                + std::to_string(socketError);
+            return false;
+        }
+    }
+    if (!running.load()) return true;
+    if (*ttlSocketCount == 0) {
+        Log(LogLevel::Warn, "Low-TTL NAT pre-punch is unavailable. err="
+            + std::to_string(firstApplyError));
+    } else if (*ttlSocketCount < sockets.size()) {
+        Log(LogLevel::Warn, "Applied low TTL to "
+            + std::to_string(*ttlSocketCount) + "/"
+            + std::to_string(sockets.size()) + " NAT punch sockets");
+    }
+    return true;
+}
+
 bool MatchesSession(const RendezvousEvent& event,
                     const NatPunchSession& session) {
     return event.sessionId == session.sessionId
@@ -168,6 +209,11 @@ std::string FormatNatPunchAttemptResult(
         + ", targets=" + std::to_string(result.targetCount)
         + ", sockets=" + std::to_string(result.socketCount)
         + ", span=" + std::to_string(result.portSpan)
+        + ", execution_role=" + result.executionRole
+        + ", pre_punch_ttl=" + std::to_string(result.prePunchTtl)
+        + ", sender_delay_ms=" + std::to_string(result.senderDelayMs)
+        + ", pre_punch_datagrams="
+        + std::to_string(result.prePunchDatagrams)
         + ", wave_interval_ms=" + std::to_string(result.waveIntervalMs)
         + ", datagrams=" + std::to_string(result.datagramsSent)
         + "/" + std::to_string(result.datagramBudget)
@@ -428,6 +474,13 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     attempt.socketCount = punchSockets.size();
     attempt.portSpan = plan.portSpan;
     attempt.datagramBudget = policy.datagramBudget;
+    const NatPunchExecutionPolicy executionPolicy =
+        ResolveNatPunchExecutionPolicy(
+            plan.mode, session.role == NatPunchRole::Initiator,
+            attempt.attemptNumber);
+    attempt.executionRole = NatPunchExecutionRoleName(executionPolicy.role);
+    attempt.prePunchTtl = executionPolicy.prePunchTtl;
+    attempt.senderDelayMs = executionPolicy.senderDelayMs;
     Log(LogLevel::Info, "NAT punch plan="
         + std::string(NatPunchPlanModeName(plan.mode))
         + ", profile=" + NatPunchProfileName(cfg.nat_punch_profile)
@@ -437,7 +490,40 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         + ", predicted_port=" + std::to_string(plan.predictedPort)
         + ", span=" + std::to_string(plan.portSpan)
         + ", range_scale=" + std::to_string(policy.rangeScale)
+        + ", execution_role=" + attempt.executionRole
+        + ", pre_punch_ttl=" + std::to_string(attempt.prePunchTtl)
+        + ", sender_delay_ms=" + std::to_string(attempt.senderDelayMs)
         + ", datagram_budget=" + std::to_string(policy.datagramBudget));
+
+    std::string randomError;
+    const std::string nonce = SecureRandomHex(16, &randomError);
+    if (nonce.empty()) {
+        return fail(NatPunchAttemptOutcome::ControlError,
+                    "Cannot create NAT punch nonce: " + randomError);
+    }
+    const std::string punch = MakeControlMessage("PUNCH",
+        {session.sessionId, std::to_string(session.attemptId),
+         cfg.peer_id, nonce, session.punchToken});
+
+    if (executionPolicy.role == NatPunchExecutionRole::Receiver
+        && executionPolicy.prePunchTtl > 0) {
+        size_t ttlSocketCount = 0;
+        if (!SendPrePunchWave(punchSockets, plan.targets, punch,
+                executionPolicy.prePunchTtl, policy.datagramBudget, running,
+                &attempt.prePunchDatagrams, &ttlSocketCount, error)) {
+            return fail(NatPunchAttemptOutcome::SocketError, *error);
+        }
+        attempt.datagramsSent = attempt.prePunchDatagrams;
+        Log(LogLevel::Info, "NAT pre-punch ttl="
+            + std::to_string(executionPolicy.prePunchTtl)
+            + ", sockets=" + std::to_string(ttlSocketCount)
+            + ", datagrams="
+            + std::to_string(attempt.prePunchDatagrams));
+        if (!running.load()) {
+            return fail(NatPunchAttemptOutcome::Stopped,
+                        "Adaptive NAT traversal stopped during pre-punch");
+        }
+    }
 
     nextControlSend = std::chrono::steady_clock::time_point{};
     bool startReceived = false;
@@ -480,15 +566,24 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                         : "Adaptive NAT traversal stopped");
     }
 
-    std::string randomError;
-    const std::string nonce = SecureRandomHex(16, &randomError);
-    if (nonce.empty()) {
-        return fail(NatPunchAttemptOutcome::ControlError,
-                    "Cannot create NAT punch nonce: " + randomError);
+    if (executionPolicy.role == NatPunchExecutionRole::Sender
+        && executionPolicy.senderDelayMs > 0) {
+        const auto remaining = std::chrono::duration_cast<
+            std::chrono::milliseconds>(
+                deadline - std::chrono::steady_clock::now());
+        attempt.senderDelayMs = LimitNatPunchSenderDelayMs(
+            executionPolicy.senderDelayMs,
+            static_cast<uint64_t>((std::max)(int64_t{0}, remaining.count())));
+        if (attempt.senderDelayMs > 0) {
+            Log(LogLevel::Info, "NAT punch sender waiting "
+                + std::to_string(attempt.senderDelayMs)
+                + "ms for receiver pre-punch");
+            if (!WaitForNatPunchDelay(running, attempt.senderDelayMs)) {
+                return fail(NatPunchAttemptOutcome::Stopped,
+                            "Adaptive NAT traversal stopped during sender delay");
+            }
+        }
     }
-    const std::string punch = MakeControlMessage("PUNCH",
-        {session.sessionId, std::to_string(session.attemptId),
-         cfg.peer_id, nonce, session.punchToken});
     const auto punchBudget = std::chrono::duration_cast<
         std::chrono::milliseconds>(
             deadline - std::chrono::steady_clock::now());
@@ -499,10 +594,15 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     const size_t datagramsPerWave = randomReceiver
         ? punchSockets.size() * plan.targets.size()
         : plan.targets.size();
+    NatPunchAttemptPolicy remainingPolicy = policy;
+    remainingPolicy.datagramBudget = attempt.datagramsSent
+            >= policy.datagramBudget
+        ? 0 : policy.datagramBudget - attempt.datagramsSent;
     attempt.waveIntervalMs = randomSender
         ? policy.randomPortIntervalMs
         : ComputeNatPunchWaveIntervalMs(
-            policy, datagramsPerWave, static_cast<uint64_t>((std::max)(
+            remainingPolicy, datagramsPerWave,
+            static_cast<uint64_t>((std::max)(
                 int64_t{1}, punchBudget.count())));
     const auto punchInterval = std::chrono::milliseconds(
         attempt.waveIntervalMs);

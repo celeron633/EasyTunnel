@@ -10,6 +10,7 @@ EasyTunnel 的 IPv4 P2P 穿透使用两台独立 STUN 服务探测 NAT 映射，
 stun_client.cpp              RFC 8489 Binding 与映射分类
 nat_punch_plan.cpp           确定性的双方互补打洞计划
 nat_punch_socket_pool.cpp    多 socket 生命周期、轮询和 winner 移交
+nat_punch_transport.cpp      临时 IPv4 TTL 和可取消 sender delay
 adaptive_nat_traversal.cpp   STUN、会合屏障和 PUNCH 状态机
 rendezvous_client.cpp        新 NAT 控制消息的收发与校验
 rendezvous/registry.cpp      session/attempt 及短生命周期屏障状态
@@ -159,8 +160,8 @@ port-dependent-random 一端固定为 receiver，在发送 `NAT_ARMED` 前绑定
 
 receiver 同时轮询整个 socket pool，首个收到合法 session/attempt/token 报文的 socket
 成为 winner；其余 socket 立即关闭，winner 原样交给 TUN 数据面。sender 每个随机端口
-只探测一次，receiver 的重复波次仍受 profile 报文预算限制。当前基线不使用低 TTL，
-也不额外等待 frp 的 3 秒 sender delay。
+只探测一次，receiver 的重复波次仍受 profile 报文预算限制。首轮保留无延迟基线，
+后续重试使用下述 receiver-first 变体。
 
 ### regular/random
 
@@ -177,8 +178,33 @@ mixed_span = min(profile_max_span, 2 * attempt_scale)
 receiver 从池中每个 socket 扫描 `[predicted-mixed_span,
 predicted+mixed_span]`。Balanced 的 attempt 半径为 2 / 4 / 8 / 16，Aggressive 为
 2 / 8 / 16 / 32；端口边界、单 attempt 报文预算和随机资源数量继续受相同 profile
-限制。会合屏障保证 receiver 创建完 socket pool 后双方才开始，因此基线不额外复制
-frp 的 3 秒 sender delay；低 TTL 预打洞仍待实网评估。
+限制。会合屏障保证 receiver 创建完 socket pool 后双方才开始；后续重试再叠加
+下述 TTL 7/TTL 4 receiver-first 变体。
+
+## Receiver 预打洞与 Sender 延迟
+
+首个 attempt 保留已经验证的无延迟基线。默认三次 attempt 会自动轮换：
+
+| attempt | receiver 在 `NAT_ARMED` 前的动作 | sender 在 `NAT_START` 后的动作 |
+|---:|---|---|
+| 1 | 不预打洞 | 不延迟 |
+| 2 | 使用 IPv4 TTL 7 发送一轮认证 PUNCH | 最多等待 1000 ms |
+| 3 | 使用 IPv4 TTL 4 发送一轮认证 PUNCH | 最多等待 1000 ms |
+| 4+ | 不预打洞 | 不延迟 |
+
+regular/easy、easy/random 和 regular/random 使用计划固定的 sender/receiver；Direct 和
+dual-range 使用 session initiator 作为 sender、responder 作为 receiver。低 TTL 波次
+从 receiver 的全部 punch socket 发往当前全部目标，发送量计入 profile 的单 attempt
+报文预算。每个 socket 发送前保存原 `IP_TTL`，完成后立即恢复；恢复失败会关闭整个
+attempt，避免低 TTL socket 进入 TUN 数据面。如果系统不能设置 TTL，则记录警告并继续
+正常屏障和 PUNCH，不让可选优化阻断回退链。
+
+sender delay 不超过 1000 ms，同时最多占用当前 attempt 剩余时间的四分之一。等待每
+25 ms 检查一次停止状态，关闭时不会睡满整个延迟。EasyTunnel 已有 `NAT_ARMED` 屏障，
+因此不使用 frp 固定 3 秒延迟。
+
+单行 attempt 摘要会记录 `execution_role`、`pre_punch_ttl`、`sender_delay_ms` 和
+`pre_punch_datagrams`，便于对比公网样本中三种时序的结果。
 
 socket pool 由单次 attempt 独占的 RAII 对象管理。成功时只释放 winner 的所有权；
 屏障取消、PUNCH 超时、协议错误和资源不足等其他退出路径都会自动关闭主 socket 与

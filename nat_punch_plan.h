@@ -19,6 +19,17 @@ enum class NatPunchPlanMode {
     MixedRandomReceiver,
 };
 
+enum class NatPunchExecutionRole {
+    Sender,
+    Receiver,
+};
+
+struct NatPunchExecutionPolicy {
+    NatPunchExecutionRole role = NatPunchExecutionRole::Sender;
+    uint8_t prePunchTtl = 0;
+    uint16_t senderDelayMs = 0;
+};
+
 struct NatPunchObservation {
     NatMappingBehavior behavior = NatMappingBehavior::Unknown;
     UdpEndpoint mappedA{};
@@ -53,6 +64,18 @@ NatPunchAttemptPolicy ResolveNatPunchAttemptPolicy(
 uint32_t ComputeNatPunchWaveIntervalMs(
     const NatPunchAttemptPolicy& policy, size_t targetCount,
     uint64_t punchBudgetMs);
+
+// Keeps attempt 1 on the proven no-delay baseline. Attempts 2 and 3 try the
+// frp-style receiver-first variants with TTL 7 and TTL 4 respectively.
+NatPunchExecutionPolicy ResolveNatPunchExecutionPolicy(
+    NatPunchPlanMode mode, bool localIsInitiator,
+    uint16_t attemptNumber);
+const char* NatPunchExecutionRoleName(NatPunchExecutionRole role);
+
+// Sender delay may consume at most one quarter of the remaining attempt, so
+// short punch timeouts retain time for actual probing and confirmation.
+uint32_t LimitNatPunchSenderDelayMs(uint32_t requestedDelayMs,
+                                    uint64_t remainingAttemptMs);
 
 // Builds a unique, CSPRNG-seeded target sequence on the peer's observed
 // public IPv4. Known STUN ports are tried first; remaining ports are sampled
