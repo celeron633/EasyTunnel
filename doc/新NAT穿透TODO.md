@@ -16,6 +16,67 @@ TUN-over-UDP 数据面不变。
 - 困难 NAT 直连失败后，仍可按配置继续尝试 IPv6 或 IPv4 Relay。
 - TUN 适配器、TUN 地址配置和现有隧道数据包格式不在本次重构范围内。
 
+## 开发 Roadmap
+
+### 阶段 0：新协议和基础策略
+
+状态：已完成。
+
+- 双 STUN 同 socket 探测和 NAT mapping behavior 分类。
+- 精简会合协议以及 session、attempt、token 和开始屏障。
+- easy/easy Direct、regular/easy Range 和 hard/hard regular dual-range。
+- PUNCH 认证、winner socket 接管以及 IPv6/Relay 顺序回退。
+
+### 阶段 1：公网实网验证
+
+状态：进行中。
+
+- GitHub Actions 对 `new-nat-punch` 同时构建 Windows/Linux 产物并运行测试。
+- 使用 `txy2.lvsrobot.top:3479` 和 `txy.lvsrobot.top:3479` 作为两台独立 STUN。
+- 在家庭宽带、公司网络和手机热点之间测试 Direct、Range 和 dual-range。
+- 记录双方 STUN A/B 映射、delta、计划名称、目标数、成功端点和总耗时。
+- 验收条件：现有三种策略均有真实网络样本，失败可以定位到 STUN、分类、屏障或 PUNCH。
+
+### 阶段 2：诊断和可观测性
+
+状态：待开始。
+
+- GUI/TUI 增加 STUN 测试入口，显示 A/B 映射、delta、分类和推荐计划。
+- 为一次穿透生成可关联的 attempt 日志摘要，避免只能拼接多行日志排障。
+- 区分 STUN 超时、策略不支持、屏障超时、PUNCH 超时和回退结果。
+
+### 阶段 3：多 attempt 策略框架
+
+状态：待开始。
+
+- 增加 `attempt_limit`，每次重试使用新的 attempt ID，拒绝旧 attempt 报文。
+- 增加 balanced/aggressive profile，控制范围大小、发送间隔和总预算。
+- 按 Direct、小范围 Range、扩大 Range 的顺序尝试，再进入 Random 或其他回退策略。
+
+### 阶段 4：frp Mode 2 类 Random receiver
+
+状态：待开始。
+
+- 困难 NAT 端创建有上限的随机监听 socket，并选择第一个成功 socket。
+- 对端在限定数量、速率和时间预算内探测随机目标端口。
+- 增加 socket、带宽、突发速率和取消流程压力测试。
+
+### 阶段 5：frp Mode 4 类 mixed random/range
+
+状态：待开始。
+
+- regular 一端执行范围预测，random 一端使用受控多 socket 策略。
+- 评估低 TTL 预打洞和 sender/receiver 延迟发送组合的实际收益。
+- 保证任一策略失败后都能及时释放 socket 并继续 IPv6/Relay。
+
+### 阶段 6：策略学习和发布收敛
+
+状态：待开始。
+
+- 收集不含敏感端点明文的成功/失败统计，按 NAT 特征调整策略优先级。
+- 完成协议不兼容、乱序、重复、过期 attempt 和资源上限测试。
+- 完成 Windows/Linux、重连、关闭以及长期 liveness 回归后再合并主分支。
+
 ## 当前完成情况
 
 ### 已完成
