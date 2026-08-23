@@ -94,6 +94,148 @@ uint16_t EndpointPort(const UdpEndpoint& endpoint) {
     return ntohs(reinterpret_cast<const sockaddr_in*>(
         &endpoint.addr)->sin_port);
 }
+
+bool WaitForNatPeerInfo(socket_t sock, RendezvousClient* rendezvous,
+                        const NatPunchSession& session,
+                        const std::string& peerId) {
+    std::vector<uint8_t> buffer(2048);
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        sockaddr_storage sourceAddress{};
+        socket_len_t sourceLen =
+            static_cast<socket_len_t>(sizeof(sourceAddress));
+        const int received = recvfrom(sock,
+            reinterpret_cast<char*>(buffer.data()),
+            static_cast<int>(buffer.size()), 0,
+            reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
+        if (received < 0) {
+            const int socketError = GetSocketError();
+            if (IsRecvTimeout(socketError)
+                || IsUdpDestinationUnreachable(socketError)) {
+                continue;
+            }
+            return false;
+        }
+        const RendezvousEvent event = rendezvous->HandlePacket(
+            FromSockaddr(sourceAddress, sourceLen), buffer.data(),
+            static_cast<size_t>(received));
+        if (event.type == RendezvousEventType::NatPeerInfo
+            && event.sessionId == session.sessionId
+            && event.attemptId == session.attemptId
+            && event.peerId == peerId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+struct InterruptedPunchResult {
+    bool setup = false;
+    bool peerInfoReceived = false;
+    bool punched = false;
+    NatPunchAttemptResult attempt;
+    std::string error;
+};
+
+InterruptedPunchResult RunInterruptedRandomReceiver(
+        Config easyConfig, Config randomConfig,
+        const UdpEndpoint& rendezvousEndpoint, bool cancelAtBarrier,
+        int sequence) {
+    InterruptedPunchResult result;
+    easyConfig.room_id = "interrupt-" + std::to_string(sequence);
+    easyConfig.peer_id = "easy";
+    easyConfig.target_peer_id = "random";
+    randomConfig.room_id = easyConfig.room_id;
+    randomConfig.peer_id = "random";
+    randomConfig.target_peer_id.clear();
+    randomConfig.punch_timeout = cancelAtBarrier ? 5 : 2;
+
+    socket_t easyControl = kInvalidSocket;
+    socket_t randomControl = kInvalidSocket;
+    UdpEndpoint easyServer{};
+    UdpEndpoint randomServer{};
+    std::string easyError;
+    if (!OpenRendezvousSocket(
+            easyConfig, 100, &easyControl, &easyServer, &easyError)
+        || !OpenRendezvousSocket(
+            randomConfig, 100, &randomControl, &randomServer,
+            &result.error)) {
+        CloseSocket(easyControl);
+        CloseSocket(randomControl);
+        return result;
+    }
+
+    std::atomic<bool> running{true};
+    UdpEndpoint easyPeer{};
+    UdpEndpoint randomPeer{};
+    std::string easyPeerId;
+    std::string randomPeerId;
+    std::vector<TraversalMode> easyModes;
+    std::vector<TraversalMode> randomModes;
+    NatPunchSession easySession;
+    NatPunchSession randomSession;
+    bool easySelected = false;
+    bool randomSelected = false;
+    std::thread easySelectThread([&] {
+        easySelected = SelectPeer(easyControl, easyConfig, easyServer,
+            running, &easyPeer, &easyPeerId, &easyModes,
+            &easySession, &easyError);
+    });
+    std::thread randomSelectThread([&] {
+        randomSelected = SelectPeer(randomControl, randomConfig,
+            randomServer, running, &randomPeer, &randomPeerId,
+            &randomModes, &randomSession, &result.error);
+    });
+    easySelectThread.join();
+    randomSelectThread.join();
+    if (!easySelected || !randomSelected) {
+        running.store(false);
+        CloseSocket(easyControl);
+        CloseSocket(randomControl);
+        return result;
+    }
+
+    UdpEndpoint easyPunchEndpoint{};
+    socket_t easyPunch = OpenBoundSocket("127.0.0.1", &easyPunchEndpoint);
+    if (easyPunch == kInvalidSocket) {
+        CloseSocket(easyControl);
+        CloseSocket(randomControl);
+        return result;
+    }
+    result.setup = true;
+    RendezvousClient easyRendezvous(easyConfig, rendezvousEndpoint);
+    std::thread randomPunchThread([&] {
+        result.punched = PunchAdaptiveNat(&randomControl, randomConfig,
+            randomServer, running, randomPeerId, randomSession,
+            &randomPeer, &result.error, &result.attempt, 3);
+    });
+
+    if (easyRendezvous.SendNatInfo(easyPunch, easyPeerId,
+            easySession.sessionId, easySession.attemptId,
+            NatMappingBehaviorName(NatMappingBehavior::EndpointIndependent),
+            easyPunchEndpoint, easyPunchEndpoint, "-")) {
+        result.peerInfoReceived = WaitForNatPeerInfo(
+            easyPunch, &easyRendezvous, easySession, easyPeerId);
+    }
+    if (!cancelAtBarrier && result.peerInfoReceived) {
+        easyRendezvous.SendNatArmed(easyPunch, easyPeerId,
+            easySession.sessionId, easySession.attemptId);
+    }
+    if (cancelAtBarrier) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        running.store(false);
+    }
+    randomPunchThread.join();
+
+    running.store(false);
+    UnregisterRendezvous(easyControl, easyConfig, easyServer);
+    UnregisterRendezvous(randomControl, randomConfig, randomServer);
+    CloseSocket(easyPunch);
+    CloseSocket(easyControl);
+    CloseSocket(randomControl);
+    return result;
+}
 }  // namespace
 
 int main() {
@@ -347,6 +489,33 @@ int main() {
                && !IsRetryableNatPunchOutcome(
                    NatPunchAttemptOutcome::StrategyUnsupported),
            "only transient NAT attempt outcomes schedule another attempt");
+
+    const InterruptedPunchResult cancelled = RunInterruptedRandomReceiver(
+        aConfig, bConfig, rendezvousEndpoint, true, 1);
+    Expect(cancelled.setup && cancelled.peerInfoReceived
+               && !cancelled.punched
+               && cancelled.attempt.outcome
+                      == NatPunchAttemptOutcome::Stopped
+               && cancelled.attempt.plan == "random-receiver"
+               && cancelled.attempt.socketCount == 256,
+           "cancellation closes a maximum random receiver pool at the barrier");
+    if (cancelled.attempt.outcome != NatPunchAttemptOutcome::Stopped) {
+        std::cerr << "Cancellation error: " << cancelled.error << '\n';
+    }
+
+    const InterruptedPunchResult timedOut = RunInterruptedRandomReceiver(
+        aConfig, bConfig, rendezvousEndpoint, false, 2);
+    Expect(timedOut.setup && timedOut.peerInfoReceived
+               && !timedOut.punched
+               && timedOut.attempt.outcome
+                      == NatPunchAttemptOutcome::PunchTimeout
+               && timedOut.attempt.plan == "random-receiver"
+               && timedOut.attempt.socketCount == 256
+               && timedOut.attempt.datagramsSent > 0,
+           "PUNCH timeout closes a maximum random receiver pool");
+    if (timedOut.attempt.outcome != NatPunchAttemptOutcome::PunchTimeout) {
+        std::cerr << "Timeout error: " << timedOut.error << '\n';
+    }
     if (aPunched) {
         const std::string legacyPunch = MakeControlMessage(
             "PUNCH", {aConfig.room_id, aPeerId});

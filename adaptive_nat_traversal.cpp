@@ -1,17 +1,13 @@
 #include "adaptive_nat_traversal.h"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
 #include <vector>
-
-#ifndef _WIN32
-#include <poll.h>
-#endif
 
 #include "log.h"
 #include "nat_protocol.h"
 #include "nat_punch_plan.h"
+#include "nat_punch_socket_pool.h"
 #include "secure_random.h"
 #include "stun_client.h"
 
@@ -123,102 +119,6 @@ bool ReceiveDatagram(socket_t sock, std::vector<uint8_t>* buffer,
     return false;
 }
 
-socket_t OpenBoundIpv4UdpSocket(int* socketError) {
-    socket_t sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock == kInvalidSocket) {
-        if (socketError != nullptr) *socketError = GetSocketError();
-        return sock;
-    }
-    sockaddr_in local{};
-    local.sin_family = AF_INET;
-    local.sin_addr.s_addr = htonl(INADDR_ANY);
-    local.sin_port = 0;
-    if (bind(sock, reinterpret_cast<const sockaddr*>(&local),
-             static_cast<socket_len_t>(sizeof(local))) != 0) {
-        if (socketError != nullptr) *socketError = GetSocketError();
-        CloseSocket(sock);
-        return kInvalidSocket;
-    }
-    SetSocketRecvTimeoutMs(sock, kReceiveTimeoutMs);
-    return sock;
-}
-
-void CloseSocketList(std::vector<socket_t>* sockets,
-                     socket_t keep = kInvalidSocket) {
-    for (socket_t& sock : *sockets) {
-        if (sock != keep) CloseSocket(sock);
-    }
-    sockets->clear();
-}
-
-bool ReceiveDatagramFromAny(const std::vector<socket_t>& sockets,
-                            int timeoutMs,
-                            std::vector<uint8_t>* buffer,
-                            socket_t* receivingSocket,
-                            UdpEndpoint* source, int* received,
-                            std::string* error) {
-    *receivingSocket = kInvalidSocket;
-    *received = -1;
-    if (sockets.empty()) {
-        *error = "No NAT punch sockets are available";
-        return false;
-    }
-#ifdef _WIN32
-    std::vector<WSAPOLLFD> descriptors;
-    descriptors.reserve(sockets.size());
-    for (const socket_t sock : sockets) {
-        WSAPOLLFD descriptor{};
-        descriptor.fd = sock;
-        descriptor.events = POLLRDNORM;
-        descriptors.push_back(descriptor);
-    }
-    const int ready = WSAPoll(descriptors.data(),
-        static_cast<ULONG>(descriptors.size()), timeoutMs);
-    if (ready == SOCKET_ERROR) {
-        const int socketError = GetSocketError();
-        if (socketError == WSAEINTR) return true;
-        *error = "UDP poll failed during adaptive NAT traversal. err="
-            + std::to_string(socketError);
-        return false;
-    }
-    if (ready == 0) return true;
-    for (size_t i = 0; i < descriptors.size(); ++i) {
-        if ((descriptors[i].revents
-             & (POLLRDNORM | POLLERR | POLLHUP)) == 0) {
-            continue;
-        }
-        *receivingSocket = sockets[i];
-        return ReceiveDatagram(
-            sockets[i], buffer, source, received, error);
-    }
-#else
-    std::vector<pollfd> descriptors;
-    descriptors.reserve(sockets.size());
-    for (const socket_t sock : sockets) {
-        pollfd descriptor{};
-        descriptor.fd = sock;
-        descriptor.events = POLLIN;
-        descriptors.push_back(descriptor);
-    }
-    const int ready = poll(descriptors.data(), descriptors.size(), timeoutMs);
-    if (ready < 0) {
-        if (errno == EINTR) return true;
-        *error = "UDP poll failed during adaptive NAT traversal. err="
-            + std::to_string(errno);
-        return false;
-    }
-    if (ready == 0) return true;
-    for (size_t i = 0; i < descriptors.size(); ++i) {
-        if ((descriptors[i].revents & (POLLIN | POLLERR | POLLHUP)) == 0) {
-            continue;
-        }
-        *receivingSocket = sockets[i];
-        return ReceiveDatagram(
-            sockets[i], buffer, source, received, error);
-    }
-#endif
-    return true;
-}
 }  // namespace
 
 const char* NatPunchAttemptOutcomeName(NatPunchAttemptOutcome outcome) {
@@ -510,20 +410,15 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         return fail(NatPunchAttemptOutcome::ControlError, *error);
     }
 
-    std::vector<socket_t> punchSockets{punchSocket};
+    NatPunchSocketPool punchSockets(punchSocket, kReceiveTimeoutMs);
     if (plan.mode == NatPunchPlanMode::RandomReceiver) {
-        while (punchSockets.size() < plan.receiverSocketCount) {
-            int socketError = 0;
-            socket_t auxiliary = OpenBoundIpv4UdpSocket(&socketError);
-            if (auxiliary == kInvalidSocket) {
-                Log(LogLevel::Warn,
-                    "Stopped growing random receiver socket pool at "
-                    + std::to_string(punchSockets.size())
-                    + "/" + std::to_string(plan.receiverSocketCount)
-                    + ". err=" + std::to_string(socketError));
-                break;
-            }
-            punchSockets.push_back(auxiliary);
+        int socketError = 0;
+        if (!punchSockets.GrowTo(plan.receiverSocketCount, &socketError)) {
+            Log(LogLevel::Warn,
+                "Stopped growing random receiver socket pool at "
+                + std::to_string(punchSockets.size())
+                + "/" + std::to_string(plan.receiverSocketCount)
+                + ". err=" + std::to_string(socketError));
         }
     }
     attempt.plan = NatPunchPlanModeName(plan.mode);
@@ -559,14 +454,12 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         UdpEndpoint source{};
         int received = -1;
         if (!ReceiveDatagram(punchSocket, &buffer, &source, &received, error)) {
-            CloseSocketList(&punchSockets);
             return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
         if (received < 0) continue;
         const RendezvousEvent event = rendezvous.HandlePacket(
             source, buffer.data(), static_cast<size_t>(received));
         if (event.type == RendezvousEventType::Error) {
-            CloseSocketList(&punchSockets);
             return fail(NatPunchAttemptOutcome::ControlError, event.error);
         }
         if (event.type == RendezvousEventType::NatStart
@@ -577,7 +470,6 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     }
     if (!startReceived) {
         const bool stillRunning = running.load();
-        CloseSocketList(&punchSockets);
         return fail(stillRunning
                         ? NatPunchAttemptOutcome::BarrierTimeout
                         : NatPunchAttemptOutcome::Stopped,
@@ -589,7 +481,6 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     std::string randomError;
     const std::string nonce = SecureRandomHex(16, &randomError);
     if (nonce.empty()) {
-        CloseSocketList(&punchSockets);
         return fail(NatPunchAttemptOutcome::ControlError,
                     "Cannot create NAT punch nonce: " + randomError);
     }
@@ -631,7 +522,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                     nextPunch = now + punchInterval;
                 }
             } else if (randomReceiver) {
-                for (const socket_t senderSocket : punchSockets) {
+                for (const socket_t senderSocket : punchSockets.sockets()) {
                     for (const UdpEndpoint& target : plan.targets) {
                         if (attempt.datagramsSent >= policy.datagramBudget) break;
                         Send(senderSocket, target, punch);
@@ -659,10 +550,9 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                 static_cast<uint32_t>(kReceiveTimeoutMs),
                 attempt.waveIntervalMs))
             : kReceiveTimeoutMs;
-        if (!ReceiveDatagramFromAny(
-                punchSockets, receiveTimeoutMs, &buffer,
+        if (!punchSockets.Receive(
+                receiveTimeoutMs, &buffer,
                 &receivingSocket, &source, &received, error)) {
-            CloseSocketList(&punchSockets);
             return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
         if (received < 0) continue;
@@ -670,7 +560,6 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         const RendezvousEvent rendezvousEvent = rendezvous.HandlePacket(
             source, buffer.data(), static_cast<size_t>(received));
         if (rendezvousEvent.type == RendezvousEventType::Error) {
-            CloseSocketList(&punchSockets);
             return fail(NatPunchAttemptOutcome::ControlError,
                         rendezvousEvent.error);
         }
@@ -701,7 +590,11 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
             }
         }
         *peer = source;
-        CloseSocketList(&punchSockets, receivingSocket);
+        receivingSocket = punchSockets.ReleaseWinner(receivingSocket);
+        if (receivingSocket == kInvalidSocket) {
+            return fail(NatPunchAttemptOutcome::SocketError,
+                        "NAT punch winner is not owned by the socket pool");
+        }
         CloseSocket(*sock);
         *sock = receivingSocket;
         attempt.outcome = NatPunchAttemptOutcome::Success;
@@ -713,7 +606,6 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
     }
 
     const bool stillRunning = running.load();
-    CloseSocketList(&punchSockets);
     return fail(stillRunning ? NatPunchAttemptOutcome::PunchTimeout
                              : NatPunchAttemptOutcome::Stopped,
                 stillRunning ? "Adaptive NAT punch timed out"

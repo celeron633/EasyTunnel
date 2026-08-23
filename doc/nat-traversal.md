@@ -161,6 +161,11 @@ receiver 同时轮询整个 socket pool，首个收到合法 session/attempt/tok
 只探测一次，receiver 的重复波次仍受 profile 报文预算限制。当前基线不使用低 TTL，
 也不额外等待 frp 的 3 秒 sender delay。
 
+socket pool 由单次 attempt 独占的 RAII 对象管理。成功时只释放 winner 的所有权；
+屏障取消、PUNCH 超时、协议错误和资源不足等其他退出路径都会自动关闭主 socket 与
+全部辅助 socket。自动化测试覆盖连续 12 轮最大 256-socket 池、确定性的中途创建失败、
+真实会合屏障取消以及发送阶段超时。
+
 ### 尚未完成
 
 mixed random/range、random/random 和 multi-public-IP 仍在

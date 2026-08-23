@@ -70,11 +70,12 @@ frp xTCP 的流程、五种模式和源码索引见
 
 ### 阶段 4：frp Mode 2 类 Random receiver
 
-状态：进行中。
+状态：已完成。
 
 - [x] 困难 NAT 端创建有上限的随机监听 socket，并选择第一个成功 socket。
 - [x] 对端在限定数量、速率和时间预算内探测不重复的随机目标端口。
-- [ ] 增加重复执行、资源耗尽、超时和取消流程压力测试。
+- [x] 增加重复执行、资源耗尽、超时和取消流程压力测试；socket pool 使用 RAII
+      统一管理，只有 winner 显式移交数据面。
 
 ### 阶段 5：frp Mode 4 类 mixed random/range
 
@@ -151,6 +152,8 @@ frp xTCP 的流程、五种模式和源码索引见
       将 winner socket 原样交给 TUN 数据面。
 - [x] 集成测试覆盖 Aggressive 最大 256 socket、1000 随机目标、真实 registry 屏障、
       attempt/token 校验和 winner 接管。
+- [x] socket pool 测试连续 12 轮创建/释放 256 socket，并注入辅助 socket 创建失败；
+      集成测试覆盖最大池在 barrier 取消和 PUNCH 超时后的自动回收。
 
 ### 待完成
 
@@ -173,4 +176,5 @@ frp xTCP 的流程、五种模式和源码索引见
 - [ ] 补充计划对称性、UDP 端口边界、乱序/重复控制消息和过期 attempt 测试。
 - [ ] 完成本机双客户端直连、IPv6、Relay、重连和关闭流程回归。
 - [ ] 使用两台公网 STUN，在多种家用路由器和手机热点上记录分类、策略及成功率。
-- [ ] 对 Random 策略执行 socket、带宽、突发速率和超时压力测试。
+- [x] 对 Random 策略执行 socket 生命周期、资源耗尽、取消和超时压力测试；带宽与
+      突发速率继续由 profile 报文预算和发送间隔约束，发布前仍需补公网长期负载样本。

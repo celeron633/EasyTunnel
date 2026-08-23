@@ -130,6 +130,7 @@ if(BUILD_TESTING)
         tests/adaptive_nat_integration_test.cpp
         adaptive_nat_traversal.cpp
         nat_punch_plan.cpp
+        nat_punch_socket_pool.cpp
         stun_client.cpp
         secure_random.cpp
         peer_selection.cpp
@@ -152,6 +153,24 @@ if(BUILD_TESTING)
     add_test(NAME adaptive_nat_integration
         COMMAND EasyTunnel_adaptive_nat_integration_tests)
     set_tests_properties(adaptive_nat_integration PROPERTIES TIMEOUT 30)
+
+    add_executable(EasyTunnel_nat_punch_socket_pool_tests
+        tests/nat_punch_socket_pool_test.cpp
+        nat_punch_socket_pool.cpp
+        util.cpp
+        config.cpp
+        log.cpp)
+    target_include_directories(
+        EasyTunnel_nat_punch_socket_pool_tests PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(EasyTunnel_nat_punch_socket_pool_tests PRIVATE
+        Threads::Threads spdlog::spdlog_header_only)
+    if(WIN32)
+        target_link_libraries(
+            EasyTunnel_nat_punch_socket_pool_tests PRIVATE ws2_32 bcrypt)
+    endif()
+    add_test(NAME nat_punch_socket_pool
+        COMMAND EasyTunnel_nat_punch_socket_pool_tests)
+    set_tests_properties(nat_punch_socket_pool PROPERTIES TIMEOUT 30)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -168,6 +187,7 @@ set(COMMON_SOURCES
     secure_random.cpp
     stun_client.cpp
     nat_punch_plan.cpp
+    nat_punch_socket_pool.cpp
     adaptive_nat_traversal.cpp
     rendezvous_client.cpp
     peer_selection.cpp
