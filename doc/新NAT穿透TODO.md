@@ -37,7 +37,7 @@ frp xTCP 的流程、五种模式和源码索引见
 状态：进行中。
 
 - GitHub Actions 对 `new-nat-punch` 同时构建 Windows/Linux 产物并运行测试。
-- 使用 `txy2.lvsrobot.top:3479` 和 `txy.lvsrobot.top:3479` 作为两台独立 STUN。
+- 使用部署在不同公网 IPv4 服务器上的两套独立 STUN 服务进行实网验证。
 - 2026-08-23 完成第一组公网 Direct 样本：本端 A/B 映射均为
   `218.17.213.3:60738`、delta 为 0，计划为 `direct`、目标数为 1，最终从
   `163.125.4.38:1801` 收到认证打洞包并建立隧道。
