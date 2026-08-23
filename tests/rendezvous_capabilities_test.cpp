@@ -203,6 +203,61 @@ int main() {
                && fields[0] == natSession && fields[1] == natAttempt,
            "responder receives synchronized NAT start");
 
+    registry.Handle(aEndpoint, "NAT_RETRY",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_RETRY_WAIT"
+               && fields.size() == 2 && fields[0] == natSession
+               && fields[1] == natAttempt,
+           "first retry request waits for its peer");
+    registry.Handle(bEndpoint, "NAT_RETRY",
+        {"common", "b", "a", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    std::string nextAttempt;
+    std::string nextPunchToken;
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_ATTEMPT"
+               && fields.size() == 5 && fields[0] == natSession
+               && fields[1] != natAttempt && fields[2] == "initiator"
+               && fields[3] == "2" && fields[4] != natPunchToken,
+           "initiator receives a fresh retry attempt and token");
+    if (fields.size() == 5) {
+        nextAttempt = fields[1];
+        nextPunchToken = fields[4];
+    }
+    Expect(ReceiveControl(b, &type, &fields) && type == "NAT_ATTEMPT"
+               && fields.size() == 5 && fields[0] == natSession
+               && fields[1] == nextAttempt && fields[2] == "responder"
+               && fields[4] == nextPunchToken,
+           "responder receives the same fresh retry attempt");
+
+    const std::string attemptPacket = MakeControlMessage("NAT_ATTEMPT",
+        {natSession, nextAttempt, "initiator", "2", nextPunchToken});
+    const RendezvousEvent parsedAttempt = responseParser.HandlePacket(
+        aEndpoint, reinterpret_cast<const uint8_t*>(attemptPacket.data()),
+        attemptPacket.size());
+    Expect(parsedAttempt.type == RendezvousEventType::NatAttempt
+               && parsedAttempt.sessionId == natSession
+               && parsedAttempt.attemptId > parsedPeer.attemptId
+               && parsedAttempt.natPunchToken == nextPunchToken,
+           "client parses synchronized retry metadata");
+
+    registry.Handle(aEndpoint, "NAT_RETRY",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_ATTEMPT"
+               && fields[1] == nextAttempt,
+           "stale retry request resends the current attempt");
+
+    registry.Handle(aPunchEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt, "2",
+         "endpoint-independent", "198.51.100.10", "40000",
+         "198.51.100.10", "40000", "-", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields) && type == "ERROR"
+               && fields.size() == 1
+               && fields[0] == "invalid-nat-session",
+           "old attempt NAT reports are rejected after retry synchronization");
+
     Register(&registry, cEndpoint, "incompatible", "c", "ipv6");
     Register(&registry, dEndpoint, "incompatible", "d", "ipv4_relay");
     Expect(ReceiveControl(c, &type, &fields) && type == "REGISTERED",

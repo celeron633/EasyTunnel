@@ -55,6 +55,7 @@ struct Config {
     uint16_t peer_timeout = 45;
     bool dummy_traffic_enabled = false;
     uint16_t punch_timeout = 30;
+    uint16_t nat_punch_attempt_limit = 3;
     std::vector<StunServerConfig> stun_servers;
     std::vector<TraversalModeSetting> traversal_modes = DefaultTraversalModes();
     bool ipv6_accept_inbound = false;

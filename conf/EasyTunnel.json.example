@@ -13,6 +13,7 @@
   "peer_timeout": 45,
   "dummy_traffic_enabled": false,
   "punch_timeout": 30,
+  "nat_punch_attempt_limit": 3,
   "stun_servers": [
     { "host": "198.51.100.10", "port": 3478 },
     { "host": "203.0.113.10", "port": 3478 }

@@ -23,6 +23,8 @@ TUN 适配器、TUN IPv4 数据格式和连接后的收发循环没有变化。�
 客户端必须配置两台解析到不同公网 IPv4 的 STUN 服务：
 
 ```json
+"punch_timeout": 30,
+"nat_punch_attempt_limit": 3,
 "stun_servers": [
   { "host": "stun-a.example.com", "port": 3478 },
   { "host": "stun-b.example.com", "port": 3478 }
@@ -81,6 +83,18 @@ NAT_INFO(room, self, peer, session, attempt, version,
 `NAT_ARMED_ACK`，双方都 armed 后向两个 punch socket 发送 `NAT_START`。重复的
 `NAT_INFO`、`NAT_ARMED` 会重发当前响应，以覆盖 UDP 丢包。
 
+一次可重试失败后，双方从原控制 socket 重复发送：
+
+```text
+NAT_RETRY(room, self, peer, session, current_attempt, auth_token)
+```
+
+第一端收到 `NAT_RETRY_WAIT`；双方都请求后，服务器在同一 session 下分配新的全局
+attempt ID 和新的 punch token，清空双方 NAT_INFO/ARMED 状态，再通过
+`NAT_ATTEMPT(session, attempt, role, version, punch_token)` 同步给两端。丢失
+`NAT_ATTEMPT` 的客户端继续发送旧 `NAT_RETRY` 时，服务器会重发当前 attempt；旧
+attempt 的 `NAT_INFO`、`NAT_ARMED` 和 Peer PUNCH 均不再有效。
+
 ## 当前打洞计划
 
 ### easy/easy
@@ -133,9 +147,12 @@ Punch token 用于阻止无关 UDP 包误接管连接，不加密后续 TUN 流�
 
 ## 超时与回退
 
-一次 adaptive NAT 流程（STUN、信息交换、屏障和直连确认）共享 `punch_timeout`。
-当前只执行一次 attempt；多 attempt 限制和 aggressive profile 尚未实现。失败后按
-`traversal_modes` 顺序继续 IPv6 或 IPv4 Relay。
+单次 adaptive NAT attempt（STUN、信息交换、屏障和直连确认）共享
+`punch_timeout`。`nat_punch_attempt_limit` 范围为 1～10、默认 3，包含第一次尝试；
+每次重试重新创建 punch socket、重新执行 STUN，并使用新 attempt ID 和 token。
+STUN 超时、Peer 信息超时、屏障超时和 PUNCH 超时允许重试；无效配置、确定不支持的
+NAT 组合和控制协议错误不会盲目重试。达到上限后按 `traversal_modes` 继续 IPv6 或
+IPv4 Relay。balanced/aggressive profile 和逐轮扩大 Range 尚未实现。
 
 `keepalive_interval` 和 `peer_timeout` 仅属于连接后的 NAT liveness，不参与打洞计划。
 

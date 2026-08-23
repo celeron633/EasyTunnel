@@ -98,6 +98,13 @@ stateDiagram-v2
     OneArmed --> Started: 第二端 NAT_ARMED
     Started --> Started: 重复 NAT_ARMED / 重发 NAT_START
     InfoReady --> InfoReady: 重复 NAT_INFO / 重发 NAT_PEER_INFO
+    Paired --> RetryWaiting: attempt 失败 / 第一端 NAT_RETRY
+    OneReported --> RetryWaiting: attempt 失败 / 第一端 NAT_RETRY
+    InfoReady --> RetryWaiting: attempt 失败 / 第一端 NAT_RETRY
+    OneArmed --> RetryWaiting: attempt 失败 / 第一端 NAT_RETRY
+    Started --> RetryWaiting: attempt 失败 / 第一端 NAT_RETRY
+    RetryWaiting --> Paired: 第二端 NAT_RETRY / 新 attempt + token
+    RetryWaiting --> RetryWaiting: 重复旧 NAT_RETRY / 重发当前状态
     Started --> [*]: UNREG / client timeout / pairing reset
 ```
 
@@ -134,10 +141,12 @@ liveness，不影响打洞计划。
 |---|---|---|
 | 首次会合响应 | 5 秒 | `Rendezvous server did not respond` |
 | 主动端选 Peer | `punch_timeout` | Error |
-| Adaptive NAT 全流程 | `punch_timeout` | 下一个策略 |
+| 单次 Adaptive NAT attempt | `punch_timeout` | 重试或下一个策略 |
+| 等待双方同步新 attempt | `punch_timeout` + 5 秒 | 下一个策略 |
 | IPv6 | `ipv6_fallback_timeout` | 下一个策略 |
 | Relay 协商 | `punch_timeout` | 下一个策略 |
 | 已连接 Peer liveness | `peer_timeout` | Error |
 
-当前 Adaptive NAT 只有一个 attempt。多 attempt、attempt limit 和 aggressive profile
-仍在 [新 NAT 穿透 TODO](新NAT穿透TODO.md)。
+Adaptive NAT 最多执行 `nat_punch_attempt_limit` 次 attempt（默认 3，最大 10），
+每次使用新的 attempt ID 和 punch token。逐轮扩大 Range 以及 balanced/aggressive
+profile 仍在 [新 NAT 穿透 TODO](新NAT穿透TODO.md)。

@@ -41,8 +41,18 @@ struct NatPunchAttemptResult {
 };
 
 const char* NatPunchAttemptOutcomeName(NatPunchAttemptOutcome outcome);
+bool IsRetryableNatPunchOutcome(NatPunchAttemptOutcome outcome);
 std::string FormatNatPunchAttemptResult(
     const NatPunchAttemptResult& result);
+
+// Synchronizes a new attempt ID and punch token through the rendezvous
+// control socket after both peers finish a retryable failed attempt.
+bool RequestNextNatPunchAttempt(socket_t sock, const Config& cfg,
+                                const UdpEndpoint& server,
+                                const std::atomic<bool>& running,
+                                const std::string& matchedPeerId,
+                                NatPunchSession* session,
+                                std::string* error);
 
 // Runs the STUN-based adaptive NAT punch on a dedicated UDP socket. The
 // existing rendezvous socket is replaced only after the punch succeeds; on

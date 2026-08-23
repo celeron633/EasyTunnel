@@ -232,6 +232,32 @@ int main() {
                && bSession.role == NatPunchRole::Responder,
            "paired clients receive one complementary NAT session");
 
+    const uint64_t initialAttemptId = aSession.attemptId;
+    const std::string initialPunchToken = aSession.punchToken;
+    bool aRetrySynchronized = false;
+    bool bRetrySynchronized = false;
+    if (aSelected && bSelected) {
+        std::thread aRetryThread([&] {
+            aRetrySynchronized = RequestNextNatPunchAttempt(
+                aSocket, aConfig, aServer, clientsRunning, aPeerId,
+                &aSession, &aError);
+        });
+        std::thread bRetryThread([&] {
+            bRetrySynchronized = RequestNextNatPunchAttempt(
+                bSocket, bConfig, bServer, clientsRunning, bPeerId,
+                &bSession, &bError);
+        });
+        aRetryThread.join();
+        bRetryThread.join();
+    }
+    Expect(aRetrySynchronized && bRetrySynchronized
+               && aSession.sessionId == bSession.sessionId
+               && aSession.attemptId == bSession.attemptId
+               && aSession.attemptId > initialAttemptId
+               && aSession.punchToken == bSession.punchToken
+               && aSession.punchToken != initialPunchToken,
+           "both clients synchronize a fresh attempt ID and punch token");
+
     bool aPunched = false;
     bool bPunched = false;
     NatPunchAttemptResult aAttempt;
@@ -291,6 +317,14 @@ int main() {
                && std::string(NatPunchAttemptOutcomeName(
                       NatPunchAttemptOutcome::PunchTimeout)) == "punch-timeout",
            "diagnostic outcome names stay stable for log analysis");
+    Expect(IsRetryableNatPunchOutcome(NatPunchAttemptOutcome::StunTimeout)
+               && IsRetryableNatPunchOutcome(
+                   NatPunchAttemptOutcome::BarrierTimeout)
+               && IsRetryableNatPunchOutcome(
+                   NatPunchAttemptOutcome::PunchTimeout)
+               && !IsRetryableNatPunchOutcome(
+                   NatPunchAttemptOutcome::StrategyUnsupported),
+           "only transient NAT attempt outcomes schedule another attempt");
     if (aPunched) {
         const std::string legacyPunch = MakeControlMessage(
             "PUNCH", {aConfig.room_id, aPeerId});

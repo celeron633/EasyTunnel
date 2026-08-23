@@ -25,6 +25,7 @@ struct ClientConfig {
     int peerTimeout = 45;
     bool dummyTrafficEnabled = false;
     int punchTimeout = 30;
+    int natPunchAttemptLimit = 3;
     std::vector<StunServerConfig> stunServers{
         {"", 3478},
         {"", 3478},

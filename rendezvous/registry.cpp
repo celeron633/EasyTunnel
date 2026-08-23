@@ -39,6 +39,7 @@ struct Client {
     std::string natSessionId;
     std::string natPunchToken;
     uint64_t natAttemptId = 0;
+    bool natRetryRequested = false;
     NatPunchInfo natPunch;
 };
 using Room = std::unordered_map<std::string, Client>;
@@ -50,6 +51,7 @@ void ResetPairing(Client* client) {
     client->natSessionId.clear();
     client->natPunchToken.clear();
     client->natAttemptId = 0;
+    client->natRetryRequested = false;
     client->natPunch = {};
     client->ipv6Joined = false;
 }
@@ -221,18 +223,40 @@ struct RendezvousRegistry::Impl {
         SendMessage(sock, source, "CLIENTS", entries);
     }
 
-    bool ValidateNatSession(Room& room, Room::iterator current,
-                            const std::string& targetId,
-                            const std::string& sessionId,
-                            uint64_t attemptId, Room::iterator* target) {
+    bool ValidateNatPair(Room& room, Room::iterator current,
+                         const std::string& targetId,
+                         const std::string& sessionId,
+                         Room::iterator* target) {
         *target = room.find(targetId);
         return *target != room.end() && *target != current
             && current->second.pairedWith == targetId
             && (*target)->second.pairedWith == current->first
             && current->second.natSessionId == sessionId
-            && (*target)->second.natSessionId == sessionId
+            && (*target)->second.natSessionId == sessionId;
+    }
+
+    bool ValidateNatSession(Room& room, Room::iterator current,
+                            const std::string& targetId,
+                            const std::string& sessionId,
+                            uint64_t attemptId, Room::iterator* target) {
+        return ValidateNatPair(room, current, targetId, sessionId, target)
             && current->second.natAttemptId == attemptId
             && (*target)->second.natAttemptId == attemptId;
+    }
+
+    std::vector<std::string> NatAttemptFields(const Client& client) const {
+        return {
+            client.natSessionId,
+            std::to_string(client.natAttemptId),
+            client.node == client.pairInitiator ? "initiator" : "responder",
+            kNatPunchProtocolVersion,
+            client.natPunchToken,
+        };
+    }
+
+    void SendNatAttempt(const Client& client) {
+        SendMessage(sock, client.endpoint, "NAT_ATTEMPT",
+                    NatAttemptFields(client));
     }
 
     std::vector<std::string> NatPeerInfoFields(
@@ -347,6 +371,67 @@ struct RendezvousRegistry::Impl {
             + " session=" + fields[3] + " attempt=" + fields[4]);
     }
 
+    void HandleNatRetry(Room& room, Room::iterator current,
+                        const UdpEndpoint& source,
+                        const std::vector<std::string>& fields,
+                        std::chrono::steady_clock::time_point now) {
+        uint64_t attemptId = 0;
+        Room::iterator target;
+        if (!ParseAttemptId(fields[4], &attemptId)
+            || !IsSafeControlField(fields[3])
+            || !ValidateNatPair(room, current, fields[2], fields[3], &target)
+            || !SameUdpEndpoint(source, current->second.endpoint)) {
+            SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
+            return;
+        }
+
+        current->second.seen = now;
+        if (attemptId < current->second.natAttemptId) {
+            SendNatAttempt(current->second);
+            return;
+        }
+        if (attemptId != current->second.natAttemptId
+            || target->second.natAttemptId != attemptId) {
+            SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
+            return;
+        }
+
+        current->second.natRetryRequested = true;
+        if (!target->second.natRetryRequested) {
+            SendMessage(sock, source, "NAT_RETRY_WAIT",
+                        {fields[3], fields[4]});
+            return;
+        }
+
+        std::string randomError;
+        const std::string punchToken = SecureRandomHex(32, &randomError);
+        if (punchToken.empty()) {
+            Log(LogLevel::Error, "Cannot create NAT retry token: " + randomError);
+            SendMessage(sock, current->second.endpoint, "ERROR",
+                        {"server-random-failed"});
+            SendMessage(sock, target->second.endpoint, "ERROR",
+                        {"server-random-failed"});
+            return;
+        }
+        uint64_t nextAttemptId = nextNatAttemptId++;
+        if (nextAttemptId == 0) nextAttemptId = nextNatAttemptId++;
+        current->second.natAttemptId = nextAttemptId;
+        current->second.natPunchToken = punchToken;
+        current->second.natRetryRequested = false;
+        current->second.natPunch = {};
+        target->second.natAttemptId = nextAttemptId;
+        target->second.natPunchToken = punchToken;
+        target->second.natRetryRequested = false;
+        target->second.natPunch = {};
+
+        SendNatAttempt(current->second);
+        SendNatAttempt(target->second);
+        Log(LogLevel::Info, "NAT retry ready room=" + fields[0]
+            + " session=" + fields[3]
+            + " previous_attempt=" + fields[4]
+            + " attempt=" + std::to_string(nextAttemptId));
+    }
+
     void HandleConnect(Room& room, Room::iterator current,
                        const UdpEndpoint& source,
                        const std::vector<std::string>& fields) {
@@ -415,10 +500,12 @@ struct RendezvousRegistry::Impl {
             current->second.natSessionId = sessionId;
             current->second.natPunchToken = punchToken;
             current->second.natAttemptId = attemptId;
+            current->second.natRetryRequested = false;
             current->second.natPunch = {};
             target->second.natSessionId = sessionId;
             target->second.natPunchToken = punchToken;
             target->second.natAttemptId = attemptId;
+            target->second.natRetryRequested = false;
             target->second.natPunch = {};
         }
 
@@ -596,6 +683,7 @@ struct RendezvousRegistry::Impl {
         else if (type == "UNREG") expectedFields = 3;
         else if (type == "NAT_INFO") expectedFields = 13;
         else if (type == "NAT_ARMED") expectedFields = 6;
+        else if (type == "NAT_RETRY") expectedFields = 6;
         else if (type == "V6_JOIN") expectedFields = 7;
         else if (type == "RELAY_JOIN") expectedFields = 4;
         else if (type == "TUN_IP") expectedFields = 4;
@@ -623,6 +711,7 @@ struct RendezvousRegistry::Impl {
         const bool isUnregister = type == "UNREG";
         const bool isNatInfo = type == "NAT_INFO";
         const bool isNatArmed = type == "NAT_ARMED";
+        const bool isNatRetry = type == "NAT_RETRY";
         const bool isIpv6Join = type == "V6_JOIN";
         const bool isIpv4RelayJoin = type == "RELAY_JOIN";
         const bool isTunIp = type == "TUN_IP";
@@ -635,13 +724,14 @@ struct RendezvousRegistry::Impl {
         const std::string& roomId = fields[0];
         const std::string& nodeId = fields[1];
         const std::string targetId = (isConnect || isNatInfo
-                                      || isNatArmed || isIpv6Join
+                                      || isNatArmed || isNatRetry || isIpv6Join
                                       || isIpv4RelayJoin)
             ? fields[2] : "";
         size_t tokenIndex = 2;
         if (isRegister || isIpv4RelayJoin) tokenIndex = 3;
         if (isConnect) tokenIndex = 4;
         if (isNatArmed) tokenIndex = 5;
+        if (isNatRetry) tokenIndex = 5;
         if (isIpv6Join) tokenIndex = 6;
         if (isNatInfo) tokenIndex = 12;
         const std::string& token = fields[tokenIndex];
@@ -696,7 +786,8 @@ struct RendezvousRegistry::Impl {
         }
 
         auto current = room.find(nodeId);
-        if ((isNatInfo || isNatArmed) && current == room.end()) {
+        if ((isNatInfo || isNatArmed || isNatRetry)
+            && current == room.end()) {
             SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
             return;
         }
@@ -709,7 +800,9 @@ struct RendezvousRegistry::Impl {
             Log(LogLevel::Info, "Registered peer=" + nodeId + " room=" + roomId
                 + " endpoint=" + FormatUdpEndpoint(source) + " tun_ip=N/A");
         } else {
-            if (!isNatInfo && !isNatArmed) current->second.endpoint = source;
+            if (!isNatInfo && !isNatArmed && !isNatRetry) {
+                current->second.endpoint = source;
+            }
             current->second.seen = now;
         }
         if (isRegister || isConnect) {
@@ -731,6 +824,8 @@ struct RendezvousRegistry::Impl {
             HandleNatInfo(room, current, source, fields, now);
         } else if (isNatArmed) {
             HandleNatArmed(room, current, source, fields, now);
+        } else if (isNatRetry) {
+            HandleNatRetry(room, current, source, fields, now);
         } else if (isIpv6Join) {
             HandleIpv6Join(room, current, source, fields);
         } else if (isIpv4RelayJoin) {

@@ -75,6 +75,7 @@ private:
     std::string keepaliveText_;
     std::string peerTimeoutText_;
     std::string punchTimeoutText_;
+    std::string natPunchAttemptLimitText_;
     std::string stunAPortText_;
     std::string stunBPortText_;
     std::string ipv6ListenPortText_;

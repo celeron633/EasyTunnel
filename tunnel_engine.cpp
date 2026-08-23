@@ -127,6 +127,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ ", peer_id=" + cfg.peer_id
 		+ (cfg.target_peer_id.empty() ? "" : ", target_peer_id=" + cfg.target_peer_id)
 		+ ", punch_timeout=" + std::to_string(cfg.punch_timeout) + "s"
+		+ ", nat_punch_attempt_limit="
+		+ std::to_string(cfg.nat_punch_attempt_limit)
 		+ ", traversal_modes=" + SerializeTraversalModes(cfg.traversal_modes)
 		+ ", ipv6_accept_inbound=" + (cfg.ipv6_accept_inbound ? "true" : "false")
 		+ ", ipv6_probe=" + cfg.ipv6_probe_host + ":"
@@ -181,11 +183,47 @@ void TunnelEngine::WorkerThread(Config cfg) {
 				std::string strategyError;
 				const auto strategyStartedAt = std::chrono::steady_clock::now();
 				switch (mode) {
-					case TraversalMode::NatPunch:
-						traversalConnected = PunchAdaptiveNat(
-							&sock, cfg, server, running_, matchedPeerId,
-							natPunchSession, &peer, &strategyError);
+					case TraversalMode::NatPunch: {
+						for (uint16_t attemptNumber = 1;
+							 attemptNumber <= cfg.nat_punch_attempt_limit;
+							 ++attemptNumber) {
+							SetState(TunnelState::Connecting,
+								"Trying NAT Punch attempt "
+								+ std::to_string(attemptNumber) + "/"
+								+ std::to_string(cfg.nat_punch_attempt_limit));
+							Log(LogLevel::Info, "Starting NAT punch attempt "
+								+ std::to_string(attemptNumber) + "/"
+								+ std::to_string(cfg.nat_punch_attempt_limit)
+								+ "; session=" + natPunchSession.sessionId
+								+ ", attempt="
+								+ std::to_string(natPunchSession.attemptId));
+							NatPunchAttemptResult attemptResult;
+							traversalConnected = PunchAdaptiveNat(
+								&sock, cfg, server, running_, matchedPeerId,
+								natPunchSession, &peer, &strategyError,
+								&attemptResult);
+							if (traversalConnected || !running_.load()
+								|| attemptNumber >= cfg.nat_punch_attempt_limit
+								|| !IsRetryableNatPunchOutcome(
+									attemptResult.outcome)) {
+								break;
+							}
+
+							Log(LogLevel::Info, "Requesting another NAT punch attempt"
+								" after outcome="
+								+ std::string(NatPunchAttemptOutcomeName(
+									attemptResult.outcome)));
+							std::string retryError;
+							if (!RequestNextNatPunchAttempt(
+									sock, cfg, server, running_, matchedPeerId,
+									&natPunchSession, &retryError)) {
+								strategyError += "; retry synchronization: "
+									+ retryError;
+								break;
+							}
+						}
 						break;
+					}
 					case TraversalMode::Ipv6:
 						traversalConnected = DiscoverAndConnectIpv6(
 							&sock, cfg, server, running_, matchedPeerId,

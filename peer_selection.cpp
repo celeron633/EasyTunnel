@@ -25,6 +25,8 @@ const char* RendezvousEventName(RendezvousEventType type) {
         case RendezvousEventType::NatPeerInfo: return "NatPeerInfo";
         case RendezvousEventType::NatArmedAck: return "NatArmedAck";
         case RendezvousEventType::NatStart: return "NatStart";
+        case RendezvousEventType::NatRetryWait: return "NatRetryWait";
+        case RendezvousEventType::NatAttempt: return "NatAttempt";
         case RendezvousEventType::Error: return "Error";
         default: return "Unknown";
     }

@@ -60,9 +60,10 @@ frp xTCP 的流程、五种模式和源码索引见
 
 ### 阶段 3：多 attempt 策略框架
 
-状态：待开始。
+状态：进行中。
 
-- 增加 `attempt_limit`，每次重试使用新的 attempt ID，拒绝旧 attempt 报文。
+- [x] 增加 `nat_punch_attempt_limit`（默认 3、最大 10）；双方同步重试后使用新的
+      attempt ID 和 punch token，并拒绝旧 attempt 报文。
 - 增加 balanced/aggressive profile，控制范围大小、发送间隔和总预算。
 - 按 Direct、小范围 Range、扩大 Range 的顺序尝试，再进入 Random 或其他回退策略。
 
@@ -136,6 +137,9 @@ frp xTCP 的流程、五种模式和源码索引见
 - [x] 增加本机双 STUN、真实会合 registry 和双客户端打洞集成测试。
 - [x] 增加结构化 NAT Punch attempt 结果和单行摘要，失败阶段使用稳定分类名称。
 - [x] 每个 NAT Punch、IPv6、IPv4 Relay 尝试均记录结果、耗时和下一回退策略。
+- [x] Console/GUI/TUI 共用 `nat_punch_attempt_limit`，引擎只对瞬时失败执行有界重试。
+- [x] 会合服务器通过 `NAT_RETRY_WAIT` / `NAT_ATTEMPT` 为双方同步新 attempt，
+      重试丢包时可重发当前状态，旧 NAT_INFO 会被拒绝。
 
 ### 待完成
 
@@ -151,7 +155,7 @@ frp xTCP 的流程、五种模式和源码索引见
 
 - [ ] 收集本机私网 IPv4 候选地址，通过现有 `localCandidates` 字段交换并优先尝试
       同局域网直连。
-- [ ] 增加多 attempt 控制、attempt limit，以及 balanced/aggressive 策略配置。
+- [ ] 增加 balanced/aggressive 策略配置，并按 attempt 逐步扩大 Range。
 - [ ] 新旧客户端或会合服务器协议不一致时返回明确错误，不进行静默误判。
 
 #### UI、测试与实网验证

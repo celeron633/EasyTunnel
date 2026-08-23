@@ -120,6 +120,11 @@ void GuiApp::RenderSettingsTab() {
         FormField("Punch timeout (s)");
         configChanged |= ImGui::InputInt("##PunchTimeout", &config_.punchTimeout);
         config_.punchTimeout = std::clamp(config_.punchTimeout, 1, 600);
+        FormField("Attempt limit");
+        configChanged |= ImGui::InputInt(
+            "##NatPunchAttemptLimit", &config_.natPunchAttemptLimit);
+        config_.natPunchAttemptLimit = std::clamp(
+            config_.natPunchAttemptLimit, 1, 10);
         FormField("STUN A host");
         configChanged |= ImGui::InputText("##StunAHost",
                                           &config_.stunServers[0].host);

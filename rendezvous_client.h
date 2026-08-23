@@ -18,6 +18,8 @@ enum class RendezvousEventType {
     NatPeerInfo,
     NatArmedAck,
     NatStart,
+    NatRetryWait,
+    NatAttempt,
     Error,
 };
 
@@ -82,6 +84,9 @@ public:
                      const UdpEndpoint& mappedB,
                      const std::string& localCandidates) const;
     bool SendNatArmed(socket_t sock, const std::string& expectedPeerId,
+                      const std::string& sessionId,
+                      uint64_t attemptId) const;
+    bool SendNatRetry(socket_t sock, const std::string& expectedPeerId,
                       const std::string& sessionId,
                       uint64_t attemptId) const;
     void Unregister(socket_t sock) const;

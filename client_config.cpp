@@ -100,6 +100,7 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
     ReadInt(root, "peer_timeout", &config->peerTimeout);
     ReadBool(root, "dummy_traffic_enabled", &config->dummyTrafficEnabled);
     ReadInt(root, "punch_timeout", &config->punchTimeout);
+    ReadInt(root, "nat_punch_attempt_limit", &config->natPunchAttemptLimit);
     if (!ReadStunServers(root, &config->stunServers, error)) return false;
     if (root.isMember("traversal_modes") && root["traversal_modes"].isString()
         && !ParseTraversalModes(root["traversal_modes"].asString(),
@@ -125,6 +126,8 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
     config->peerTimeout = std::clamp(config->peerTimeout,
                                      config->keepaliveInterval + 1, 3600);
     config->punchTimeout = std::clamp(config->punchTimeout, 1, 600);
+    config->natPunchAttemptLimit = std::clamp(
+        config->natPunchAttemptLimit, 1, 10);
     config->ipv6ListenPort = std::clamp(config->ipv6ListenPort, 0, 65535);
     config->ipv6ProbePort = std::clamp(config->ipv6ProbePort, 1, 65535);
     config->ipv6FallbackTimeout = std::clamp(config->ipv6FallbackTimeout, 1, 120);
@@ -151,6 +154,7 @@ bool SaveClientConfig(const std::string& path, const ClientConfig& config,
     root["peer_timeout"] = config.peerTimeout;
     root["dummy_traffic_enabled"] = config.dummyTrafficEnabled;
     root["punch_timeout"] = config.punchTimeout;
+    root["nat_punch_attempt_limit"] = config.natPunchAttemptLimit;
     Json::Value stunServers(Json::arrayValue);
     for (const auto& server : config.stunServers) {
         Json::Value item(Json::objectValue);
@@ -263,6 +267,8 @@ Config ToEngineConfig(const ClientConfig& config,
     output.dummy_traffic_enabled = config.dummyTrafficEnabled;
     output.punch_timeout = static_cast<uint16_t>(
         std::clamp(config.punchTimeout, 1, 600));
+    output.nat_punch_attempt_limit = static_cast<uint16_t>(
+        std::clamp(config.natPunchAttemptLimit, 1, 10));
     output.stun_servers = config.stunServers;
     output.traversal_modes = config.traversalModes;
     output.ipv6_accept_inbound = config.ipv6AcceptInbound;

@@ -15,6 +15,7 @@ constexpr int kStunTimeoutMs = 800;
 constexpr int kStunAttempts = 3;
 constexpr auto kControlRetryInterval = std::chrono::milliseconds(500);
 constexpr auto kPunchInterval = std::chrono::milliseconds(200);
+constexpr auto kAttemptRetryGrace = std::chrono::seconds(5);
 
 const char* NatPunchRoleName(NatPunchRole role) {
     switch (role) {
@@ -137,6 +138,13 @@ const char* NatPunchAttemptOutcomeName(NatPunchAttemptOutcome outcome) {
     }
 }
 
+bool IsRetryableNatPunchOutcome(NatPunchAttemptOutcome outcome) {
+    return outcome == NatPunchAttemptOutcome::StunTimeout
+        || outcome == NatPunchAttemptOutcome::PeerInfoTimeout
+        || outcome == NatPunchAttemptOutcome::BarrierTimeout
+        || outcome == NatPunchAttemptOutcome::PunchTimeout;
+}
+
 std::string FormatNatPunchAttemptResult(
     const NatPunchAttemptResult& result) {
     const std::string endpoint = result.confirmedPeer.family == AF_UNSPEC
@@ -157,6 +165,82 @@ std::string FormatNatPunchAttemptResult(
         + ", endpoint=" + endpoint
         + ", elapsed_ms=" + std::to_string(result.elapsedMs)
         + ", detail=" + SingleLine(result.detail.empty() ? "-" : result.detail);
+}
+
+bool RequestNextNatPunchAttempt(socket_t sock, const Config& cfg,
+                                const UdpEndpoint& server,
+                                const std::atomic<bool>& running,
+                                const std::string& matchedPeerId,
+                                NatPunchSession* session,
+                                std::string* error) {
+    if (sock == kInvalidSocket || session == nullptr
+        || matchedPeerId.empty() || session->sessionId.empty()
+        || session->attemptId == 0 || session->protocolVersion != 2) {
+        if (error != nullptr) *error = "Cannot retry an invalid NAT session";
+        return false;
+    }
+
+    std::string ignoredError;
+    if (error == nullptr) error = &ignoredError;
+    const uint64_t previousAttemptId = session->attemptId;
+    RendezvousClient rendezvous(cfg, server);
+    std::vector<uint8_t> buffer(2048);
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(cfg.punch_timeout) + kAttemptRetryGrace;
+    auto nextSend = std::chrono::steady_clock::time_point{};
+    SetSocketRecvTimeoutMs(sock, kReceiveTimeoutMs);
+
+    while (running.load() && std::chrono::steady_clock::now() < deadline) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= nextSend) {
+            if (!rendezvous.SendNatRetry(
+                    sock, matchedPeerId, session->sessionId,
+                    previousAttemptId)) {
+                Log(LogLevel::Warn, "Failed to send NAT_RETRY. err="
+                    + std::to_string(GetSocketError()));
+            }
+            nextSend = now + kControlRetryInterval;
+        }
+
+        UdpEndpoint source{};
+        int received = -1;
+        if (!ReceiveDatagram(sock, &buffer, &source, &received, error)) {
+            return false;
+        }
+        if (received < 0) continue;
+        const RendezvousEvent event = rendezvous.HandlePacket(
+            source, buffer.data(), static_cast<size_t>(received));
+        if (event.type == RendezvousEventType::Error) {
+            *error = event.error;
+            return false;
+        }
+        if (event.type == RendezvousEventType::NatRetryWait
+            && event.sessionId == session->sessionId
+            && event.attemptId == previousAttemptId) {
+            continue;
+        }
+        if (event.type != RendezvousEventType::NatAttempt) continue;
+        if (event.sessionId != session->sessionId
+            || event.attemptId <= previousAttemptId
+            || event.natPunchRole != session->role
+            || event.natPunchVersion != session->protocolVersion
+            || event.natPunchToken.empty()) {
+            *error = "Rendezvous returned an invalid NAT retry attempt";
+            return false;
+        }
+
+        session->attemptId = event.attemptId;
+        session->punchToken = event.natPunchToken;
+        Log(LogLevel::Info, "NAT punch retry synchronized: session="
+            + session->sessionId + ", previous_attempt="
+            + std::to_string(previousAttemptId) + ", attempt="
+            + std::to_string(session->attemptId));
+        return true;
+    }
+
+    *error = running.load() ? "Timed out waiting for the next NAT attempt"
+                            : "NAT attempt retry stopped";
+    return false;
 }
 
 bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,

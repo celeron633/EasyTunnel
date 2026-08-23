@@ -41,6 +41,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto keepalive = Input(&keepaliveText_, "15");
     auto peerTimeout = Input(&peerTimeoutText_, "45");
     auto punchTimeout = Input(&punchTimeoutText_, "30");
+    auto natPunchAttemptLimit = Input(&natPunchAttemptLimitText_, "3");
     auto stunAHost = Input(&config_.stunServers[0].host, "stun-a.example.com");
     auto stunAPort = Input(&stunAPortText_, "3478");
     auto stunBHost = Input(&config_.stunServers[1].host, "stun-b.example.com");
@@ -87,7 +88,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     // data path on the right.
     auto leftColumn = Container::Vertical({
         serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay,
-        autoWait, keepalive, peerTimeout, punchTimeout,
+        autoWait, keepalive, peerTimeout, punchTimeout, natPunchAttemptLimit,
         stunAHost, stunAPort, stunBHost, stunBPort, stunDiagnostic,
         logLevel, dummyTraffic,
     });
@@ -101,7 +102,8 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto controls = Container::Horizontal({leftColumn, rightColumn});
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
-         peerTimeout, punchTimeout, stunAHost, stunAPort, stunBHost, stunBPort,
+         peerTimeout, punchTimeout, natPunchAttemptLimit,
+         stunAHost, stunAPort, stunBHost, stunBPort,
          stunDiagnostic, logLevel, serverAddress,
          serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
          autoWait, ipv6Inbound, ipv6ListenPort,
@@ -136,6 +138,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             separatorEmpty(),
             tui_theme::SectionTitle("NAT Punch"),
             row("Punch timeout (s)", punchTimeout),
+            row("Attempt limit", natPunchAttemptLimit),
             row("STUN A host", stunAHost),
             row("STUN A port", stunAPort),
             row("STUN B host", stunBHost),
@@ -242,6 +245,7 @@ void TuiApp::SyncTextFromConfig() {
     keepaliveText_ = std::to_string(config_.keepaliveInterval);
     peerTimeoutText_ = std::to_string(config_.peerTimeout);
     punchTimeoutText_ = std::to_string(config_.punchTimeout);
+    natPunchAttemptLimitText_ = std::to_string(config_.natPunchAttemptLimit);
     stunAPortText_ = std::to_string(config_.stunServers[0].port);
     stunBPortText_ = std::to_string(config_.stunServers[1].port);
     ipv6ListenPortText_ = std::to_string(config_.ipv6ListenPort);
@@ -259,6 +263,8 @@ void TuiApp::SyncConfigFromText() {
     config_.peerTimeout = std::clamp(ParseInt(peerTimeoutText_, config_.peerTimeout),
                                      config_.keepaliveInterval + 1, 3600);
     config_.punchTimeout = std::clamp(ParseInt(punchTimeoutText_, config_.punchTimeout), 1, 600);
+    config_.natPunchAttemptLimit = std::clamp(ParseInt(
+        natPunchAttemptLimitText_, config_.natPunchAttemptLimit), 1, 10);
     config_.stunServers[0].port = static_cast<uint16_t>(std::clamp(
         ParseInt(stunAPortText_, config_.stunServers[0].port), 1, 65535));
     config_.stunServers[1].port = static_cast<uint16_t>(std::clamp(
@@ -280,7 +286,8 @@ std::string TuiApp::ConfigSignature() const {
               << config_.roomId << '\n' << config_.peerId << '\n' << config_.authToken << '\n'
               << config_.adapterName << '\n' << config_.localTunIpv4 << '\n'
               << tunPrefixText_ << '\n' << tunMtuText_ << '\n' << config_.autoConfigIpv4 << '\n'
-              << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
+              << keepaliveText_ << '\n' << peerTimeoutText_ << '\n'
+              << punchTimeoutText_ << '\n' << natPunchAttemptLimitText_ << '\n'
               << config_.stunServers[0].host << '\n' << stunAPortText_ << '\n'
               << config_.stunServers[1].host << '\n' << stunBPortText_ << '\n'
               << SerializeTraversalModes(config_.traversalModes) << '\n'

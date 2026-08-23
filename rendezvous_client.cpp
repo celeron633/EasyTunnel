@@ -187,6 +187,15 @@ bool RendezvousClient::SendNatArmed(
          std::to_string(attemptId), config_.auth_token}));
 }
 
+bool RendezvousClient::SendNatRetry(
+        socket_t sock, const std::string& expectedPeerId,
+        const std::string& sessionId, uint64_t attemptId) const {
+    if (!IsSafeControlField(sessionId) || attemptId == 0) return false;
+    return Send(sock, server_, MakeControlMessage("NAT_RETRY",
+        {config_.room_id, config_.peer_id, expectedPeerId, sessionId,
+         std::to_string(attemptId), config_.auth_token}));
+}
+
 void RendezvousClient::Unregister(socket_t sock) const {
     UnregisterRendezvous(sock, config_, server_);
 }
@@ -263,16 +272,30 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
         return event;
     }
     if (type == "NAT_WAIT" || type == "NAT_ARMED_ACK"
-        || type == "NAT_START") {
+        || type == "NAT_START" || type == "NAT_RETRY_WAIT") {
         if (fields.size() != 2 || !IsSafeControlField(fields[0])
             || !ParseAttemptId(fields[1], &event.attemptId)) {
             return InvalidResponse();
         }
         event.sessionId = fields[0];
         event.type = type == "NAT_WAIT" ? RendezvousEventType::NatWait
-            : (type == "NAT_ARMED_ACK"
-                ? RendezvousEventType::NatArmedAck
-                : RendezvousEventType::NatStart);
+            : type == "NAT_ARMED_ACK" ? RendezvousEventType::NatArmedAck
+            : type == "NAT_START" ? RendezvousEventType::NatStart
+            : RendezvousEventType::NatRetryWait;
+        return event;
+    }
+    if (type == "NAT_ATTEMPT") {
+        if (fields.size() != 5 || !IsSafeControlField(fields[0])
+            || !ParseAttemptId(fields[1], &event.attemptId)
+            || !ParseRole(fields[2], &event.natPunchRole)
+            || fields[3] != kNatPunchProtocolVersion
+            || fields[4].empty() || !IsSafeControlField(fields[4])) {
+            return InvalidResponse();
+        }
+        event.sessionId = fields[0];
+        event.natPunchVersion = 2;
+        event.natPunchToken = fields[4];
+        event.type = RendezvousEventType::NatAttempt;
         return event;
     }
     if (type == "NAT_PEER_INFO") {

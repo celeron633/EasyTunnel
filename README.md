@@ -287,9 +287,9 @@ Adaptive NAT Punch 使用同一 UDP socket 依次探测两台独立 STUN，并�
 traversal_modes=nat_punch:true,ipv6:false,ipv4_relay:false
 ```
 
-`stun_servers` 必须包含两台解析到不同公网 IPv4 的标准 RFC 8489 STUN 服务。推荐分别部署 Coturn `stun-only`。easy/easy 使用 Direct；regular/easy 使用互补的稳定端点发送和动态范围扫描；hard/hard regular 使用双方有界范围扫描。当前 random 和 multi-public-IP 会转后续 IPv6/Relay，不会回退旧 fixed-offset 算法。完整协议见 [Adaptive NAT Punch 文档](doc/nat-traversal.md)。
+`stun_servers` 必须包含两台解析到不同公网 IPv4 的标准 RFC 8489 STUN 服务。推荐分别部署 Coturn `stun-only`。easy/easy 使用 Direct；regular/easy 使用互补的稳定端点发送和动态范围扫描；hard/hard regular 使用双方有界范围扫描。当前 random 和 multi-public-IP 会转后续 IPv6/Relay，不会回退旧 fixed-offset 算法。`nat_punch_attempt_limit` 控制最多执行几次独立 attempt，范围为 1～10，默认 3。完整协议见 [Adaptive NAT Punch 文档](doc/nat-traversal.md)。
 
-Adaptive NAT Punch 和 IPv4 Relay 各自使用一次 `punch_timeout`；IPv6 使用 `ipv6_fallback_timeout`。等待模式会在收到 PEER 后才开始执行策略列表。
+每次 Adaptive NAT Punch attempt 和 IPv4 Relay 分别使用一次 `punch_timeout`；IPv6 使用 `ipv6_fallback_timeout`。只有 STUN/信息交换/屏障/PUNCH 等瞬时失败会请求下一 attempt，配置或策略不支持会直接进入下一 traversal mode。等待模式会在收到 PEER 后才开始执行策略列表。
 
 启用 IPv6 直连时，双方都必须在 `traversal_modes` 中将 `ipv6` 设为 `true`、都具有经公网 TCP 探针验证的 IPv6 GUA，并且至少一端设置
 `ipv6_accept_inbound=true`。会合服务器只交换 IPv6 UDP 端点和 `listen/connect` 角色，

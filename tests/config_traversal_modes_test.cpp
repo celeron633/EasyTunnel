@@ -106,8 +106,9 @@ int main(int argc, char** argv) {
                "shared example traversal strategy");
         Expect(example.stunServers.size() == 2
                    && example.stunServers[0].host == "198.51.100.10"
-                   && example.stunServers[1].port == 3478,
-               "shared example STUN servers");
+                   && example.stunServers[1].port == 3478
+                   && example.natPunchAttemptLimit == 3,
+               "shared example NAT Punch settings");
         Expect(ValidateClientConfig(example, &error),
                "shared example config validates");
         ClientConfig missingStun = example;
@@ -118,8 +119,15 @@ int main(int argc, char** argv) {
         Expect(engine.rendezvous_addr == example.rendezvousAddress
                    && engine.target_peer_id == "node-b"
                    && engine.tun_mtu == 1452
+                   && engine.nat_punch_attempt_limit == 3
                    && engine.stun_servers.size() == 2,
                "engine config mapping");
+        example.natPunchAttemptLimit = 0;
+        Expect(ToEngineConfig(example, "node-b").nat_punch_attempt_limit == 1,
+               "NAT punch attempt limit clamps to its minimum");
+        example.natPunchAttemptLimit = 99;
+        Expect(ToEngineConfig(example, "node-b").nat_punch_attempt_limit == 10,
+               "NAT punch attempt limit clamps to its maximum");
     }
 
     if (failures != 0) {
