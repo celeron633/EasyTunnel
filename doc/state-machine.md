@@ -82,8 +82,8 @@ sequenceDiagram
 成功时关闭控制 socket，并让 punch socket 直接进入数据面；失败时关闭 punch socket，
 控制 socket 仍可继续 IPv6/Relay。
 
-当前计划支持 easy/easy Direct 和 regular/easy Range。random、multi-public-IP 和
-hard/hard regular 返回明确错误并进入下一个策略。
+当前计划支持 easy/easy Direct、regular/easy Range 和 hard/hard regular dual-range。
+random 与 multi-public-IP 返回明确错误并进入下一个策略。
 
 ## 会合服务器 NAT 状态
 
@@ -140,4 +140,4 @@ liveness，不影响打洞计划。
 | 已连接 Peer liveness | `peer_timeout` | Error |
 
 当前 Adaptive NAT 只有一个 attempt。多 attempt、attempt limit 和 aggressive profile
-仍在 `todo.md`。
+仍在 [新 NAT 穿透 TODO](新NAT穿透TODO.md)。

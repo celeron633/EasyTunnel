@@ -4,6 +4,10 @@
 #include <cstdlib>
 
 namespace {
+constexpr int kRegularPortDeltaLimit = 5;
+constexpr int kRangePredictionMargin = 5;
+constexpr int kMaximumRangeSpan = 10;
+
 bool Ipv4AddressAndPort(const UdpEndpoint& endpoint, in_addr* address,
                         uint16_t* port) {
     if (endpoint.family != AF_INET
@@ -42,12 +46,6 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
         SetError(error, "Random or multi-public-IP NAT plan is not implemented yet");
         return false;
     }
-    if (local.behavior == NatMappingBehavior::PortDependentRegular
-        && peer.behavior == NatMappingBehavior::PortDependentRegular) {
-        SetError(error, "Regular symmetric NAT on both peers is not implemented yet");
-        return false;
-    }
-
     in_addr peerAddressA{};
     in_addr peerAddressB{};
     uint16_t peerPortA = 0;
@@ -70,7 +68,7 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
     const int delta = static_cast<int>(peerPortB)
         - static_cast<int>(peerPortA);
     const int absoluteDelta = std::abs(delta);
-    if (delta == 0 || absoluteDelta > 5) {
+    if (delta == 0 || absoluteDelta > kRegularPortDeltaLimit) {
         SetError(error, "Peer regular NAT observation has an invalid port delta");
         return false;
     }
@@ -80,9 +78,12 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
         return false;
     }
 
-    plan->mode = NatPunchPlanMode::RangeScanner;
+    plan->mode = local.behavior == NatMappingBehavior::PortDependentRegular
+        ? NatPunchPlanMode::DualRangeScanner
+        : NatPunchPlanMode::RangeScanner;
     plan->predictedPort = predicted;
-    plan->portSpan = static_cast<uint16_t>((std::min)(10, absoluteDelta + 5));
+    plan->portSpan = static_cast<uint16_t>((std::min)(
+        kMaximumRangeSpan, absoluteDelta + kRangePredictionMargin));
     const int firstPort = (std::max)(1, predicted - plan->portSpan);
     const int lastPort = (std::min)(65535, predicted + plan->portSpan);
     plan->targets.reserve(static_cast<size_t>(lastPort - firstPort + 1));
@@ -107,7 +108,7 @@ const char* NatPunchPlanModeName(NatPunchPlanMode mode) {
         case NatPunchPlanMode::Direct: return "direct";
         case NatPunchPlanMode::RegularSender: return "regular-sender";
         case NatPunchPlanMode::RangeScanner: return "range-scanner";
+        case NatPunchPlanMode::DualRangeScanner: return "dual-range-scanner";
         default: return "unknown";
     }
 }
-

@@ -105,6 +105,7 @@ make -f Makefile.rendezvous rendezvous
 - [客户端与会合服务器状态机、UML 风格协商时序](doc/state-machine.md)
 - [TUN 数据面与 Windows/Linux 适配器](doc/tun.md)
 - [双 STUN、自适应 NAT Punch 与故障排查](doc/nat-traversal.md)
+- [新 NAT 穿透目的、完成情况与后续 TODO](doc/新NAT穿透TODO.md)
 - [IPv6 Fallback：启用条件、角色协商、协议与故障排查](doc/ipv6-fallback.md)
 - [IPv4 Relay Fallback：会话线程、协议、部署与故障排查](doc/ipv4-relay-fallback.md)
 
@@ -286,7 +287,7 @@ Adaptive NAT Punch 使用同一 UDP socket 依次探测两台独立 STUN，并�
 traversal_modes=nat_punch:true,ipv6:false,ipv4_relay:false
 ```
 
-`stun_servers` 必须包含两台解析到不同公网 IPv4 的标准 RFC 8489 STUN 服务。推荐分别部署 Coturn `stun-only`。easy/easy 使用 Direct；regular/easy 根据观测端口差计算预测中心与动态范围。当前 random、multi-public-IP 和 hard/hard regular 会转后续 IPv6/Relay，不会回退旧 fixed-offset 算法。完整协议见 [Adaptive NAT Punch 文档](doc/nat-traversal.md)。
+`stun_servers` 必须包含两台解析到不同公网 IPv4 的标准 RFC 8489 STUN 服务。推荐分别部署 Coturn `stun-only`。easy/easy 使用 Direct；regular/easy 使用互补的稳定端点发送和动态范围扫描；hard/hard regular 使用双方有界范围扫描。当前 random 和 multi-public-IP 会转后续 IPv6/Relay，不会回退旧 fixed-offset 算法。完整协议见 [Adaptive NAT Punch 文档](doc/nat-traversal.md)。
 
 Adaptive NAT Punch 和 IPv4 Relay 各自使用一次 `punch_timeout`；IPv6 使用 `ipv6_fallback_timeout`。等待模式会在收到 PEER 后才开始执行策略列表。
 

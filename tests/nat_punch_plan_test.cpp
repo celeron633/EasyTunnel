@@ -58,8 +58,23 @@ int main() {
                && FormatUdpEndpoint(plan.targets[0]) == "203.0.113.20:41000",
            "regular peer sends to the easy peer's stable endpoint");
 
-    Expect(!BuildNatPunchPlan(regular, regular, &plan, &error),
-           "hard/hard regular waits for its dedicated strategy");
+    const auto regularPeer = Observation(
+        NatMappingBehavior::PortDependentRegular,
+        "203.0.113.30", 43000, 43002);
+    Expect(BuildNatPunchPlan(regular, regularPeer, &plan, &error)
+               && plan.mode == NatPunchPlanMode::DualRangeScanner
+               && plan.predictedPort == 43004 && plan.portSpan == 7
+               && plan.targets.size() == 15
+               && FormatUdpEndpoint(plan.targets.front())
+                    == "203.0.113.30:42997"
+               && FormatUdpEndpoint(plan.targets.back())
+                    == "203.0.113.30:43011",
+           "hard/hard regular scans the peer's predicted range");
+    Expect(BuildNatPunchPlan(regularPeer, regular, &plan, &error)
+               && plan.mode == NatPunchPlanMode::DualRangeScanner
+               && plan.predictedPort == 42006 && plan.portSpan == 8
+               && plan.targets.size() == 17,
+           "hard/hard regular produces the complementary peer plan");
     const auto random = Observation(
         NatMappingBehavior::PortDependentRandom,
         "198.51.100.40", 43000, 44000);
@@ -89,4 +104,3 @@ int main() {
     std::cout << "NAT punch plan tests passed\n";
     return 0;
 }
-

@@ -11,6 +11,7 @@ enum class NatPunchPlanMode {
     Direct,
     RegularSender,
     RangeScanner,
+    DualRangeScanner,
 };
 
 struct NatPunchObservation {
@@ -26,11 +27,10 @@ struct NatPunchPlan {
     uint16_t portSpan = 0;
 };
 
-// Builds the currently supported deterministic plans: easy/easy direct and
-// regular/easy complementary sender/range-scanner. Random and hard/hard NATs
-// intentionally return false until their bounded aggressive strategies land.
+// Builds deterministic plans for easy/easy direct, regular/easy complementary
+// sender/range-scanner, and hard/hard regular dual-range scanning. Random and
+// multi-public-IP NATs return false until bounded aggressive strategies land.
 bool BuildNatPunchPlan(const NatPunchObservation& local,
                        const NatPunchObservation& peer,
                        NatPunchPlan* plan, std::string* error);
 const char* NatPunchPlanModeName(NatPunchPlanMode mode);
-

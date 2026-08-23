@@ -47,7 +47,7 @@ transaction ID，并包含合法的 `XOR-MAPPED-ADDRESS`。
 | A/B 观测 | 分类 | 当前计划 |
 |---|---|---|
 | 公网 IP、端口均相同 | endpoint-independent | Direct |
-| 公网 IP 相同，端口差绝对值 1～5 | port-dependent-regular | Range/regular sender |
+| 公网 IP 相同，端口差绝对值 1～5 | port-dependent-regular | Range/regular sender/dual-range |
 | 公网 IP 相同，端口差大于 5 | port-dependent-random | 尚未实现，转后续策略 |
 | 公网 IP 不同 | multi-public-IP | 尚未实现，转后续策略 |
 
@@ -101,9 +101,17 @@ span = min(10, abs(delta) + 5)
 然后扫描 `[predicted-span, predicted+span]`，并在 UDP 端口边界处截断。这里没有
 固定偏移配置。
 
+### hard/hard regular
+
+双方都根据对端两次 STUN 映射的端口差计算预测中心，并同时执行上述 Range 扫描。
+每端范围半径最多为 10，即每轮最多向 21 个目标端口发送 PUNCH；所有目标仍由同一个
+punch socket 发送。该策略是 frp Mode 3 的有界 dual-range 基线，暂不包含低 TTL
+预打洞和延迟发送变体。
+
 ### 尚未完成
 
-hard/hard regular、random receiver 和 mixed random/range 仍在 `todo.md` 中。遇到
+random receiver 和 mixed random/range 仍在
+[新 NAT 穿透 TODO](新NAT穿透TODO.md) 中。遇到
 这些组合会返回明确错误并继续 IPv6/Relay（若已启用），不会调用旧 fixed-offset
 算法。
 
@@ -137,7 +145,5 @@ Punch token 用于阻止无关 UDP 包误接管连接，不加密后续 TUN 流�
 - `STUN server did not respond`：检查 Coturn `stun-only`、UDP 3478 和安全组。
 - `Random or multi-public-IP NAT plan is not implemented yet`：启用 Relay，或等待
   aggressive 模式完成。
-- `Regular symmetric NAT on both peers is not implemented yet`：当前 hard/hard 组合
-  尚未接入 dual-range。
 - `Timed out at the NAT synchronization barrier`：检查客户端/会合服务器版本是否一致，
   以及 punch socket 到会合服务器的 UDP 返回流量。
