@@ -287,7 +287,7 @@ Adaptive NAT Punch 使用同一 UDP socket 依次探测两台独立 STUN，并�
 traversal_modes=nat_punch:true,ipv6:false,ipv4_relay:false
 ```
 
-`stun_servers` 必须包含两台解析到不同公网 IPv4 的标准 RFC 8489 STUN 服务。推荐分别部署 Coturn `stun-only`。easy/easy 使用 Direct；regular/easy 使用互补的稳定端点发送和动态范围扫描；hard/hard regular 使用双方有界范围扫描。当前 random 和 multi-public-IP 会转后续 IPv6/Relay，不会回退旧 fixed-offset 算法。`nat_punch_attempt_limit` 控制最多执行几次独立 attempt，范围为 1～10，默认 3；`nat_punch_profile` 可选 `balanced`（默认）或 `aggressive`，控制重试扩围速度、发送间隔和报文预算。完整协议见 [Adaptive NAT Punch 文档](doc/nat-traversal.md)。
+`stun_servers` 必须包含两台解析到不同公网 IPv4 的标准 RFC 8489 STUN 服务。推荐分别部署 Coturn `stun-only`。easy/easy 使用 Direct；regular/easy 使用互补的稳定端点发送和动态范围扫描；hard/hard regular 使用双方有界范围扫描；easy/random 使用有上限的随机 sender 和多 socket receiver。当前 random/regular、random/random 和 multi-public-IP 会转后续 IPv6/Relay，不会回退旧 fixed-offset 算法。`nat_punch_attempt_limit` 控制最多执行几次独立 attempt，范围为 1～10，默认 3；`nat_punch_profile` 可选 `balanced`（默认）或 `aggressive`，控制重试扩围速度、随机 socket/目标规模、发送间隔和报文预算。完整协议见 [Adaptive NAT Punch 文档](doc/nat-traversal.md)。
 
 每次 Adaptive NAT Punch attempt 和 IPv4 Relay 分别使用一次 `punch_timeout`；IPv6 使用 `ipv6_fallback_timeout`。只有 STUN/信息交换/屏障/PUNCH 等瞬时失败会请求下一 attempt，配置或策略不支持会直接进入下一 traversal mode。等待模式会在收到 PEER 后才开始执行策略列表。
 
@@ -303,7 +303,7 @@ UDP payload，不增加封装。服务器部署时必须放行配置的 UDP 端�
 
 以下情况可能失败：
 
-- 外部端口随机分配或 multi-public-IP（Random receiver 计划尚未完成）
+- 双方端口都随机变化、random/regular 混合或 multi-public-IP
 - regular 映射变化超过当前 profile 的最大预测范围
 - 企业或运营商网络禁止 P2P UDP
 - 不支持 hairpin 的同公网出口场景

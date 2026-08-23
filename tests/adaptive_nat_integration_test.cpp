@@ -108,18 +108,23 @@ int main() {
     UdpEndpoint rendezvousEndpoint{};
     UdpEndpoint stunAEndpoint{};
     UdpEndpoint stunBEndpoint{};
+    UdpEndpoint stunRandomEndpoint{};
     socket_t rendezvousSocket =
         OpenBoundSocket("127.0.0.1", &rendezvousEndpoint);
     socket_t stunA = OpenBoundSocket("127.0.0.1", &stunAEndpoint);
     socket_t stunB = OpenBoundSocket("127.0.0.2", &stunBEndpoint);
+    socket_t stunRandom = OpenBoundSocket(
+        "127.0.0.3", &stunRandomEndpoint);
     Expect(rendezvousSocket != kInvalidSocket && stunA != kInvalidSocket
-               && stunB != kInvalidSocket,
-           "local rendezvous and two STUN sockets open");
+               && stunB != kInvalidSocket
+               && stunRandom != kInvalidSocket,
+           "local rendezvous and STUN sockets open");
     if (rendezvousSocket == kInvalidSocket || stunA == kInvalidSocket
-        || stunB == kInvalidSocket) {
+        || stunB == kInvalidSocket || stunRandom == kInvalidSocket) {
         CloseSocket(rendezvousSocket);
         CloseSocket(stunA);
         CloseSocket(stunB);
+        CloseSocket(stunRandom);
 #ifdef _WIN32
         WSACleanup();
 #endif
@@ -153,7 +158,7 @@ int main() {
         }
     });
 
-    auto runStun = [&](socket_t stunSocket) {
+    auto runStun = [&](socket_t stunSocket, int mappedPortOffset) {
         std::vector<uint8_t> buffer(512);
         while (servicesRunning.load()) {
             sockaddr_storage sourceAddress{};
@@ -165,15 +170,22 @@ int main() {
                 reinterpret_cast<sockaddr*>(&sourceAddress), &sourceLen);
             if (received != 20 || buffer[0] != 0 || buffer[1] != 1) continue;
             const UdpEndpoint source = FromSockaddr(sourceAddress, sourceLen);
-            const auto response = MakeBindingResponse(buffer.data(), source);
+            UdpEndpoint mapped = source;
+            auto* mappedAddress = reinterpret_cast<sockaddr_in*>(&mapped.addr);
+            const int sourcePort = ntohs(mappedAddress->sin_port);
+            int mappedPort = sourcePort + mappedPortOffset;
+            if (mappedPort > 65535) mappedPort = sourcePort - mappedPortOffset;
+            mappedAddress->sin_port = htons(static_cast<uint16_t>(mappedPort));
+            const auto response = MakeBindingResponse(buffer.data(), mapped);
             sendto(stunSocket,
                 reinterpret_cast<const char*>(response.data()),
                 static_cast<int>(response.size()), 0,
                 reinterpret_cast<const sockaddr*>(&source.addr), source.addr_len);
         }
     };
-    std::thread stunAThread(runStun, stunA);
-    std::thread stunBThread(runStun, stunB);
+    std::thread stunAThread(runStun, stunA, 0);
+    std::thread stunBThread(runStun, stunB, 0);
+    std::thread stunRandomThread(runStun, stunRandom, 1000);
 
     Config aConfig;
     aConfig.rendezvous_addr = "127.0.0.1";
@@ -182,6 +194,7 @@ int main() {
     aConfig.peer_id = "a";
     aConfig.target_peer_id = "b";
     aConfig.punch_timeout = 8;
+    aConfig.nat_punch_profile = NatPunchProfile::Aggressive;
     aConfig.stun_servers = {
         {"127.0.0.1", EndpointPort(stunAEndpoint)},
         {"127.0.0.2", EndpointPort(stunBEndpoint)},
@@ -189,6 +202,8 @@ int main() {
     Config bConfig = aConfig;
     bConfig.peer_id = "b";
     bConfig.target_peer_id.clear();
+    bConfig.stun_servers[1] = {
+        "127.0.0.3", EndpointPort(stunRandomEndpoint)};
 
     socket_t aSocket = kInvalidSocket;
     socket_t bSocket = kInvalidSocket;
@@ -266,12 +281,12 @@ int main() {
         std::thread aPunchThread([&] {
             aPunched = PunchAdaptiveNat(&aSocket, aConfig, aServer,
                 clientsRunning, aPeerId, aSession, &aPeer, &aError,
-                &aAttempt, 2);
+                &aAttempt, 3);
         });
         std::thread bPunchThread([&] {
             bPunched = PunchAdaptiveNat(&bSocket, bConfig, bServer,
                 clientsRunning, bPeerId, bSession, &bPeer, &bError,
-                &bAttempt, 2);
+                &bAttempt, 3);
         });
         aPunchThread.join();
         bPunchThread.join();
@@ -286,21 +301,23 @@ int main() {
                && bAttempt.outcome == NatPunchAttemptOutcome::Success
                && aAttempt.sessionId == aSession.sessionId
                && bAttempt.attemptId == bSession.attemptId
-               && aAttempt.attemptNumber == 2
-               && bAttempt.attemptNumber == 2,
+               && aAttempt.attemptNumber == 3
+               && bAttempt.attemptNumber == 3,
            "attempt results correlate success with session and attempt IDs");
     Expect(aAttempt.localBehavior == NatMappingBehavior::EndpointIndependent
-               && aAttempt.peerBehavior
-                   == NatMappingBehavior::EndpointIndependent
-               && aAttempt.plan == "direct" && aAttempt.targetCount == 1
-               && aAttempt.profile == NatPunchProfile::Balanced
-               && aAttempt.waveIntervalMs == 200
+               && aAttempt.peerBehavior == NatMappingBehavior::PortDependentRandom
+               && aAttempt.plan == "random-sender"
+               && aAttempt.targetCount == 1000
+               && bAttempt.plan == "random-receiver"
+               && bAttempt.socketCount == 256
+               && aAttempt.profile == NatPunchProfile::Aggressive
+               && aAttempt.waveIntervalMs == 5
                && aAttempt.datagramsSent > 0
                && aAttempt.confirmedPeer.family == AF_INET,
            "successful attempt summary retains mapping, plan and endpoint");
     const std::string attemptSummary = FormatNatPunchAttemptResult(aAttempt);
     Expect(attemptSummary.find("outcome=success") != std::string::npos
-               && attemptSummary.find("plan=direct") != std::string::npos
+               && attemptSummary.find("plan=random-sender") != std::string::npos
                && attemptSummary.find("attempt="
                    + std::to_string(aSession.attemptId)) != std::string::npos,
            "formatted attempt summary exposes correlated result fields");
@@ -358,9 +375,11 @@ int main() {
     rendezvousThread.join();
     stunAThread.join();
     stunBThread.join();
+    stunRandomThread.join();
     CloseSocket(rendezvousSocket);
     CloseSocket(stunA);
     CloseSocket(stunB);
+    CloseSocket(stunRandom);
 #ifdef _WIN32
     WSACleanup();
 #endif

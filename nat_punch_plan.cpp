@@ -3,11 +3,16 @@
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
+#include <numeric>
+
+#include "secure_random.h"
 
 namespace {
 constexpr int kRegularPortDeltaLimit = 5;
 constexpr int kRangePredictionMargin = 5;
 constexpr int kInitialMaximumRangeSpan = 10;
+constexpr uint16_t kFirstRandomPort = 1024;
+constexpr uint32_t kRandomPortCount = 65536u - kFirstRandomPort;
 
 bool Ipv4AddressAndPort(const UdpEndpoint& endpoint, in_addr* address,
                         uint16_t* port) {
@@ -29,6 +34,14 @@ bool IsSupportedBehavior(NatMappingBehavior behavior) {
     return behavior == NatMappingBehavior::EndpointIndependent
         || behavior == NatMappingBehavior::PortDependentRegular;
 }
+
+bool EndpointFromAddress(in_addr address, uint16_t port,
+                         UdpEndpoint* endpoint) {
+    char addressText[INET_ADDRSTRLEN]{};
+    return inet_ntop(AF_INET, &address, addressText,
+                     sizeof(addressText)) != nullptr
+        && ParseUdpEndpoint(addressText, port, endpoint);
+}
 }  // namespace
 
 NatPunchAttemptPolicy ResolveNatPunchAttemptPolicy(
@@ -42,6 +55,13 @@ NatPunchAttemptPolicy ResolveNatPunchAttemptPolicy(
         policy.maximumRangeSpan = 128;
         policy.minimumWaveIntervalMs = 75;
         policy.datagramBudget = 131072;
+        const unsigned resourceShift = (std::min)(
+            static_cast<unsigned>(attempt), 3u);
+        policy.randomReceiverSocketCount = static_cast<uint16_t>((std::min)(
+            256u, 32u << resourceShift));
+        policy.randomTargetPortCount = static_cast<uint16_t>((std::min)(
+            1000u, 256u << resourceShift));
+        policy.randomPortIntervalMs = 5;
         return policy;
     }
 
@@ -51,6 +71,13 @@ NatPunchAttemptPolicy ResolveNatPunchAttemptPolicy(
     policy.maximumRangeSpan = 48;
     policy.minimumWaveIntervalMs = 200;
     policy.datagramBudget = 16384;
+    const unsigned resourceShift = (std::min)(
+        static_cast<unsigned>(attempt), 3u);
+    policy.randomReceiverSocketCount = static_cast<uint16_t>((std::min)(
+        128u, 16u << resourceShift));
+    policy.randomTargetPortCount = static_cast<uint16_t>((std::min)(
+        1000u, 128u << resourceShift));
+    policy.randomPortIntervalMs = 15;
     return policy;
 }
 
@@ -73,6 +100,75 @@ uint32_t ComputeNatPunchWaveIntervalMs(
         interval, static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())));
 }
 
+bool BuildRandomPortTargets(const NatPunchObservation& peer,
+                            size_t targetCount,
+                            std::vector<UdpEndpoint>* targets,
+                            std::string* error) {
+    if (targets == nullptr || targetCount == 0
+        || targetCount > kRandomPortCount) {
+        SetError(error, "Random NAT target count is outside the safe range");
+        return false;
+    }
+    in_addr peerAddressA{};
+    in_addr peerAddressB{};
+    uint16_t peerPortA = 0;
+    uint16_t peerPortB = 0;
+    if (!Ipv4AddressAndPort(peer.mappedA, &peerAddressA, &peerPortA)
+        || !Ipv4AddressAndPort(peer.mappedB, &peerAddressB, &peerPortB)
+        || peerAddressA.s_addr != peerAddressB.s_addr) {
+        SetError(error, "Random NAT peer mappings do not share one public IPv4 address");
+        return false;
+    }
+
+    targets->clear();
+    targets->reserve(targetCount);
+    std::vector<bool> used(65536, false);
+    const auto append = [&](uint16_t port) {
+        if (targets->size() >= targetCount || used[port]) return true;
+        UdpEndpoint endpoint{};
+        if (!EndpointFromAddress(peerAddressB, port, &endpoint)) return false;
+        used[port] = true;
+        targets->push_back(endpoint);
+        return true;
+    };
+    if (!append(peerPortB) || !append(peerPortA)) {
+        SetError(error, "Cannot build an observed random NAT endpoint");
+        targets->clear();
+        return false;
+    }
+
+    uint32_t entropy[2]{};
+    if (!FillSecureRandom(reinterpret_cast<uint8_t*>(entropy),
+                          sizeof(entropy), error)) {
+        targets->clear();
+        return false;
+    }
+    const uint32_t start = entropy[0] % kRandomPortCount;
+    uint32_t step = entropy[1] % kRandomPortCount;
+    if (step == 0) step = 1;
+    while (std::gcd(step, kRandomPortCount) != 1) {
+        step = step == kRandomPortCount - 1 ? 1 : step + 1;
+    }
+    for (uint32_t index = 0;
+         index < kRandomPortCount && targets->size() < targetCount;
+         ++index) {
+        const uint16_t port = static_cast<uint16_t>(kFirstRandomPort
+            + (static_cast<uint64_t>(start)
+               + static_cast<uint64_t>(index) * step) % kRandomPortCount);
+        if (!append(port)) {
+            SetError(error, "Cannot build a random NAT target endpoint");
+            targets->clear();
+            return false;
+        }
+    }
+    if (targets->size() != targetCount) {
+        SetError(error, "Cannot generate enough unique random NAT targets");
+        targets->clear();
+        return false;
+    }
+    return true;
+}
+
 bool BuildNatPunchPlan(const NatPunchObservation& local,
                        const NatPunchObservation& peer,
                        NatPunchPlan* plan, std::string* error) {
@@ -93,12 +189,8 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
     plan->targets.clear();
     plan->predictedPort = 0;
     plan->portSpan = 0;
+    plan->receiverSocketCount = 1;
 
-    if (!IsSupportedBehavior(local.behavior)
-        || !IsSupportedBehavior(peer.behavior)) {
-        SetError(error, "Random or multi-public-IP NAT plan is not implemented yet");
-        return false;
-    }
     in_addr peerAddressA{};
     in_addr peerAddressB{};
     uint16_t peerPortA = 0;
@@ -107,6 +199,32 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
         || !Ipv4AddressAndPort(peer.mappedB, &peerAddressB, &peerPortB)
         || peerAddressA.s_addr != peerAddressB.s_addr) {
         SetError(error, "Peer STUN mappings do not share one public IPv4 address");
+        return false;
+    }
+
+    const bool localRandom =
+        local.behavior == NatMappingBehavior::PortDependentRandom;
+    const bool peerRandom =
+        peer.behavior == NatMappingBehavior::PortDependentRandom;
+    const bool localEasy =
+        local.behavior == NatMappingBehavior::EndpointIndependent;
+    const bool peerEasy =
+        peer.behavior == NatMappingBehavior::EndpointIndependent;
+    if (localRandom && peerEasy) {
+        plan->mode = NatPunchPlanMode::RandomReceiver;
+        plan->predictedPort = peerPortB;
+        plan->receiverSocketCount = policy.randomReceiverSocketCount;
+        plan->targets.push_back(peer.mappedB);
+        return true;
+    }
+    if (localEasy && peerRandom) {
+        plan->mode = NatPunchPlanMode::RandomSender;
+        plan->receiverSocketCount = 1;
+        return true;
+    }
+    if (!IsSupportedBehavior(local.behavior)
+        || !IsSupportedBehavior(peer.behavior)) {
+        SetError(error, "NAT mapping combination requires an unsupported mixed-random strategy");
         return false;
     }
 
@@ -145,11 +263,8 @@ bool BuildNatPunchPlan(const NatPunchObservation& local,
     plan->targets.reserve(static_cast<size_t>(lastPort - firstPort + 1));
     for (int port = firstPort; port <= lastPort; ++port) {
         UdpEndpoint target{};
-        char addressText[INET_ADDRSTRLEN]{};
-        if (inet_ntop(AF_INET, &peerAddressB, addressText,
-                      sizeof(addressText)) == nullptr
-            || !ParseUdpEndpoint(addressText, static_cast<uint16_t>(port),
-                                 &target)) {
+        if (!EndpointFromAddress(
+                peerAddressB, static_cast<uint16_t>(port), &target)) {
             SetError(error, "Cannot build a predicted peer endpoint");
             plan->targets.clear();
             return false;
@@ -165,6 +280,8 @@ const char* NatPunchPlanModeName(NatPunchPlanMode mode) {
         case NatPunchPlanMode::RegularSender: return "regular-sender";
         case NatPunchPlanMode::RangeScanner: return "range-scanner";
         case NatPunchPlanMode::DualRangeScanner: return "dual-range-scanner";
+        case NatPunchPlanMode::RandomSender: return "random-sender";
+        case NatPunchPlanMode::RandomReceiver: return "random-receiver";
         default: return "unknown";
     }
 }

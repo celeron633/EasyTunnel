@@ -13,6 +13,8 @@ enum class NatPunchPlanMode {
     RegularSender,
     RangeScanner,
     DualRangeScanner,
+    RandomSender,
+    RandomReceiver,
 };
 
 struct NatPunchObservation {
@@ -26,6 +28,7 @@ struct NatPunchPlan {
     std::vector<UdpEndpoint> targets;
     int predictedPort = 0;
     uint16_t portSpan = 0;
+    uint16_t receiverSocketCount = 1;
 };
 
 struct NatPunchAttemptPolicy {
@@ -33,6 +36,9 @@ struct NatPunchAttemptPolicy {
     uint16_t maximumRangeSpan = 10;
     uint16_t minimumWaveIntervalMs = 200;
     uint32_t datagramBudget = 16384;
+    uint16_t randomReceiverSocketCount = 32;
+    uint16_t randomTargetPortCount = 256;
+    uint16_t randomPortIntervalMs = 15;
 };
 
 // Converts the user-facing resource profile and one-based local attempt
@@ -46,9 +52,18 @@ uint32_t ComputeNatPunchWaveIntervalMs(
     const NatPunchAttemptPolicy& policy, size_t targetCount,
     uint64_t punchBudgetMs);
 
+// Builds a unique, CSPRNG-seeded target sequence on the peer's observed
+// public IPv4. Known STUN ports are tried first; remaining ports are sampled
+// without replacement from the non-privileged UDP range.
+bool BuildRandomPortTargets(const NatPunchObservation& peer,
+                            size_t targetCount,
+                            std::vector<UdpEndpoint>* targets,
+                            std::string* error);
+
 // Builds deterministic plans for easy/easy direct, regular/easy complementary
-// sender/range-scanner, and hard/hard regular dual-range scanning. Random and
-// multi-public-IP NATs return false until bounded random strategies land.
+// sender/range-scanner, hard/hard regular dual-range scanning, and the
+// easy/random complementary random sender/receiver strategy. Mixed hard NAT
+// and multi-public-IP combinations remain unsupported.
 bool BuildNatPunchPlan(const NatPunchObservation& local,
                        const NatPunchObservation& peer,
                        NatPunchPlan* plan, std::string* error);

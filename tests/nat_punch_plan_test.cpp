@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 #include "nat_punch_plan.h"
 
@@ -58,12 +59,17 @@ int main() {
                easyA, regular, balancedSecond, &plan, &error)
                && balancedSecond.rangeScale == 2
                && balancedSecond.maximumRangeSpan == 48
+               && balancedSecond.randomReceiverSocketCount == 64
+               && balancedSecond.randomTargetPortCount == 512
                && plan.portSpan == 16 && plan.targets.size() == 33,
            "balanced retry doubles the initial regular range");
     const NatPunchAttemptPolicy balancedThird =
         ResolveNatPunchAttemptPolicy(NatPunchProfile::Balanced, 3);
     Expect(BuildNatPunchPlan(
                easyA, regular, balancedThird, &plan, &error)
+               && balancedThird.randomReceiverSocketCount == 128
+               && balancedThird.randomTargetPortCount == 1000
+               && balancedThird.randomPortIntervalMs == 15
                && plan.portSpan == 32 && plan.targets.size() == 65,
            "later balanced retries continue expanding the range");
 
@@ -73,12 +79,17 @@ int main() {
                easyA, regular, aggressiveSecond, &plan, &error)
                && aggressiveSecond.rangeScale == 4
                && aggressiveSecond.maximumRangeSpan == 128
+               && aggressiveSecond.randomReceiverSocketCount == 128
+               && aggressiveSecond.randomTargetPortCount == 1000
                && plan.portSpan == 32 && plan.targets.size() == 65,
            "aggressive retry expands the regular range faster");
     const NatPunchAttemptPolicy aggressiveMaximum =
         ResolveNatPunchAttemptPolicy(NatPunchProfile::Aggressive, 10);
     Expect(BuildNatPunchPlan(
                easyA, regular, aggressiveMaximum, &plan, &error)
+               && aggressiveMaximum.randomReceiverSocketCount == 256
+               && aggressiveMaximum.randomTargetPortCount == 1000
+               && aggressiveMaximum.randomPortIntervalMs == 5
                && plan.portSpan == 128 && plan.targets.size() == 257,
            "aggressive range remains bounded at 257 target ports");
     Expect(ComputeNatPunchWaveIntervalMs(
@@ -119,8 +130,31 @@ int main() {
     const auto random = Observation(
         NatMappingBehavior::PortDependentRandom,
         "198.51.100.40", 43000, 44000);
-    Expect(!BuildNatPunchPlan(easyA, random, &plan, &error),
-           "random mapping does not silently use a fixed offset");
+    Expect(BuildNatPunchPlan(easyA, random, &plan, &error)
+               && plan.mode == NatPunchPlanMode::RandomSender
+               && plan.targets.empty(),
+           "easy side becomes the bounded random-port sender");
+    std::vector<UdpEndpoint> randomTargets;
+    Expect(BuildRandomPortTargets(random, 256, &randomTargets, &error)
+               && randomTargets.size() == 256
+               && FormatUdpEndpoint(randomTargets.front())
+                    == "198.51.100.40:44000",
+           "random sender includes observed ports before random targets");
+    std::unordered_set<std::string> uniqueRandomTargets;
+    for (const UdpEndpoint& target : randomTargets) {
+        uniqueRandomTargets.insert(FormatUdpEndpoint(target));
+    }
+    Expect(uniqueRandomTargets.size() == randomTargets.size(),
+           "random sender targets do not repeat within one attempt");
+    Expect(BuildNatPunchPlan(random, easyB, &plan, &error)
+               && plan.mode == NatPunchPlanMode::RandomReceiver
+               && plan.receiverSocketCount == 32
+               && plan.targets.size() == 1
+               && FormatUdpEndpoint(plan.targets[0])
+                    == "203.0.113.20:41000",
+           "random side becomes a bounded multi-socket receiver");
+    Expect(!BuildNatPunchPlan(random, regular, &plan, &error),
+           "mixed random/regular remains reserved for the next strategy");
 
     const auto decreasing = Observation(
         NatMappingBehavior::PortDependentRegular,

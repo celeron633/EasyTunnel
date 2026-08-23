@@ -37,6 +37,7 @@ struct NatPunchAttemptResult {
     NatMappingBehavior peerBehavior = NatMappingBehavior::Unknown;
     std::string plan = "-";
     size_t targetCount = 0;
+    size_t socketCount = 1;
     uint16_t portSpan = 0;
     uint32_t waveIntervalMs = 0;
     uint32_t datagramBudget = 0;

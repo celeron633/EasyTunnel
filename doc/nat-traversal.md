@@ -51,7 +51,7 @@ transaction ID，并包含合法的 `XOR-MAPPED-ADDRESS`。
 |---|---|---|
 | 公网 IP、端口均相同 | endpoint-independent | Direct |
 | 公网 IP 相同，端口差绝对值 1～5 | port-dependent-regular | Range/regular sender/dual-range |
-| 公网 IP 相同，端口差大于 5 | port-dependent-random | 尚未实现，转后续策略 |
+| 公网 IP 相同，端口差大于 5 | port-dependent-random | 与 easy 配对时使用 Random sender/receiver |
 | 公网 IP 不同 | multi-public-IP | 尚未实现，转后续策略 |
 
 这里的分类只描述 mapping behavior，不宣称完成 RFC 5780 的 filtering behavior 测试。
@@ -139,12 +139,31 @@ span = min(profile_max_span, initial_span * attempt_scale)
 Direct 和 regular sender 仍只有一个目标，不会因为 profile 无意义地扩展。Range 与
 dual-range 首轮保持原来的小范围，只有同步到新 attempt 后才扩大。一次发送波次会
 遍历当前全部目标；如果 `punch_timeout` 很长，实际波次间隔会自动增加，保证发送量
-不超过对应 profile 的单 attempt 报文预算。`aggressive` 只扩大当前 regular Range
-策略，不代表已经支持 random 或 multi-public-IP NAT。
+不超过对应 profile 的单 attempt 报文预算。
+
+Random sender/receiver 使用另一组受限资源：
+
+| Profile | receiver socket（attempt 1/2/3+） | 随机目标（attempt 1/2/3+） | 每目标间隔 |
+|---|---:|---:|---:|
+| `balanced` | 32 / 64 / 128 | 256 / 512 / 1000 | 15 ms |
+| `aggressive` | 64 / 128 / 256 | 512 / 1000 / 1000 | 5 ms |
+
+### easy/random
+
+port-dependent-random 一端固定为 receiver，在发送 `NAT_ARMED` 前绑定 profile 指定
+数量的 UDP socket；easy 一端固定为 sender。`NAT_START` 后 receiver 从每个 socket
+向 easy 的稳定端点发送认证 PUNCH，为这些 socket 创建到目标地址的 NAT 映射。sender
+先尝试对端两次 STUN 的已知端口，再使用 CSPRNG 生成的起点和互质步长，在
+1024～65535 内无重复探测限定数量的端口。
+
+receiver 同时轮询整个 socket pool，首个收到合法 session/attempt/token 报文的 socket
+成为 winner；其余 socket 立即关闭，winner 原样交给 TUN 数据面。sender 每个随机端口
+只探测一次，receiver 的重复波次仍受 profile 报文预算限制。当前基线不使用低 TTL，
+也不额外等待 frp 的 3 秒 sender delay。
 
 ### 尚未完成
 
-random receiver 和 mixed random/range 仍在
+mixed random/range、random/random 和 multi-public-IP 仍在
 [新 NAT 穿透 TODO](新NAT穿透TODO.md) 中。遇到
 这些组合会返回明确错误并继续 IPv6/Relay（若已启用），不会调用旧 fixed-offset
 算法。
@@ -182,7 +201,7 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
 
 - `STUN servers must resolve to different public IPv4 addresses`：A/B 实际解析到同一 IP。
 - `STUN server did not respond`：检查 Coturn `stun-only`、UDP 3478 和安全组。
-- `Random or multi-public-IP NAT plan is not implemented yet`：启用 Relay，或等待
-  Random receiver 策略完成；当前 aggressive profile 只扩大 regular Range。
+- `NAT mapping combination requires an unsupported mixed-random strategy`：当前只支持
+  easy/random；random/regular、random/random 和 multi-public-IP 请启用 Relay。
 - `Timed out at the NAT synchronization barrier`：检查客户端/会合服务器版本是否一致，
   以及 punch socket 到会合服务器的 UDP 返回流量。

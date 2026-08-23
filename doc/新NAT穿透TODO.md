@@ -70,11 +70,11 @@ frp xTCP 的流程、五种模式和源码索引见
 
 ### 阶段 4：frp Mode 2 类 Random receiver
 
-状态：待开始。
+状态：进行中。
 
-- 困难 NAT 端创建有上限的随机监听 socket，并选择第一个成功 socket。
-- 对端在限定数量、速率和时间预算内探测随机目标端口。
-- 增加 socket、带宽、突发速率和取消流程压力测试。
+- [x] 困难 NAT 端创建有上限的随机监听 socket，并选择第一个成功 socket。
+- [x] 对端在限定数量、速率和时间预算内探测不重复的随机目标端口。
+- [ ] 增加重复执行、资源耗尽、超时和取消流程压力测试。
 
 ### 阶段 5：frp Mode 4 类 mixed random/range
 
@@ -145,13 +145,17 @@ frp xTCP 的流程、五种模式和源码索引见
       Aggressive 最大半径 128，并通过波次间隔和单 attempt 报文预算限制发送量。
 - [x] Range/dual-range 按本地 attempt 序号确定性扩围；Direct 和 regular sender
       继续使用单目标计划。
+- [x] 实现 easy/random 的 Mode 2 基线：random 端使用 32～256 个受限 receiver
+      socket，easy 端按 profile 探测 256～1000 个不重复随机端口。
+- [x] 多 socket 使用系统 poll 等待首个认证 PUNCH/PUNCH_ACK；关闭所有 loser，
+      将 winner socket 原样交给 TUN 数据面。
+- [x] 集成测试覆盖 Aggressive 最大 256 socket、1000 随机目标、真实 registry 屏障、
+      attempt/token 校验和 winner 接管。
 
 ### 待完成
 
 #### frp xTCP 困难 NAT 策略
 
-- [ ] 实现 Mode 2 类 Random receiver：限制随机监听 socket 数、随机目标端口数和
-      UDP 发送速率。
 - [ ] 实现 Mode 4 类 mixed random/range：一端范围预测，另一端多 socket 随机探测。
 - [ ] 评估并实现低 TTL 预打洞以及 sender/receiver 延迟发送组合。
 - [ ] 收集打洞成功报告，按 NAT 特征记录策略成功率并动态调整尝试顺序。
