@@ -34,11 +34,7 @@ jobs:
 
       - name: Build and run tests
         run: |
-          cmake --build build --config Release --target EasyTunnel_config_tests
-          cmake --build build --config Release --target EasyTunnel_rendezvous_capabilities_tests
-          cmake --build build --config Release --target EasyTunnel_stun_tests
-          cmake --build build --config Release --target EasyTunnel_nat_punch_plan_tests
-          cmake --build build --config Release --target EasyTunnel_adaptive_nat_integration_tests
+          cmake --build build --config Release
           ctest --test-dir build -C Release --output-on-failure
 
       - name: Package EasyTunnel release
@@ -123,12 +119,7 @@ jobs:
 
       - name: Build and run tests
         run: |
-          cmake --build build --parallel --target \
-            EasyTunnel_config_tests \
-            EasyTunnel_rendezvous_capabilities_tests \
-            EasyTunnel_stun_tests \
-            EasyTunnel_nat_punch_plan_tests \
-            EasyTunnel_adaptive_nat_integration_tests
+          cmake --build build --parallel
           ctest --test-dir build --output-on-failure
 
       - name: Package Linux amd64 release
