@@ -21,8 +21,10 @@ const char* RendezvousEventName(RendezvousEventType type) {
         case RendezvousEventType::Registered: return "Registered";
         case RendezvousEventType::PeerUnavailable: return "PeerUnavailable";
         case RendezvousEventType::Peer: return "Peer";
-        case RendezvousEventType::Nat4Wait: return "Nat4Wait";
-        case RendezvousEventType::Nat4Peer: return "Nat4Peer";
+        case RendezvousEventType::NatWait: return "NatWait";
+        case RendezvousEventType::NatPeerInfo: return "NatPeerInfo";
+        case RendezvousEventType::NatArmedAck: return "NatArmedAck";
+        case RendezvousEventType::NatStart: return "NatStart";
         case RendezvousEventType::Error: return "Error";
         default: return "Unknown";
     }
@@ -48,11 +50,13 @@ long long MillisecondsRemaining(
 bool SelectPeer(socket_t sock, const Config& config,
                 const UdpEndpoint& server,
                 const std::atomic<bool>& running,
-                UdpEndpoint* peer, std::string* matchedPeerId,
-                std::vector<TraversalMode>* traversalModes,
-                std::string* error) {
+                 UdpEndpoint* peer, std::string* matchedPeerId,
+                 std::vector<TraversalMode>* traversalModes,
+                 NatPunchSession* natPunchSession,
+                 std::string* error) {
     if (!ValidateRendezvousSession(config, error)) return false;
     traversalModes->clear();
+    *natPunchSession = {};
 
     RendezvousClient rendezvous(config, server);
     const auto selectionDeadline = std::chrono::steady_clock::now()
@@ -142,6 +146,11 @@ bool SelectPeer(socket_t sock, const Config& config,
             *peer = event.peer;
             *matchedPeerId = event.peerId;
             *traversalModes = event.traversalModes;
+            natPunchSession->sessionId = event.sessionId;
+            natPunchSession->attemptId = event.attemptId;
+            natPunchSession->role = event.natPunchRole;
+            natPunchSession->protocolVersion = event.natPunchVersion;
+            natPunchSession->punchToken = event.natPunchToken;
             Log(LogLevel::Info, "Rendezvous selected peer id="
                 + *matchedPeerId + ", endpoint=" + FormatUdpEndpoint(*peer)
                 + ", peer_capabilities="

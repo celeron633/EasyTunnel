@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "nat_protocol.h"
+#include "rendezvous_client.h"
 #include "rendezvous/config.h"
 #include "rendezvous/registry.h"
 #include "util.h"
@@ -92,26 +93,115 @@ int main() {
     std::vector<std::string> fields;
 
     Register(&registry, aEndpoint, "common", "a",
-             "ipv4_relay,nat4,nat");
-    Register(&registry, bEndpoint, "common", "b", "nat,nat4");
+             "ipv4_relay,nat_punch");
+    Register(&registry, bEndpoint, "common", "b", "nat_punch");
     Expect(ReceiveControl(a, &type, &fields) && type == "REGISTERED",
            "initiator registers capabilities");
     Expect(ReceiveControl(b, &type, &fields) && type == "REGISTERED",
            "waiting peer registers capabilities");
 
     registry.Handle(aEndpoint, "CONNECT",
-        {"common", "a", "b", "ipv4_relay,nat4,nat", ""},
+        {"common", "a", "b", "ipv4_relay,nat_punch", ""},
         std::chrono::steady_clock::now());
     Expect(ReceiveControl(a, &type, &fields) && type == "PEER"
-               && fields.size() == 5
-               && fields[3] == "nat,nat4"
-               && fields[4] == "nat4,nat",
+               && fields.size() == 10
+               && fields[3] == "nat_punch"
+               && fields[4] == "nat_punch"
+               && fields[7] == "initiator" && fields[8] == "2"
+               && fields[9].size() == 64,
            "initiator receives peer capabilities and its preferred intersection");
+    const std::string natSession = fields.size() == 10 ? fields[5] : "";
+    const std::string natAttempt = fields.size() == 10 ? fields[6] : "";
+    const std::string natPunchToken = fields.size() == 10 ? fields[9] : "";
     Expect(ReceiveControl(b, &type, &fields) && type == "PEER"
-               && fields.size() == 5
-               && fields[3] == "ipv4_relay,nat4,nat"
-               && fields[4] == "nat4,nat",
+               && fields.size() == 10
+               && fields[3] == "ipv4_relay,nat_punch"
+               && fields[4] == "nat_punch"
+               && fields[5] == natSession && fields[6] == natAttempt
+               && fields[7] == "responder" && fields[8] == "2"
+               && fields[9] == natPunchToken,
            "waiting peer receives the initiator's negotiated order");
+
+    Config parserConfig;
+    parserConfig.room_id = "common";
+    parserConfig.peer_id = "a";
+    parserConfig.target_peer_id = "b";
+    RendezvousClient responseParser(parserConfig, aEndpoint);
+    const std::string peerPacket = MakeControlMessage("PEER",
+        {"203.0.113.20", "41000", "b", "nat_punch", "nat_punch",
+         natSession, natAttempt, "initiator", "2", natPunchToken});
+    const RendezvousEvent parsedPeer = responseParser.HandlePacket(
+        aEndpoint, reinterpret_cast<const uint8_t*>(peerPacket.data()),
+        peerPacket.size());
+    Expect(parsedPeer.type == RendezvousEventType::Peer
+               && parsedPeer.sessionId == natSession
+               && parsedPeer.attemptId != 0
+               && parsedPeer.natPunchRole == NatPunchRole::Initiator
+               && parsedPeer.natPunchToken == natPunchToken,
+           "client parses NAT session metadata from PEER");
+
+    const std::string peerInfoPacket = MakeControlMessage("NAT_PEER_INFO",
+        {natSession, natAttempt, "b", "port-dependent-regular",
+         "203.0.113.20", "41000", "203.0.113.20", "41002", "-",
+         "initiator", "2"});
+    const RendezvousEvent parsedPeerInfo = responseParser.HandlePacket(
+        aEndpoint, reinterpret_cast<const uint8_t*>(peerInfoPacket.data()),
+        peerInfoPacket.size());
+    Expect(parsedPeerInfo.type == RendezvousEventType::NatPeerInfo
+               && parsedPeerInfo.peerId == "b"
+               && FormatUdpEndpoint(parsedPeerInfo.natPeerInfo.mappedB)
+                    == "203.0.113.20:41002",
+           "client parses peer STUN mappings from NAT_PEER_INFO");
+
+    UdpEndpoint aPunchEndpoint{};
+    UdpEndpoint bPunchEndpoint{};
+    socket_t aPunch = OpenClient(&aPunchEndpoint);
+    socket_t bPunch = OpenClient(&bPunchEndpoint);
+    Expect(aPunch != kInvalidSocket && bPunch != kInvalidSocket,
+           "separate NAT punch sockets open");
+    registry.Handle(aPunchEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt, "2",
+         "endpoint-independent", "198.51.100.10", "40000",
+         "198.51.100.10", "40000", "-", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_WAIT"
+               && fields.size() == 2 && fields[0] == natSession
+               && fields[1] == natAttempt,
+           "first NAT report waits for its peer");
+
+    registry.Handle(bPunchEndpoint, "NAT_INFO",
+        {"common", "b", "a", natSession, natAttempt, "2",
+         "port-dependent-regular", "203.0.113.20", "41000",
+         "203.0.113.20", "41002", "-", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields)
+               && type == "NAT_PEER_INFO" && fields.size() == 11
+               && fields[0] == natSession && fields[1] == natAttempt
+               && fields[2] == "b" && fields[3] == "port-dependent-regular"
+               && fields[4] == "203.0.113.20" && fields[5] == "41000"
+               && fields[7] == "41002" && fields[9] == "initiator",
+           "initiator receives the responder's NAT report");
+    Expect(ReceiveControl(bPunch, &type, &fields)
+               && type == "NAT_PEER_INFO" && fields.size() == 11
+               && fields[2] == "a" && fields[3] == "endpoint-independent"
+               && fields[9] == "responder",
+           "responder receives the initiator's NAT report");
+
+    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields)
+               && type == "NAT_ARMED_ACK",
+           "first armed peer waits at the synchronization barrier");
+    registry.Handle(bPunchEndpoint, "NAT_ARMED",
+        {"common", "b", "a", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_START"
+               && fields[0] == natSession && fields[1] == natAttempt,
+           "initiator receives synchronized NAT start");
+    Expect(ReceiveControl(bPunch, &type, &fields) && type == "NAT_START"
+               && fields[0] == natSession && fields[1] == natAttempt,
+           "responder receives synchronized NAT start");
 
     Register(&registry, cEndpoint, "incompatible", "c", "ipv6");
     Register(&registry, dEndpoint, "incompatible", "d", "ipv4_relay");
@@ -163,6 +253,8 @@ int main() {
     CloseSocket(b);
     CloseSocket(c);
     CloseSocket(d);
+    CloseSocket(aPunch);
+    CloseSocket(bPunch);
     CloseSocket(serverSocket);
 #ifdef _WIN32
     WSACleanup();

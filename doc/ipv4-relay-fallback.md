@@ -15,7 +15,7 @@ Relay 不改变 TUN 内层协议，也不增加逐包封装。IPv4 TUN 包、`KE
 客户端必须设置：
 
 ```ini
-traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:true
+traversal_modes=nat_punch:true,ipv6:false,ipv4_relay:true
 ```
 
 会合服务器必须设置：
@@ -32,7 +32,7 @@ traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:true
 IPv4 精确端口 Punch
         |
         v
-NAT4 socket pool
+Adaptive NAT Punch
         |
         v
 IPv6 直连（启用时）
@@ -79,7 +79,7 @@ Client A                 控制端口                 Relay 线程              
 ```
 
 第一端请求时，如果目标仍在服务器注册表中，服务器会立即创建线程并返回端口；如果
-目标刚因 NAT4 换 socket 而短暂注销，则返回 `RELAY_WAIT`。客户端会重发请求，第二端
+目标刚因 NAT Punch 换 socket 而短暂更新端点，则返回 `RELAY_WAIT`。客户端会重发请求，第二端
 注册后创建会话，两端最终取得同一个 relay 端口。
 
 控制协议消息如下：

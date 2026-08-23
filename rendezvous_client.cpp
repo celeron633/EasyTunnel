@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <limits>
 #include <utility>
 
 #include "nat_protocol.h"
@@ -14,6 +13,7 @@ constexpr const char* kNoResponseError = "Rendezvous server did not respond";
 constexpr size_t kClientFields = 5;
 constexpr size_t kMaxControlMessageBytes = 8192;
 constexpr const char* kUnknownField = "-";
+constexpr const char* kNatPunchProtocolVersion = "2";
 
 bool Send(socket_t sock, const UdpEndpoint& endpoint, const std::string& data) {
     return sendto(sock, data.data(), static_cast<int>(data.size()), 0,
@@ -29,17 +29,70 @@ UdpEndpoint FromSockaddr(const sockaddr_storage& address, socket_len_t len) {
     return endpoint;
 }
 
-bool ParseRound(const std::string& text, uint32_t* round) {
+bool ParseAttemptId(const std::string& text, uint64_t* attemptId) {
     try {
         size_t consumed = 0;
-        const unsigned long value = std::stoul(text, &consumed);
-        if (consumed != text.size()
-            || value > (std::numeric_limits<uint32_t>::max)()) return false;
-        *round = static_cast<uint32_t>(value);
+        const unsigned long long value = std::stoull(text, &consumed);
+        if (consumed != text.size() || value == 0) return false;
+        *attemptId = static_cast<uint64_t>(value);
         return true;
     } catch (...) {
         return false;
     }
+}
+
+bool ParsePort(const std::string& text, uint16_t* port) {
+    try {
+        size_t consumed = 0;
+        const unsigned long value = std::stoul(text, &consumed);
+        if (consumed != text.size() || value == 0 || value > 65535) return false;
+        *port = static_cast<uint16_t>(value);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool ParseRole(const std::string& text, NatPunchRole* role) {
+    if (text == "initiator") {
+        *role = NatPunchRole::Initiator;
+        return true;
+    }
+    if (text == "responder") {
+        *role = NatPunchRole::Responder;
+        return true;
+    }
+    return false;
+}
+
+bool IsNatMappingBehavior(const std::string& behavior) {
+    return behavior == "endpoint-independent"
+        || behavior == "port-dependent-regular"
+        || behavior == "port-dependent-random"
+        || behavior == "multi-public-ip"
+        || behavior == "unknown";
+}
+
+bool ParseMappedEndpoint(const std::string& ip, const std::string& portText,
+                         UdpEndpoint* endpoint) {
+    uint16_t port = 0;
+    return ParsePort(portText, &port) && ParseUdpEndpoint(ip, port, endpoint);
+}
+
+bool IpAndPort(const UdpEndpoint& endpoint, std::string* ip,
+               std::string* port) {
+    if (endpoint.family != AF_INET
+        || endpoint.addr_len < static_cast<socket_len_t>(sizeof(sockaddr_in))) {
+        return false;
+    }
+    const auto* address = reinterpret_cast<const sockaddr_in*>(&endpoint.addr);
+    char text[INET_ADDRSTRLEN]{};
+    if (inet_ntop(AF_INET, &address->sin_addr, text, sizeof(text)) == nullptr) {
+        return false;
+    }
+    *ip = text;
+    *port = std::to_string(ntohs(address->sin_port));
+    return true;
 }
 
 bool ParsePeer(const std::vector<std::string>& fields, UdpEndpoint* peer,
@@ -102,12 +155,36 @@ bool RendezvousClient::SendProbe(socket_t sock) const {
     return sent;
 }
 
-bool RendezvousClient::SendNat4Join(socket_t sock,
-                                    const std::string& expectedPeerId,
-                                    uint32_t round) const {
-    return Send(sock, server_, MakeControlMessage("NAT4_JOIN",
-        {config_.room_id, config_.peer_id, expectedPeerId,
-         std::to_string(round), config_.auth_token}));
+bool RendezvousClient::SendNatInfo(
+        socket_t sock, const std::string& expectedPeerId,
+        const std::string& sessionId, uint64_t attemptId,
+        const std::string& mappingBehavior, const UdpEndpoint& mappedA,
+        const UdpEndpoint& mappedB,
+        const std::string& localCandidates) const {
+    std::string mappedAIp;
+    std::string mappedAPort;
+    std::string mappedBIp;
+    std::string mappedBPort;
+    if (!IpAndPort(mappedA, &mappedAIp, &mappedAPort)
+        || !IpAndPort(mappedB, &mappedBIp, &mappedBPort)
+        || !IsNatMappingBehavior(mappingBehavior)
+        || !IsSafeControlField(sessionId)
+        || !IsSafeControlField(localCandidates)) {
+        return false;
+    }
+    return Send(sock, server_, MakeControlMessage("NAT_INFO",
+        {config_.room_id, config_.peer_id, expectedPeerId, sessionId,
+         std::to_string(attemptId), kNatPunchProtocolVersion,
+         mappingBehavior, mappedAIp, mappedAPort, mappedBIp, mappedBPort,
+         localCandidates, config_.auth_token}));
+}
+
+bool RendezvousClient::SendNatArmed(
+        socket_t sock, const std::string& expectedPeerId,
+        const std::string& sessionId, uint64_t attemptId) const {
+    return Send(sock, server_, MakeControlMessage("NAT_ARMED",
+        {config_.room_id, config_.peer_id, expectedPeerId, sessionId,
+         std::to_string(attemptId), config_.auth_token}));
 }
 
 void RendezvousClient::Unregister(socket_t sock) const {
@@ -154,12 +231,17 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
     }
     if (type == "PEER") {
         std::string parseError;
-        if (fields.size() != 5
+        if (fields.size() != 10
             || !ParsePeer(fields, &event.peer, &event.peerId)
             || !ParseTraversalModeSequence(
                 fields[3], &event.peerCapabilities, &parseError)
             || !ParseTraversalModeSequence(
                 fields[4], &event.traversalModes, &parseError)
+            || !IsSafeControlField(fields[5])
+            || !ParseAttemptId(fields[6], &event.attemptId)
+            || !ParseRole(fields[7], &event.natPunchRole)
+            || fields[8] != kNatPunchProtocolVersion
+            || !IsSafeControlField(fields[9])
             || event.traversalModes.empty()) {
             return InvalidResponse();
         }
@@ -174,23 +256,45 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
                 return InvalidResponse();
             }
         }
+        event.sessionId = fields[5];
+        event.natPunchVersion = 2;
+        event.natPunchToken = fields[9];
         event.type = RendezvousEventType::Peer;
         return event;
     }
-    if (type == "NAT4_WAIT") {
-        if (fields.size() != 1 || !ParseRound(fields[0], &event.round)) {
+    if (type == "NAT_WAIT" || type == "NAT_ARMED_ACK"
+        || type == "NAT_START") {
+        if (fields.size() != 2 || !IsSafeControlField(fields[0])
+            || !ParseAttemptId(fields[1], &event.attemptId)) {
             return InvalidResponse();
         }
-        event.type = RendezvousEventType::Nat4Wait;
+        event.sessionId = fields[0];
+        event.type = type == "NAT_WAIT" ? RendezvousEventType::NatWait
+            : (type == "NAT_ARMED_ACK"
+                ? RendezvousEventType::NatArmedAck
+                : RendezvousEventType::NatStart);
         return event;
     }
-    if (type == "NAT4_PEER") {
-        if (fields.size() != 4
-            || !ParsePeer(fields, &event.peer, &event.peerId)
-            || !ParseRound(fields[3], &event.round)) {
+    if (type == "NAT_PEER_INFO") {
+        if (fields.size() != 11 || !IsSafeControlField(fields[0])
+            || !ParseAttemptId(fields[1], &event.attemptId)
+            || !IsSafeControlField(fields[2])
+            || !IsNatMappingBehavior(fields[3])
+            || !ParseMappedEndpoint(fields[4], fields[5],
+                                    &event.natPeerInfo.mappedA)
+            || !ParseMappedEndpoint(fields[6], fields[7],
+                                    &event.natPeerInfo.mappedB)
+            || !IsSafeControlField(fields[8])
+            || !ParseRole(fields[9], &event.natPunchRole)
+            || fields[10] != kNatPunchProtocolVersion) {
             return InvalidResponse();
         }
-        event.type = RendezvousEventType::Nat4Peer;
+        event.sessionId = fields[0];
+        event.peerId = fields[2];
+        event.natPeerInfo.mappingBehavior = fields[3];
+        event.natPeerInfo.localCandidates = fields[8];
+        event.natPunchVersion = 2;
+        event.type = RendezvousEventType::NatPeerInfo;
         return event;
     }
 

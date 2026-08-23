@@ -37,8 +37,10 @@ ftxui::Component RendezvousTuiApp::BuildDashboardTab() {
             for (const auto& client : room.clients) {
                 std::string state = "available";
                 Color stateColor = Color::Green;
-                if (client.nat4Joined) {
-                    state = "NAT4 #" + std::to_string(client.nat4Round);
+                if (client.natArmed) {
+                    state = "NAT armed";
+                } else if (client.natInfoReported) {
+                    state = "NAT info";
                     if (!client.pairedWith.empty()) state += " -> " + client.pairedWith;
                     stateColor = Color::Blue;
                 } else if (!client.pairedWith.empty()) {

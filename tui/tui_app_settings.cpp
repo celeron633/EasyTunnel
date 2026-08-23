@@ -39,11 +39,10 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto keepalive = Input(&keepaliveText_, "15");
     auto peerTimeout = Input(&peerTimeoutText_, "45");
     auto punchTimeout = Input(&punchTimeoutText_, "30");
-    auto nat4SourcePortStart = Input(&nat4SourcePortStartText_, "30000");
-    auto nat4SourcePortCount = Input(&nat4SourcePortCountText_, "25");
-    auto nat4PeerPortOffset = Input(&nat4PeerPortOffsetText_, "20");
-    auto nat4RoundTimeout = Input(&nat4RoundTimeoutText_, "10");
-    auto nat4RoundLimit = Input(&nat4RoundLimitText_, "3");
+    auto stunAHost = Input(&config_.stunServers[0].host, "stun-a.example.com");
+    auto stunAPort = Input(&stunAPortText_, "3478");
+    auto stunBHost = Input(&config_.stunServers[1].host, "stun-b.example.com");
+    auto stunBPort = Input(&stunBPortText_, "3478");
     auto ipv6ListenPort = Input(&ipv6ListenPortText_, "0");
     auto ipv6ProbeHost = Input(&config_.ipv6ProbeHost, "2400:3200::1");
     auto ipv6ProbePort = Input(&ipv6ProbePortText_, "53");
@@ -84,8 +83,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto leftColumn = Container::Vertical({
         serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay,
         autoWait, keepalive, peerTimeout, punchTimeout,
-        nat4SourcePortStart, nat4SourcePortCount,
-        nat4PeerPortOffset, nat4RoundTimeout, nat4RoundLimit,
+        stunAHost, stunAPort, stunBHost, stunBPort,
         logLevel, dummyTraffic,
     });
     Components rightControls = {adapter, tunIp, tunPrefix, tunMtu, autoConfig};
@@ -98,8 +96,8 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto controls = Container::Horizontal({leftColumn, rightColumn});
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
-         peerTimeout, punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
-         nat4PeerPortOffset, nat4RoundTimeout, nat4RoundLimit, logLevel, serverAddress,
+         peerTimeout, punchTimeout, stunAHost, stunAPort, stunBHost, stunBPort,
+         logLevel, serverAddress,
          serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
          autoWait, ipv6Inbound, ipv6ListenPort,
          ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout,
@@ -121,11 +119,10 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             separatorEmpty(),
             tui_theme::SectionTitle("NAT Punch"),
             row("Punch timeout (s)", punchTimeout),
-            row("NAT4 port start", nat4SourcePortStart),
-            row("NAT4 port count", nat4SourcePortCount),
-            row("NAT4 peer offset", nat4PeerPortOffset),
-            row("NAT4 round timeout (s)", nat4RoundTimeout),
-            row("NAT4 round limit", nat4RoundLimit),
+            row("STUN A host", stunAHost),
+            row("STUN A port", stunAPort),
+            row("STUN B host", stunBHost),
+            row("STUN B port", stunBPort),
             separatorEmpty(),
             tui_theme::SectionTitle("Log and misc"),
             row("Log level", logLevel),
@@ -181,17 +178,15 @@ ftxui::Component TuiApp::BuildSettingsTab() {
 }
 
 void TuiApp::SyncTextFromConfig() {
+    if (config_.stunServers.size() < 2) config_.stunServers.resize(2);
     serverPortText_ = std::to_string(config_.rendezvousPort);
     tunPrefixText_ = std::to_string(config_.tunPrefix);
     tunMtuText_ = std::to_string(config_.tunMtu);
     keepaliveText_ = std::to_string(config_.keepaliveInterval);
     peerTimeoutText_ = std::to_string(config_.peerTimeout);
     punchTimeoutText_ = std::to_string(config_.punchTimeout);
-    nat4SourcePortStartText_ = std::to_string(config_.nat4SourcePortStart);
-    nat4SourcePortCountText_ = std::to_string(config_.nat4SourcePortCount);
-    nat4PeerPortOffsetText_ = std::to_string(config_.nat4PeerPortOffset);
-    nat4RoundTimeoutText_ = std::to_string(config_.nat4RoundTimeout);
-    nat4RoundLimitText_ = std::to_string(config_.nat4RoundLimit);
+    stunAPortText_ = std::to_string(config_.stunServers[0].port);
+    stunBPortText_ = std::to_string(config_.stunServers[1].port);
     ipv6ListenPortText_ = std::to_string(config_.ipv6ListenPort);
     ipv6ProbePortText_ = std::to_string(config_.ipv6ProbePort);
     ipv6FallbackTimeoutText_ = std::to_string(config_.ipv6FallbackTimeout);
@@ -207,20 +202,10 @@ void TuiApp::SyncConfigFromText() {
     config_.peerTimeout = std::clamp(ParseInt(peerTimeoutText_, config_.peerTimeout),
                                      config_.keepaliveInterval + 1, 3600);
     config_.punchTimeout = std::clamp(ParseInt(punchTimeoutText_, config_.punchTimeout), 1, 600);
-    config_.nat4SourcePortStart = std::clamp(
-        ParseInt(nat4SourcePortStartText_, config_.nat4SourcePortStart), 1, 65535);
-    config_.nat4SourcePortCount = std::clamp(
-        ParseInt(nat4SourcePortCountText_, config_.nat4SourcePortCount), 1, 60);
-    if (config_.nat4SourcePortCount > 0) {
-        config_.nat4SourcePortStart = (std::min)(
-            config_.nat4SourcePortStart, 65536 - config_.nat4SourcePortCount);
-    }
-    config_.nat4PeerPortOffset = std::clamp(
-        ParseInt(nat4PeerPortOffsetText_, config_.nat4PeerPortOffset), 0, 256);
-    config_.nat4RoundTimeout = std::clamp(
-        ParseInt(nat4RoundTimeoutText_, config_.nat4RoundTimeout), 1, 60);
-    config_.nat4RoundLimit = std::clamp(
-        ParseInt(nat4RoundLimitText_, config_.nat4RoundLimit), 1, 1000);
+    config_.stunServers[0].port = static_cast<uint16_t>(std::clamp(
+        ParseInt(stunAPortText_, config_.stunServers[0].port), 1, 65535));
+    config_.stunServers[1].port = static_cast<uint16_t>(std::clamp(
+        ParseInt(stunBPortText_, config_.stunServers[1].port), 1, 65535));
     config_.ipv6ListenPort = std::clamp(
         ParseInt(ipv6ListenPortText_, config_.ipv6ListenPort), 0, 65535);
     config_.ipv6ProbePort = std::clamp(
@@ -239,9 +224,8 @@ std::string TuiApp::ConfigSignature() const {
               << config_.adapterName << '\n' << config_.localTunIpv4 << '\n'
               << tunPrefixText_ << '\n' << tunMtuText_ << '\n' << config_.autoConfigIpv4 << '\n'
               << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
-              << nat4SourcePortStartText_ << '\n' << nat4SourcePortCountText_ << '\n'
-              << nat4PeerPortOffsetText_ << '\n' << nat4RoundTimeoutText_ << '\n'
-              << nat4RoundLimitText_ << '\n'
+              << config_.stunServers[0].host << '\n' << stunAPortText_ << '\n'
+              << config_.stunServers[1].host << '\n' << stunBPortText_ << '\n'
               << SerializeTraversalModes(config_.traversalModes) << '\n'
               << config_.ipv6AcceptInbound << '\n'
               << ipv6ListenPortText_ << '\n' << config_.ipv6ProbeHost << '\n'

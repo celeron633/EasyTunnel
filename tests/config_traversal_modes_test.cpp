@@ -18,27 +18,27 @@ void Expect(bool condition, const char* message) {
 int main(int argc, char** argv) {
     const auto defaults = DefaultTraversalModes();
     Expect(SerializeTraversalModes(defaults)
-               == "nat:true,nat4:true,ipv6:false,ipv4_relay:false",
+               == "nat_punch:true,ipv6:false,ipv4_relay:false",
            "default traversal modes");
 
     std::vector<TraversalModeSetting> parsed;
     std::string error;
     Expect(ParseTraversalModes(
-               "ipv6:true,nat:false,ipv4_relay:true,nat4:false",
+               "ipv6:true,nat_punch:false,ipv4_relay:true",
                &parsed, &error),
            "custom traversal order parses");
-    Expect(parsed.size() == 4 && parsed[0].mode == TraversalMode::Ipv6
+    Expect(parsed.size() == 3 && parsed[0].mode == TraversalMode::Ipv6
                && parsed[2].mode == TraversalMode::Ipv4Relay,
            "custom traversal order is retained");
     Expect(SerializeTraversalModes(parsed)
-               == "ipv6:true,nat:false,ipv4_relay:true,nat4:false",
+               == "ipv6:true,nat_punch:false,ipv4_relay:true",
            "custom traversal modes round-trip");
 
     Config config;
     config.traversal_modes = parsed;
     Expect(IsTraversalModeEnabled(config, TraversalMode::Ipv6),
            "enabled mode lookup");
-    Expect(!IsTraversalModeEnabled(config, TraversalMode::Nat4),
+    Expect(!IsTraversalModeEnabled(config, TraversalMode::NatPunch),
            "disabled mode lookup");
 
     const auto enabled = EnabledTraversalModes(config.traversal_modes);
@@ -49,11 +49,11 @@ int main(int argc, char** argv) {
 
     std::vector<TraversalMode> capabilities;
     Expect(ParseTraversalModeSequence(
-               "nat4,nat,ipv4_relay", &capabilities, &error),
+               "nat_punch,ipv4_relay", &capabilities, &error),
            "wire capability sequence parses");
-    Expect(capabilities.size() == 3
-               && capabilities[0] == TraversalMode::Nat4
-               && capabilities[2] == TraversalMode::Ipv4Relay,
+    Expect(capabilities.size() == 2
+               && capabilities[0] == TraversalMode::NatPunch
+               && capabilities[1] == TraversalMode::Ipv4Relay,
            "wire capability order is retained");
     Expect(ParseTraversalModeSequence("none", &capabilities, &error)
                && capabilities.empty(),
@@ -64,31 +64,35 @@ int main(int argc, char** argv) {
 
     const std::vector<TraversalMode> initiator{
         TraversalMode::Ipv4Relay,
-        TraversalMode::Nat4,
-        TraversalMode::Nat,
+        TraversalMode::NatPunch,
     };
     const std::vector<TraversalMode> peer{
-        TraversalMode::Nat,
-        TraversalMode::Nat4,
+        TraversalMode::NatPunch,
     };
     const auto negotiated = IntersectTraversalModes(initiator, peer);
-    Expect(SerializeTraversalModeSequence(negotiated) == "nat4,nat",
+    Expect(SerializeTraversalModeSequence(negotiated) == "nat_punch",
            "negotiated modes follow initiator order");
     Expect(IntersectTraversalModes(
                {TraversalMode::Ipv6}, {TraversalMode::Ipv4Relay}).empty(),
            "incompatible capabilities have no negotiated mode");
 
     Expect(!ParseTraversalModes(
-               "nat:true,nat:true,ipv6:false,ipv4_relay:false",
+               "nat_punch:true,nat_punch:true,ipv6:false,ipv4_relay:false",
                &parsed, &error),
            "duplicate traversal mode is rejected");
     Expect(!ParseTraversalModes(
-               "nat:true,nat4:true,ipv6:false", &parsed, &error),
+               "nat_punch:true,ipv6:false", &parsed, &error),
            "missing traversal mode is rejected");
     Expect(ParseTraversalModes(
-               "nat:false,nat4:false,ipv6:false,ipv4_relay:false",
+               "nat_punch:false,ipv6:false,ipv4_relay:false",
                &parsed, &error),
            "all-disabled modes can be persisted for UI editing");
+    Expect(ParseTraversalModes(
+               "nat:false,nat4:true,ipv6:false,ipv4_relay:false",
+               &parsed, &error)
+               && SerializeTraversalModes(parsed)
+                    == "nat_punch:true,ipv6:false,ipv4_relay:false",
+           "legacy nat/nat4 settings migrate to one adaptive NAT Punch mode");
 
     Expect(argc == 2, "example config path is provided");
     if (argc == 2) {
@@ -98,25 +102,24 @@ int main(int argc, char** argv) {
                    && existed,
                "shared example config loads");
         Expect(SerializeTraversalModes(example.traversalModes)
-                   == "nat:true,nat4:true,ipv6:false,ipv4_relay:false",
+                   == "nat_punch:true,ipv6:false,ipv4_relay:false",
                "shared example traversal strategy");
-        Expect(example.nat4RoundLimit == 3,
-               "shared example NAT4 round limit");
+        Expect(example.stunServers.size() == 2
+                   && example.stunServers[0].host == "198.51.100.10"
+                   && example.stunServers[1].port == 3478,
+               "shared example STUN servers");
         Expect(ValidateClientConfig(example, &error),
                "shared example config validates");
+        ClientConfig missingStun = example;
+        missingStun.stunServers[1].host.clear();
+        Expect(!ValidateClientConfig(missingStun, &error),
+               "adaptive NAT Punch requires both STUN servers");
         const Config engine = ToEngineConfig(example, "node-b");
         Expect(engine.rendezvous_addr == example.rendezvousAddress
                    && engine.target_peer_id == "node-b"
                    && engine.tun_mtu == 1452
-                   && engine.nat4_round_limit == 3,
+                   && engine.stun_servers.size() == 2,
                "engine config mapping");
-
-        example.nat4RoundLimit = 2000;
-        Expect(ToEngineConfig(example, "node-b").nat4_round_limit == 1000,
-               "engine NAT4 round limit clamps high values");
-        example.nat4RoundLimit = 0;
-        Expect(ToEngineConfig(example, "node-b").nat4_round_limit == 1,
-               "engine NAT4 round limit clamps low values");
     }
 
     if (failures != 0) {

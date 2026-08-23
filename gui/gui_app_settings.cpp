@@ -113,29 +113,30 @@ void GuiApp::RenderSettingsTab() {
     ImGui::Spacing();
     ImGui::SeparatorText("NAT Punch");
     if (BeginForm("##NatPunchSettings")) {
+        if (config_.stunServers.size() < 2) config_.stunServers.resize(2);
         FormField("Punch timeout (s)");
         configChanged |= ImGui::InputInt("##PunchTimeout", &config_.punchTimeout);
         config_.punchTimeout = std::clamp(config_.punchTimeout, 1, 600);
-        FormField("NAT4 port start");
-        configChanged |= ImGui::InputInt("##Nat4SourcePortStart",
-                                         &config_.nat4SourcePortStart);
-        config_.nat4SourcePortStart = std::clamp(config_.nat4SourcePortStart, 1, 65535);
-        FormField("NAT4 port count");
-        configChanged |= ImGui::InputInt("##Nat4SourcePortCount",
-                                         &config_.nat4SourcePortCount);
-        config_.nat4SourcePortCount = std::clamp(config_.nat4SourcePortCount, 1, 60);
-        config_.nat4SourcePortStart = (std::min)(
-            config_.nat4SourcePortStart, 65536 - config_.nat4SourcePortCount);
-        FormField("NAT4 peer offset");
-        configChanged |= ImGui::InputInt("##Nat4PeerPortOffset",
-                                         &config_.nat4PeerPortOffset);
-        config_.nat4PeerPortOffset = std::clamp(config_.nat4PeerPortOffset, 0, 256);
-        FormField("NAT4 round timeout (s)");
-        configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &config_.nat4RoundTimeout);
-        config_.nat4RoundTimeout = std::clamp(config_.nat4RoundTimeout, 1, 60);
-        FormField("NAT4 round limit");
-        configChanged |= ImGui::InputInt("##Nat4RoundLimit", &config_.nat4RoundLimit);
-        config_.nat4RoundLimit = std::clamp(config_.nat4RoundLimit, 1, 1000);
+        FormField("STUN A host");
+        configChanged |= ImGui::InputText("##StunAHost",
+                                          &config_.stunServers[0].host);
+        FormField("STUN A port");
+        int stunAPort = config_.stunServers[0].port;
+        if (ImGui::InputInt("##StunAPort", &stunAPort)) {
+            config_.stunServers[0].port = static_cast<uint16_t>(
+                std::clamp(stunAPort, 1, 65535));
+            configChanged = true;
+        }
+        FormField("STUN B host");
+        configChanged |= ImGui::InputText("##StunBHost",
+                                          &config_.stunServers[1].host);
+        FormField("STUN B port");
+        int stunBPort = config_.stunServers[1].port;
+        if (ImGui::InputInt("##StunBPort", &stunBPort)) {
+            config_.stunServers[1].port = static_cast<uint16_t>(
+                std::clamp(stunBPort, 1, 65535));
+            configChanged = true;
+        }
         EndForm();
     }
     ImGui::Spacing();

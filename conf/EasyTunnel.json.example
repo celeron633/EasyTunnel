@@ -13,12 +13,11 @@
   "peer_timeout": 45,
   "dummy_traffic_enabled": false,
   "punch_timeout": 30,
-  "traversal_modes": "nat:true,nat4:true,ipv6:false,ipv4_relay:false",
-  "nat4_source_port_start": 30000,
-  "nat4_source_port_count": 25,
-  "nat4_peer_port_offset": 20,
-  "nat4_round_timeout": 10,
-  "nat4_round_limit": 3,
+  "stun_servers": [
+    { "host": "198.51.100.10", "port": 3478 },
+    { "host": "203.0.113.10", "port": 3478 }
+  ],
+  "traversal_modes": "nat_punch:true,ipv6:false,ipv4_relay:false",
   "ipv6_accept_inbound": false,
   "ipv6_listen_port": 0,
   "ipv6_probe_host": "2400:3200::1",

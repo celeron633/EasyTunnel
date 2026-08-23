@@ -76,6 +76,8 @@ if(BUILD_TESTING)
         rendezvous/registry.cpp
         rendezvous/ipv4_relay_app.cpp
         rendezvous/config.cpp
+        rendezvous_client.cpp
+        secure_random.cpp
         nat_protocol.cpp
         util.cpp
         config.cpp
@@ -86,10 +88,69 @@ if(BUILD_TESTING)
         Threads::Threads spdlog::spdlog_header_only jsoncpp_static)
     if(WIN32)
         target_link_libraries(
-            EasyTunnel_rendezvous_capabilities_tests PRIVATE ws2_32)
+            EasyTunnel_rendezvous_capabilities_tests PRIVATE ws2_32 bcrypt)
     endif()
     add_test(NAME rendezvous_capabilities
         COMMAND EasyTunnel_rendezvous_capabilities_tests)
+
+    add_executable(EasyTunnel_stun_tests
+        tests/stun_client_test.cpp
+        stun_client.cpp
+        secure_random.cpp
+        util.cpp
+        log.cpp
+        config.cpp)
+    target_include_directories(EasyTunnel_stun_tests PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(EasyTunnel_stun_tests PRIVATE
+        Threads::Threads spdlog::spdlog_header_only)
+    if(WIN32)
+        target_link_libraries(EasyTunnel_stun_tests PRIVATE ws2_32 bcrypt)
+    endif()
+    add_test(NAME stun_protocol COMMAND EasyTunnel_stun_tests)
+
+    add_executable(EasyTunnel_nat_punch_plan_tests
+        tests/nat_punch_plan_test.cpp
+        nat_punch_plan.cpp
+        stun_client.cpp
+        secure_random.cpp
+        util.cpp
+        log.cpp
+        config.cpp)
+    target_include_directories(
+        EasyTunnel_nat_punch_plan_tests PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(EasyTunnel_nat_punch_plan_tests PRIVATE
+        Threads::Threads spdlog::spdlog_header_only)
+    if(WIN32)
+        target_link_libraries(
+            EasyTunnel_nat_punch_plan_tests PRIVATE ws2_32 bcrypt)
+    endif()
+    add_test(NAME nat_punch_plan COMMAND EasyTunnel_nat_punch_plan_tests)
+
+    add_executable(EasyTunnel_adaptive_nat_integration_tests
+        tests/adaptive_nat_integration_test.cpp
+        adaptive_nat_traversal.cpp
+        nat_punch_plan.cpp
+        stun_client.cpp
+        secure_random.cpp
+        peer_selection.cpp
+        rendezvous_client.cpp
+        rendezvous/registry.cpp
+        rendezvous/ipv4_relay_app.cpp
+        nat_protocol.cpp
+        util.cpp
+        config.cpp
+        log.cpp)
+    target_include_directories(
+        EasyTunnel_adaptive_nat_integration_tests PRIVATE ${CMAKE_SOURCE_DIR})
+    target_link_libraries(EasyTunnel_adaptive_nat_integration_tests PRIVATE
+        Threads::Threads spdlog::spdlog_header_only)
+    if(WIN32)
+        target_link_libraries(
+            EasyTunnel_adaptive_nat_integration_tests PRIVATE ws2_32 bcrypt)
+    endif()
+    add_test(NAME adaptive_nat_integration
+        COMMAND EasyTunnel_adaptive_nat_integration_tests)
+    set_tests_properties(adaptive_nat_integration PROPERTIES TIMEOUT 30)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -103,10 +164,13 @@ set(COMMON_SOURCES
     util.cpp
     tunnel_engine.cpp
     nat_protocol.cpp
+    secure_random.cpp
+    stun_client.cpp
+    nat_punch_plan.cpp
+    adaptive_nat_traversal.cpp
     rendezvous_client.cpp
     peer_selection.cpp
     nat_traversal.cpp
-    nat4_traversal.cpp
     ipv6_fallback.cpp
     ipv4_relay_fallback.cpp
 )
@@ -139,6 +203,7 @@ add_executable(EasyTunnel_rendezvous
     rendezvous/registry.cpp
     rendezvous/ipv4_relay_app.cpp
     rendezvous/config.cpp
+    secure_random.cpp
     nat_protocol.cpp util.cpp log.cpp config.cpp)
 if(BUILD_TUI)
     set(TUI_SOURCES
@@ -169,6 +234,7 @@ if(BUILD_TUI)
         rendezvous/registry.cpp
         rendezvous/ipv4_relay_app.cpp
         rendezvous/config.cpp
+        secure_random.cpp
         nat_protocol.cpp util.cpp log.cpp config.cpp)
     target_include_directories(EasyTunnel_rendezvous_tui PRIVATE ${CMAKE_SOURCE_DIR})
 endif()
@@ -202,8 +268,8 @@ endif()
 # Platform-specific link libraries
 # ---------------------------------------------------------------------------
 if(WIN32)
-    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only jsoncpp_static ws2_32 iphlpapi Threads::Threads)
-    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only jsoncpp_static ws2_32 Threads::Threads)
+    target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only jsoncpp_static ws2_32 iphlpapi bcrypt Threads::Threads)
+    target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only jsoncpp_static ws2_32 bcrypt Threads::Threads)
 else()
     target_link_libraries(EasyTunnel PRIVATE spdlog::spdlog_header_only jsoncpp_static Threads::Threads)
     target_link_libraries(EasyTunnel_rendezvous PRIVATE spdlog::spdlog_header_only jsoncpp_static Threads::Threads)
@@ -219,8 +285,8 @@ if(BUILD_TUI)
         ftxui::component ftxui::dom ftxui::screen
         Threads::Threads)
     if(WIN32)
-        target_link_libraries(EasyTunnel_tui PRIVATE ws2_32 iphlpapi shell32)
-        target_link_libraries(EasyTunnel_rendezvous_tui PRIVATE ws2_32)
+        target_link_libraries(EasyTunnel_tui PRIVATE ws2_32 iphlpapi shell32 bcrypt)
+        target_link_libraries(EasyTunnel_rendezvous_tui PRIVATE ws2_32 bcrypt)
     endif()
 endif()
 
@@ -400,7 +466,7 @@ if(BUILD_GUI)
 
     if(WIN32)
         target_link_libraries(EasyTunnel_gui PRIVATE
-            ws2_32 iphlpapi shell32 taskschd ole32 oleaut32 secur32)
+            ws2_32 iphlpapi shell32 taskschd ole32 oleaut32 secur32 bcrypt)
         target_include_directories(EasyTunnel_gui PRIVATE "${WINTUN_INCLUDE_DIR}")
         add_custom_command(TARGET EasyTunnel_gui POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different

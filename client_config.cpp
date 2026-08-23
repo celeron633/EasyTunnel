@@ -1,7 +1,9 @@
 #include "client_config.h"
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
+#include <utility>
 
 #include <json/json.h>
 
@@ -22,6 +24,47 @@ void ReadInt(const Json::Value& root, const char* key, int* value) {
 
 void ReadBool(const Json::Value& root, const char* key, bool* value) {
     if (root.isMember(key) && root[key].isBool()) *value = root[key].asBool();
+}
+
+bool ReadStunServers(const Json::Value& root,
+                     std::vector<StunServerConfig>* servers,
+                     std::string* error) {
+    if (!root.isMember("stun_servers")) return true;
+    const Json::Value& value = root["stun_servers"];
+    if (!value.isArray()) {
+        *error = "stun_servers must be an array";
+        return false;
+    }
+
+    std::vector<StunServerConfig> parsed;
+    for (const auto& item : value) {
+        if (!item.isObject() || !item.isMember("host")
+            || !item["host"].isString() || item["host"].asString().empty()
+            || !item.isMember("port") || !item["port"].isInt()) {
+            *error = "Each STUN server must contain host and port";
+            return false;
+        }
+        const int port = item["port"].asInt();
+        if (port < 1 || port > 65535) {
+            *error = "STUN server port must be between 1 and 65535";
+            return false;
+        }
+        parsed.push_back({item["host"].asString(),
+                          static_cast<uint16_t>(port)});
+    }
+    if (parsed.size() != 2) {
+        *error = "Exactly two STUN servers are required";
+        return false;
+    }
+    *servers = std::move(parsed);
+    return true;
+}
+
+bool IsValidStunHost(const std::string& host) {
+    return !host.empty() && host.size() <= 253
+        && std::none_of(host.begin(), host.end(), [](unsigned char ch) {
+            return std::isspace(ch) != 0;
+        });
 }
 }  // namespace
 
@@ -57,17 +100,13 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
     ReadInt(root, "peer_timeout", &config->peerTimeout);
     ReadBool(root, "dummy_traffic_enabled", &config->dummyTrafficEnabled);
     ReadInt(root, "punch_timeout", &config->punchTimeout);
+    if (!ReadStunServers(root, &config->stunServers, error)) return false;
     if (root.isMember("traversal_modes") && root["traversal_modes"].isString()
         && !ParseTraversalModes(root["traversal_modes"].asString(),
                                 &config->traversalModes, error)) {
         *error = "Invalid traversal_modes: " + *error;
         return false;
     }
-    ReadInt(root, "nat4_source_port_start", &config->nat4SourcePortStart);
-    ReadInt(root, "nat4_source_port_count", &config->nat4SourcePortCount);
-    ReadInt(root, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
-    ReadInt(root, "nat4_round_timeout", &config->nat4RoundTimeout);
-    ReadInt(root, "nat4_round_limit", &config->nat4RoundLimit);
     ReadBool(root, "ipv6_accept_inbound", &config->ipv6AcceptInbound);
     ReadInt(root, "ipv6_listen_port", &config->ipv6ListenPort);
     ReadString(root, "ipv6_probe_host", &config->ipv6ProbeHost);
@@ -86,13 +125,6 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
     config->peerTimeout = std::clamp(config->peerTimeout,
                                      config->keepaliveInterval + 1, 3600);
     config->punchTimeout = std::clamp(config->punchTimeout, 1, 600);
-    config->nat4SourcePortStart = std::clamp(config->nat4SourcePortStart, 1, 65535);
-    config->nat4SourcePortCount = std::clamp(config->nat4SourcePortCount, 1, 60);
-    config->nat4SourcePortStart = (std::min)(
-        config->nat4SourcePortStart, 65536 - config->nat4SourcePortCount);
-    config->nat4PeerPortOffset = std::clamp(config->nat4PeerPortOffset, 0, 256);
-    config->nat4RoundTimeout = std::clamp(config->nat4RoundTimeout, 1, 60);
-    config->nat4RoundLimit = std::clamp(config->nat4RoundLimit, 1, 1000);
     config->ipv6ListenPort = std::clamp(config->ipv6ListenPort, 0, 65535);
     config->ipv6ProbePort = std::clamp(config->ipv6ProbePort, 1, 65535);
     config->ipv6FallbackTimeout = std::clamp(config->ipv6FallbackTimeout, 1, 120);
@@ -119,12 +151,15 @@ bool SaveClientConfig(const std::string& path, const ClientConfig& config,
     root["peer_timeout"] = config.peerTimeout;
     root["dummy_traffic_enabled"] = config.dummyTrafficEnabled;
     root["punch_timeout"] = config.punchTimeout;
+    Json::Value stunServers(Json::arrayValue);
+    for (const auto& server : config.stunServers) {
+        Json::Value item(Json::objectValue);
+        item["host"] = server.host;
+        item["port"] = server.port;
+        stunServers.append(std::move(item));
+    }
+    root["stun_servers"] = std::move(stunServers);
     root["traversal_modes"] = SerializeTraversalModes(config.traversalModes);
-    root["nat4_source_port_start"] = config.nat4SourcePortStart;
-    root["nat4_source_port_count"] = config.nat4SourcePortCount;
-    root["nat4_peer_port_offset"] = config.nat4PeerPortOffset;
-    root["nat4_round_timeout"] = config.nat4RoundTimeout;
-    root["nat4_round_limit"] = config.nat4RoundLimit;
     root["ipv6_accept_inbound"] = config.ipv6AcceptInbound;
     root["ipv6_listen_port"] = config.ipv6ListenPort;
     root["ipv6_probe_host"] = config.ipv6ProbeHost;
@@ -174,6 +209,25 @@ bool ValidateClientConfig(const ClientConfig& config, std::string* error) {
         *error = "Enable at least one traversal mode";
         return false;
     }
+    const auto natPunchMode = std::find_if(
+        config.traversalModes.begin(), config.traversalModes.end(),
+        [](const auto& setting) {
+            return setting.mode == TraversalMode::NatPunch;
+        });
+    if (natPunchMode != config.traversalModes.end()
+        && natPunchMode->enabled) {
+        if (config.stunServers.size() != 2
+            || !IsValidStunHost(config.stunServers[0].host)
+            || !IsValidStunHost(config.stunServers[1].host)) {
+            *error = "Adaptive NAT Punch requires two valid STUN servers";
+            return false;
+        }
+        if (config.stunServers[0].host == config.stunServers[1].host
+            && config.stunServers[0].port == config.stunServers[1].port) {
+            *error = "STUN A and STUN B must be different servers";
+            return false;
+        }
+    }
     const auto ipv6Mode = std::find_if(
         config.traversalModes.begin(), config.traversalModes.end(),
         [](const auto& setting) { return setting.mode == TraversalMode::Ipv6; });
@@ -209,18 +263,8 @@ Config ToEngineConfig(const ClientConfig& config,
     output.dummy_traffic_enabled = config.dummyTrafficEnabled;
     output.punch_timeout = static_cast<uint16_t>(
         std::clamp(config.punchTimeout, 1, 600));
+    output.stun_servers = config.stunServers;
     output.traversal_modes = config.traversalModes;
-    output.nat4_source_port_count = static_cast<uint16_t>(
-        std::clamp(config.nat4SourcePortCount, 1, 60));
-    output.nat4_source_port_start = static_cast<uint16_t>((std::min)(
-        std::clamp(config.nat4SourcePortStart, 1, 65535),
-        65536 - static_cast<int>(output.nat4_source_port_count)));
-    output.nat4_peer_port_offset = static_cast<uint16_t>(
-        std::clamp(config.nat4PeerPortOffset, 0, 256));
-    output.nat4_round_timeout = static_cast<uint16_t>(
-        std::clamp(config.nat4RoundTimeout, 1, 60));
-    output.nat4_round_limit = static_cast<uint16_t>(
-        std::clamp(config.nat4RoundLimit, 1, 1000));
     output.ipv6_accept_inbound = config.ipv6AcceptInbound;
     output.ipv6_listen_port = static_cast<uint16_t>(
         std::clamp(config.ipv6ListenPort, 0, 65535));

@@ -3,7 +3,7 @@
 跨 IPv4、IPv6 和 Relay 的客户端、服务端状态切换见
 [state-machine.md](state-machine.md)。
 
-IPv6 直连是四种可排序穿透模式之一，可以放在普通 NAT、增强 NAT4 或 Relay 的前后。
+IPv6 直连是三种可排序穿透模式之一，可以放在 Adaptive NAT Punch 或 Relay 的前后。
 它不改变 TUN 内层协议：TUN 中仍只转发 IPv4 包，只是把这些包封装在 Peer 之间的
 公网 IPv6 UDP 数据报中发送。
 
@@ -35,7 +35,7 @@ TCP 探针用于确认不只是“网卡上存在一个 IPv6 地址”，而是�
 IPv4 exact-port Punch 失败
           |
           v
-NAT4 socket pool 失败/关闭
+Adaptive NAT Punch 失败/关闭
           |
           v
 检查 GUA + 公网 IPv6 TCP 探针

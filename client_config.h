@@ -25,11 +25,10 @@ struct ClientConfig {
     int peerTimeout = 45;
     bool dummyTrafficEnabled = false;
     int punchTimeout = 30;
-    int nat4SourcePortStart = 30000;
-    int nat4SourcePortCount = 25;
-    int nat4PeerPortOffset = 20;
-    int nat4RoundTimeout = 10;
-    int nat4RoundLimit = 3;
+    std::vector<StunServerConfig> stunServers{
+        {"", 3478},
+        {"", 3478},
+    };
     std::vector<TraversalModeSetting> traversalModes = DefaultTraversalModes();
     bool ipv6AcceptInbound = false;
     int ipv6ListenPort = 0;

@@ -2,23 +2,33 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <unordered_map>
 #include <utility>
 
 #include "../log.h"
 #include "../nat_protocol.h"
+#include "../secure_random.h"
 #include "ipv4_relay_app.h"
 
 namespace {
+constexpr const char* kNatPunchProtocolVersion = "2";
+
+struct NatPunchInfo {
+    bool reported = false;
+    bool armed = false;
+    UdpEndpoint endpoint{};
+    std::string behavior;
+    UdpEndpoint mappedA{};
+    UdpEndpoint mappedB{};
+    std::string localCandidates;
+};
+
 struct Client {
     std::string node;
     UdpEndpoint endpoint;
     std::chrono::steady_clock::time_point seen;
     std::string tunIp;
     std::string pairedWith;
-    uint32_t nat4Round = 0;
-    bool nat4Joined = false;
     std::string ipv6Address;
     uint16_t ipv6Port = 0;
     bool ipv6AcceptInbound = false;
@@ -26,6 +36,10 @@ struct Client {
     std::vector<TraversalMode> capabilities;
     std::vector<TraversalMode> negotiatedModes;
     std::string pairInitiator;
+    std::string natSessionId;
+    std::string natPunchToken;
+    uint64_t natAttemptId = 0;
+    NatPunchInfo natPunch;
 };
 using Room = std::unordered_map<std::string, Client>;
 
@@ -33,7 +47,10 @@ void ResetPairing(Client* client) {
     client->pairedWith.clear();
     client->negotiatedModes.clear();
     client->pairInitiator.clear();
-    client->nat4Joined = false;
+    client->natSessionId.clear();
+    client->natPunchToken.clear();
+    client->natAttemptId = 0;
+    client->natPunch = {};
     client->ipv6Joined = false;
 }
 
@@ -75,19 +92,6 @@ size_t RemoveExpired(Room* room, std::chrono::steady_clock::time_point now,
     return removed;
 }
 
-bool ParseRound(const std::string& text, uint32_t* round) {
-    try {
-        size_t consumed = 0;
-        const unsigned long parsed = std::stoul(text, &consumed);
-        if (consumed != text.size()
-            || parsed > (std::numeric_limits<uint32_t>::max)()) return false;
-        *round = static_cast<uint32_t>(parsed);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
 bool ParsePort(const std::string& text, uint16_t* port) {
     try {
         size_t consumed = 0;
@@ -98,6 +102,26 @@ bool ParsePort(const std::string& text, uint16_t* port) {
     } catch (...) {
         return false;
     }
+}
+
+bool ParseAttemptId(const std::string& text, uint64_t* attemptId) {
+    try {
+        size_t consumed = 0;
+        const unsigned long long parsed = std::stoull(text, &consumed);
+        if (consumed != text.size() || parsed == 0) return false;
+        *attemptId = static_cast<uint64_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool IsNatMappingBehavior(const std::string& behavior) {
+    return behavior == "endpoint-independent"
+        || behavior == "port-dependent-regular"
+        || behavior == "port-dependent-random"
+        || behavior == "multi-public-ip"
+        || behavior == "unknown";
 }
 
 bool IsIpv6Gua(const in6_addr& address) {
@@ -121,6 +145,7 @@ struct RendezvousRegistry::Impl {
     RendezvousConfig config;
     Ipv4RelayApp relayApp;
     std::unordered_map<std::string, Room> rooms;
+    uint64_t nextNatAttemptId = 1;
 
     bool Authorized(const std::string& roomId, const std::string& nodeId,
                     const std::string& targetId, const std::string& token) const {
@@ -196,46 +221,135 @@ struct RendezvousRegistry::Impl {
         SendMessage(sock, source, "CLIENTS", entries);
     }
 
-    void HandleNat4Join(Room& room, Room::iterator current,
+    bool ValidateNatSession(Room& room, Room::iterator current,
+                            const std::string& targetId,
+                            const std::string& sessionId,
+                            uint64_t attemptId, Room::iterator* target) {
+        *target = room.find(targetId);
+        return *target != room.end() && *target != current
+            && current->second.pairedWith == targetId
+            && (*target)->second.pairedWith == current->first
+            && current->second.natSessionId == sessionId
+            && (*target)->second.natSessionId == sessionId
+            && current->second.natAttemptId == attemptId
+            && (*target)->second.natAttemptId == attemptId;
+    }
+
+    std::vector<std::string> NatPeerInfoFields(
+        const Client& recipient, const Client& peer) const {
+        const auto mappedA = IpAndPort(peer.natPunch.mappedA);
+        const auto mappedB = IpAndPort(peer.natPunch.mappedB);
+        return {
+            recipient.natSessionId,
+            std::to_string(recipient.natAttemptId),
+            peer.node,
+            peer.natPunch.behavior,
+            mappedA.first,
+            mappedA.second,
+            mappedB.first,
+            mappedB.second,
+            peer.natPunch.localCandidates,
+            recipient.node == recipient.pairInitiator
+                ? "initiator" : "responder",
+            kNatPunchProtocolVersion,
+        };
+    }
+
+    void SendNatPeerInfo(Client* first, Client* second) {
+        SendMessage(sock, first->natPunch.endpoint, "NAT_PEER_INFO",
+                    NatPeerInfoFields(*first, *second));
+        SendMessage(sock, second->natPunch.endpoint, "NAT_PEER_INFO",
+                    NatPeerInfoFields(*second, *first));
+    }
+
+    void HandleNatInfo(Room& room, Room::iterator current,
+                       const UdpEndpoint& source,
+                       const std::vector<std::string>& fields,
+                       std::chrono::steady_clock::time_point now) {
+        uint64_t attemptId = 0;
+        uint16_t mappedAPort = 0;
+        uint16_t mappedBPort = 0;
+        UdpEndpoint mappedA{};
+        UdpEndpoint mappedB{};
+        Room::iterator target;
+        if (!ParseAttemptId(fields[4], &attemptId)
+            || fields[5] != kNatPunchProtocolVersion
+            || !IsNatMappingBehavior(fields[6])
+            || !ParsePort(fields[8], &mappedAPort)
+            || !ParsePort(fields[10], &mappedBPort)
+            || !ParseUdpEndpoint(fields[7], mappedAPort, &mappedA)
+            || !ParseUdpEndpoint(fields[9], mappedBPort, &mappedB)
+            || !IsSafeControlField(fields[11])
+            || !ValidateNatSession(room, current, fields[2], fields[3],
+                                   attemptId, &target)) {
+            SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
+            return;
+        }
+
+        current->second.seen = now;
+        const bool sameReport = current->second.natPunch.reported
+            && SameUdpEndpoint(current->second.natPunch.endpoint, source)
+            && current->second.natPunch.behavior == fields[6]
+            && SameUdpEndpoint(current->second.natPunch.mappedA, mappedA)
+            && SameUdpEndpoint(current->second.natPunch.mappedB, mappedB)
+            && current->second.natPunch.localCandidates == fields[11];
+        current->second.natPunch.reported = true;
+        if (!sameReport) current->second.natPunch.armed = false;
+        current->second.natPunch.endpoint = source;
+        current->second.natPunch.behavior = fields[6];
+        current->second.natPunch.mappedA = mappedA;
+        current->second.natPunch.mappedB = mappedB;
+        current->second.natPunch.localCandidates = fields[11];
+        if (!sameReport) target->second.natPunch.armed = false;
+
+        if (!target->second.natPunch.reported) {
+            SendMessage(sock, source, "NAT_WAIT",
+                        {fields[3], fields[4]});
+            return;
+        }
+
+        Log(LogLevel::Info, "NAT info ready room=" + fields[0]
+            + " session=" + fields[3] + " attempt=" + fields[4]
+            + " peer=" + current->first + " target=" + target->first);
+        SendNatPeerInfo(&current->second, &target->second);
+    }
+
+    void HandleNatArmed(Room& room, Room::iterator current,
                         const UdpEndpoint& source,
-                        const std::vector<std::string>& fields) {
-        uint32_t round = 0;
-        if (!ParseRound(fields[3], &round)) {
-            SendMessage(sock, source, "ERROR", {"invalid-nat4-round"});
-            return;
-        }
-        current->second.nat4Round = round;
-        current->second.nat4Joined = true;
-        current->second.pairedWith = fields[2];
-
-        const auto target = room.find(fields[2]);
-        if (target == room.end() || target == current
-            || !target->second.nat4Joined || target->second.nat4Round != round
-            || (!target->second.pairedWith.empty()
-                && target->second.pairedWith != current->first)) {
-            SendMessage(sock, source, "NAT4_WAIT", {std::to_string(round)});
+                        const std::vector<std::string>& fields,
+                        std::chrono::steady_clock::time_point now) {
+        uint64_t attemptId = 0;
+        Room::iterator target;
+        if (!ParseAttemptId(fields[4], &attemptId)
+            || !ValidateNatSession(room, current, fields[2], fields[3],
+                                   attemptId, &target)
+            || !current->second.natPunch.reported
+            || !target->second.natPunch.reported
+            || !SameUdpEndpoint(source, current->second.natPunch.endpoint)) {
+            SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
             return;
         }
 
-        target->second.pairedWith = current->first;
-        const auto currentAddress = IpAndPort(source);
-        const auto targetAddress = IpAndPort(target->second.endpoint);
-        Log(LogLevel::Info, "NAT4 ready room=" + fields[0]
-            + " round=" + std::to_string(round) + " peer=" + current->first
-            + " endpoint=" + FormatUdpEndpoint(source) + " target=" + target->first
-            + " endpoint=" + FormatUdpEndpoint(target->second.endpoint));
-        SendMessage(sock, target->second.endpoint, "NAT4_PEER",
-                    {currentAddress.first, currentAddress.second, current->first,
-                     std::to_string(round)});
-        SendMessage(sock, source, "NAT4_PEER",
-                    {targetAddress.first, targetAddress.second, target->first,
-                     std::to_string(round)});
+        current->second.seen = now;
+        current->second.natPunch.armed = true;
+        if (!target->second.natPunch.armed) {
+            SendMessage(sock, source, "NAT_ARMED_ACK",
+                        {fields[3], fields[4]});
+            return;
+        }
+
+        const std::vector<std::string> startFields{fields[3], fields[4]};
+        SendMessage(sock, current->second.natPunch.endpoint,
+                    "NAT_START", startFields);
+        SendMessage(sock, target->second.natPunch.endpoint,
+                    "NAT_START", startFields);
+        Log(LogLevel::Info, "NAT punch start room=" + fields[0]
+            + " session=" + fields[3] + " attempt=" + fields[4]);
     }
 
     void HandleConnect(Room& room, Room::iterator current,
                        const UdpEndpoint& source,
                        const std::vector<std::string>& fields) {
-        current->second.nat4Joined = false;
         const auto target = room.find(fields[2]);
         if (target == room.end() || target == current) {
             Log(LogLevel::Debug, "Target unavailable: room=" + fields[0]
@@ -281,6 +395,16 @@ struct RendezvousRegistry::Impl {
                     {"no-common-traversal-mode", targetCapabilities});
                 return;
             }
+            std::string randomError;
+            const std::string sessionId = SecureRandomHex(16, &randomError);
+            const std::string punchToken = SecureRandomHex(32, &randomError);
+            if (sessionId.empty() || punchToken.empty()) {
+                Log(LogLevel::Error, "Cannot create NAT session: " + randomError);
+                SendMessage(sock, source, "ERROR", {"server-random-failed"});
+                return;
+            }
+            uint64_t attemptId = nextNatAttemptId++;
+            if (attemptId == 0) attemptId = nextNatAttemptId++;
             initiator = current->first;
             current->second.pairedWith = target->first;
             current->second.negotiatedModes = negotiatedModes;
@@ -288,6 +412,14 @@ struct RendezvousRegistry::Impl {
             target->second.pairedWith = current->first;
             target->second.negotiatedModes = negotiatedModes;
             target->second.pairInitiator = initiator;
+            current->second.natSessionId = sessionId;
+            current->second.natPunchToken = punchToken;
+            current->second.natAttemptId = attemptId;
+            current->second.natPunch = {};
+            target->second.natSessionId = sessionId;
+            target->second.natPunchToken = punchToken;
+            target->second.natAttemptId = attemptId;
+            target->second.natPunch = {};
         }
 
         const std::string negotiated =
@@ -309,12 +441,22 @@ struct RendezvousRegistry::Impl {
                     {currentAddress.first, currentAddress.second, current->first,
                      SerializeTraversalModeSequence(
                          current->second.capabilities),
-                     negotiated});
+                         negotiated,
+                         target->second.natSessionId,
+                         std::to_string(target->second.natAttemptId),
+                         target->first == initiator ? "initiator" : "responder",
+                         kNatPunchProtocolVersion,
+                         target->second.natPunchToken});
         SendMessage(sock, source, "PEER",
                     {targetAddress.first, targetAddress.second, target->first,
                      SerializeTraversalModeSequence(
                          target->second.capabilities),
-                     negotiated});
+                         negotiated,
+                         current->second.natSessionId,
+                         std::to_string(current->second.natAttemptId),
+                         current->first == initiator ? "initiator" : "responder",
+                         kNatPunchProtocolVersion,
+                         current->second.natPunchToken});
     }
 
     void HandleIpv6Join(Room& room, Room::iterator current,
@@ -452,7 +594,8 @@ struct RendezvousRegistry::Impl {
         if (type == "REG") expectedFields = 4;
         else if (type == "CONNECT") expectedFields = 5;
         else if (type == "UNREG") expectedFields = 3;
-        else if (type == "NAT4_JOIN") expectedFields = 5;
+        else if (type == "NAT_INFO") expectedFields = 13;
+        else if (type == "NAT_ARMED") expectedFields = 6;
         else if (type == "V6_JOIN") expectedFields = 7;
         else if (type == "RELAY_JOIN") expectedFields = 4;
         else if (type == "TUN_IP") expectedFields = 4;
@@ -478,7 +621,8 @@ struct RendezvousRegistry::Impl {
         const bool isRegister = type == "REG";
         const bool isConnect = type == "CONNECT";
         const bool isUnregister = type == "UNREG";
-        const bool isNat4Join = type == "NAT4_JOIN";
+        const bool isNatInfo = type == "NAT_INFO";
+        const bool isNatArmed = type == "NAT_ARMED";
         const bool isIpv6Join = type == "V6_JOIN";
         const bool isIpv4RelayJoin = type == "RELAY_JOIN";
         const bool isTunIp = type == "TUN_IP";
@@ -490,14 +634,16 @@ struct RendezvousRegistry::Impl {
 
         const std::string& roomId = fields[0];
         const std::string& nodeId = fields[1];
-        const std::string targetId = (isConnect || isNat4Join || isIpv6Join
+        const std::string targetId = (isConnect || isNatInfo
+                                      || isNatArmed || isIpv6Join
                                       || isIpv4RelayJoin)
             ? fields[2] : "";
-        const size_t tokenIndex = isIpv6Join ? 6
-            : (isNat4Join ? 4
-                : (isConnect ? 4
-                    : (isIpv4RelayJoin ? 3
-                        : (isRegister ? 3 : 2))));
+        size_t tokenIndex = 2;
+        if (isRegister || isIpv4RelayJoin) tokenIndex = 3;
+        if (isConnect) tokenIndex = 4;
+        if (isNatArmed) tokenIndex = 5;
+        if (isIpv6Join) tokenIndex = 6;
+        if (isNatInfo) tokenIndex = 12;
         const std::string& token = fields[tokenIndex];
         if (!Authorized(roomId, nodeId, targetId, token)) {
             Log(LogLevel::Warn, "Rejected " + type + " from " + FormatUdpEndpoint(source));
@@ -550,13 +696,20 @@ struct RendezvousRegistry::Impl {
         }
 
         auto current = room.find(nodeId);
+        if ((isNatInfo || isNatArmed) && current == room.end()) {
+            SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
+            return;
+        }
         if (current == room.end()) {
-            current = room.emplace(nodeId,
-                Client{nodeId, source, now, "", "", 0, false}).first;
+            Client client;
+            client.node = nodeId;
+            client.endpoint = source;
+            client.seen = now;
+            current = room.emplace(nodeId, std::move(client)).first;
             Log(LogLevel::Info, "Registered peer=" + nodeId + " room=" + roomId
                 + " endpoint=" + FormatUdpEndpoint(source) + " tun_ip=N/A");
         } else {
-            current->second.endpoint = source;
+            if (!isNatInfo && !isNatArmed) current->second.endpoint = source;
             current->second.seen = now;
         }
         if (isRegister || isConnect) {
@@ -572,11 +725,12 @@ struct RendezvousRegistry::Impl {
             current->second.capabilities = std::move(capabilities);
         }
         if (isRegister) {
-            current->second.nat4Joined = false;
             current->second.ipv6Joined = false;
             SendMessage(sock, source, "REGISTERED");
-        } else if (isNat4Join) {
-            HandleNat4Join(room, current, source, fields);
+        } else if (isNatInfo) {
+            HandleNatInfo(room, current, source, fields, now);
+        } else if (isNatArmed) {
+            HandleNatArmed(room, current, source, fields, now);
         } else if (isIpv6Join) {
             HandleIpv6Join(room, current, source, fields);
         } else if (isIpv4RelayJoin) {
@@ -656,8 +810,8 @@ std::vector<RendezvousRoomSnapshot> RendezvousRegistry::Snapshot(
                 client.tunIp.empty() ? "N/A" : client.tunIp,
                 client.pairedWith,
                 static_cast<uint64_t>((std::max)(int64_t{0}, idle)),
-                client.nat4Round,
-                client.nat4Joined,
+                client.natPunch.reported,
+                client.natPunch.armed,
             });
         }
         std::sort(roomSnapshot.clients.begin(), roomSnapshot.clients.end(),

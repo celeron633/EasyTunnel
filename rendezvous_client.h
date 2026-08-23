@@ -14,9 +14,32 @@ enum class RendezvousEventType {
     Registered,
     PeerUnavailable,
     Peer,
-    Nat4Wait,
-    Nat4Peer,
+    NatWait,
+    NatPeerInfo,
+    NatArmedAck,
+    NatStart,
     Error,
+};
+
+enum class NatPunchRole {
+    Unknown,
+    Initiator,
+    Responder,
+};
+
+struct RendezvousNatPeerInfo {
+    std::string mappingBehavior;
+    UdpEndpoint mappedA{};
+    UdpEndpoint mappedB{};
+    std::string localCandidates;
+};
+
+struct NatPunchSession {
+    std::string sessionId;
+    uint64_t attemptId = 0;
+    NatPunchRole role = NatPunchRole::Unknown;
+    uint16_t protocolVersion = 0;
+    std::string punchToken;
 };
 
 struct RendezvousEvent {
@@ -25,7 +48,12 @@ struct RendezvousEvent {
     std::string peerId;
     std::vector<TraversalMode> peerCapabilities;
     std::vector<TraversalMode> traversalModes;
-    uint32_t round = 0;
+    std::string sessionId;
+    uint64_t attemptId = 0;
+    NatPunchRole natPunchRole = NatPunchRole::Unknown;
+    uint16_t natPunchVersion = 0;
+    std::string natPunchToken;
+    RendezvousNatPeerInfo natPeerInfo;
     std::string error;
 };
 
@@ -47,8 +75,15 @@ public:
     RendezvousClient(const Config& config, const UdpEndpoint& server);
 
     bool SendProbe(socket_t sock) const;
-    bool SendNat4Join(socket_t sock, const std::string& expectedPeerId,
-                      uint32_t round) const;
+    bool SendNatInfo(socket_t sock, const std::string& expectedPeerId,
+                     const std::string& sessionId, uint64_t attemptId,
+                     const std::string& mappingBehavior,
+                     const UdpEndpoint& mappedA,
+                     const UdpEndpoint& mappedB,
+                     const std::string& localCandidates) const;
+    bool SendNatArmed(socket_t sock, const std::string& expectedPeerId,
+                      const std::string& sessionId,
+                      uint64_t attemptId) const;
     void Unregister(socket_t sock) const;
 
     RendezvousEvent HandlePacket(const UdpEndpoint& source,

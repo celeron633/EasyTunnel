@@ -19,8 +19,7 @@ std::string Trim(const std::string& s) {
 
 std::vector<TraversalModeSetting> DefaultTraversalModes() {
     return {
-        {TraversalMode::Nat, true},
-        {TraversalMode::Nat4, true},
+        {TraversalMode::NatPunch, true},
         {TraversalMode::Ipv6, false},
         {TraversalMode::Ipv4Relay, false},
     };
@@ -28,8 +27,7 @@ std::vector<TraversalModeSetting> DefaultTraversalModes() {
 
 const char* TraversalModeName(TraversalMode mode) {
     switch (mode) {
-        case TraversalMode::Nat: return "nat";
-        case TraversalMode::Nat4: return "nat4";
+        case TraversalMode::NatPunch: return "nat_punch";
         case TraversalMode::Ipv6: return "ipv6";
         case TraversalMode::Ipv4Relay: return "ipv4_relay";
         default: return "unknown";
@@ -38,8 +36,7 @@ const char* TraversalModeName(TraversalMode mode) {
 
 const char* TraversalModeDisplayName(TraversalMode mode) {
     switch (mode) {
-        case TraversalMode::Nat: return "NAT traversal";
-        case TraversalMode::Nat4: return "Enhanced NAT4 traversal";
+        case TraversalMode::NatPunch: return "Adaptive NAT Punch";
         case TraversalMode::Ipv6: return "IPv6 direct connection";
         case TraversalMode::Ipv4Relay: return "IPv4 traffic relay";
         default: return "Unknown";
@@ -51,6 +48,9 @@ bool ParseTraversalModes(const std::string& text,
                          std::string* error) {
     if (modes == nullptr) return false;
     std::vector<TraversalModeSetting> parsed;
+    bool sawLegacyNat = false;
+    bool sawLegacyNat4 = false;
+    bool sawNatPunch = false;
     size_t start = 0;
     while (start <= text.size()) {
         const size_t comma = text.find(',', start);
@@ -64,18 +64,28 @@ bool ParseTraversalModes(const std::string& text,
         const std::string name = Trim(item.substr(0, colon));
         const std::string enabledText = Trim(item.substr(colon + 1));
         TraversalMode mode;
-        if (name == "nat") mode = TraversalMode::Nat;
-        else if (name == "nat4") mode = TraversalMode::Nat4;
+        bool legacyNatMode = false;
+        if (name == "nat_punch") {
+            if (sawNatPunch || sawLegacyNat || sawLegacyNat4) {
+                if (error) *error = "Duplicate NAT Punch traversal mode";
+                return false;
+            }
+            sawNatPunch = true;
+            mode = TraversalMode::NatPunch;
+        } else if (name == "nat" || name == "nat4") {
+            bool& seen = name == "nat" ? sawLegacyNat : sawLegacyNat4;
+            if (seen || sawNatPunch) {
+                if (error) *error = "Duplicate traversal mode: " + name;
+                return false;
+            }
+            seen = true;
+            legacyNatMode = true;
+            mode = TraversalMode::NatPunch;
+        }
         else if (name == "ipv6") mode = TraversalMode::Ipv6;
         else if (name == "ipv4_relay") mode = TraversalMode::Ipv4Relay;
         else {
             if (error) *error = "Unknown traversal mode: " + name;
-            return false;
-        }
-        if (std::any_of(parsed.begin(), parsed.end(), [mode](const auto& value) {
-                return value.mode == mode;
-            })) {
-            if (error) *error = "Duplicate traversal mode: " + name;
             return false;
         }
         bool enabled = false;
@@ -84,12 +94,26 @@ bool ParseTraversalModes(const std::string& text,
             if (error) *error = "Traversal mode state must be true or false: " + name;
             return false;
         }
-        parsed.push_back({mode, enabled});
+        const auto existing = std::find_if(
+            parsed.begin(), parsed.end(), [mode](const auto& value) {
+                return value.mode == mode;
+            });
+        if (existing != parsed.end()) {
+            if (!legacyNatMode || existing->mode != TraversalMode::NatPunch) {
+                if (error) *error = "Duplicate traversal mode: " + name;
+                return false;
+            }
+            // Legacy nat/nat4 were separate toggles. Either one enabled means
+            // the single adaptive NAT Punch mode remains enabled after migration.
+            existing->enabled = existing->enabled || enabled;
+        } else {
+            parsed.push_back({mode, enabled});
+        }
         if (comma == std::string::npos) break;
         start = comma + 1;
     }
-    if (parsed.size() != 4) {
-        if (error) *error = "traversal_modes must contain nat, nat4, ipv6 and ipv4_relay exactly once";
+    if (parsed.size() != 3) {
+        if (error) *error = "traversal_modes must contain nat_punch, ipv6 and ipv4_relay exactly once";
         return false;
     }
     *modes = std::move(parsed);
@@ -147,8 +171,7 @@ bool ParseTraversalModeSequence(const std::string& text,
         const std::string name = Trim(text.substr(
             start, comma == std::string::npos ? std::string::npos : comma - start));
         TraversalMode mode;
-        if (name == "nat") mode = TraversalMode::Nat;
-        else if (name == "nat4") mode = TraversalMode::Nat4;
+        if (name == "nat_punch") mode = TraversalMode::NatPunch;
         else if (name == "ipv6") mode = TraversalMode::Ipv6;
         else if (name == "ipv4_relay") mode = TraversalMode::Ipv4Relay;
         else {

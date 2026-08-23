@@ -5,11 +5,11 @@
 #include <sstream>
 #include <vector>
 
+#include "adaptive_nat_traversal.h"
 #include "hexdump.h"
 #include "ipv4_relay_fallback.h"
 #include "ipv6_fallback.h"
 #include "log.h"
-#include "nat4_traversal.h"
 #include "nat_traversal.h"
 #include "peer_selection.h"
 #include "rendezvous_client.h"
@@ -127,11 +127,6 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ ", peer_id=" + cfg.peer_id
 		+ (cfg.target_peer_id.empty() ? "" : ", target_peer_id=" + cfg.target_peer_id)
 		+ ", punch_timeout=" + std::to_string(cfg.punch_timeout) + "s"
-		+ ", nat4_source_ports=" + std::to_string(cfg.nat4_source_port_start)
-		+ "+" + std::to_string(cfg.nat4_source_port_count)
-		+ ", nat4_peer_port_offset=" + std::to_string(cfg.nat4_peer_port_offset)
-		+ ", nat4_round_timeout=" + std::to_string(cfg.nat4_round_timeout) + "s"
-		+ ", nat4_round_limit=" + std::to_string(cfg.nat4_round_limit)
 		+ ", traversal_modes=" + SerializeTraversalModes(cfg.traversal_modes)
 		+ ", ipv6_accept_inbound=" + (cfg.ipv6_accept_inbound ? "true" : "false")
 		+ ", ipv6_probe=" + cfg.ipv6_probe_host + ":"
@@ -155,6 +150,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 	do {
 		std::string matchedPeerId;
 		std::vector<TraversalMode> traversalModes;
+		NatPunchSession natPunchSession;
 		std::string socketError;
 		if (!OpenRendezvousSocket(cfg, kSocketRecvTimeoutMs, &sock, &server, &socketError)) {
 			setExitReason("failed to open rendezvous socket");
@@ -172,7 +168,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		}
 		bool traversalConnected = SelectPeer(
 			sock, cfg, server, running_, &peer, &matchedPeerId,
-			&traversalModes, &socketError);
+			&traversalModes, &natPunchSession, &socketError);
 		if (traversalConnected) {
 			traversalConnected = false;
 			std::string traversalErrors;
@@ -182,15 +178,10 @@ void TunnelEngine::WorkerThread(Config cfg) {
 				SetState(TunnelState::Connecting, "Trying " + displayName);
 				std::string strategyError;
 				switch (mode) {
-					case TraversalMode::Nat:
-						traversalConnected = PunchNat(
+					case TraversalMode::NatPunch:
+						traversalConnected = PunchAdaptiveNat(
 							&sock, cfg, server, running_, matchedPeerId,
-							&peer, &strategyError);
-						break;
-					case TraversalMode::Nat4:
-						traversalConnected = PunchNat4(
-							&sock, cfg, server, running_, matchedPeerId,
-							&peer, &strategyError);
+							natPunchSession, &peer, &strategyError);
 						break;
 					case TraversalMode::Ipv6:
 						traversalConnected = DiscoverAndConnectIpv6(

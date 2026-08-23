@@ -15,8 +15,8 @@ struct RendezvousClientSnapshot {
     std::string tunIp;
     std::string pairedWith;
     uint64_t idleSeconds = 0;
-    uint32_t nat4Round = 0;
-    bool nat4Joined = false;
+    bool natInfoReported = false;
+    bool natArmed = false;
 };
 
 struct RendezvousRoomSnapshot {

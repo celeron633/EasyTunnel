@@ -7,8 +7,7 @@
 #include "log.h"
 
 enum class TraversalMode {
-    Nat,
-    Nat4,
+    NatPunch,
     Ipv6,
     Ipv4Relay,
 };
@@ -16,6 +15,11 @@ enum class TraversalMode {
 struct TraversalModeSetting {
     TraversalMode mode;
     bool enabled;
+};
+
+struct StunServerConfig {
+    std::string host;
+    uint16_t port = 3478;
 };
 
 struct Config;
@@ -51,12 +55,8 @@ struct Config {
     uint16_t peer_timeout = 45;
     bool dummy_traffic_enabled = false;
     uint16_t punch_timeout = 30;
+    std::vector<StunServerConfig> stun_servers;
     std::vector<TraversalModeSetting> traversal_modes = DefaultTraversalModes();
-    uint16_t nat4_source_port_start = 30000;
-    uint16_t nat4_source_port_count = 25;
-    uint16_t nat4_peer_port_offset = 20;
-    uint16_t nat4_round_timeout = 10;
-    uint16_t nat4_round_limit = 3;
     bool ipv6_accept_inbound = false;
     uint16_t ipv6_listen_port = 0;
     std::string ipv6_probe_host = "2400:3200::1";

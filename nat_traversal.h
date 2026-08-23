@@ -7,12 +7,6 @@
 
 constexpr size_t kPeerDummyTrafficPacketSize = 1024;
 
-// Attempts ordinary exact-port IPv4 NAT traversal with an already selected peer.
-bool PunchNat(socket_t* sock, const Config& cfg,
-              const UdpEndpoint& server, const std::atomic<bool>& running,
-              const std::string& matchedPeerId,
-              UdpEndpoint* peer, std::string* error);
-
 // Describes how an incoming UDP packet was handled by HandlePeerControl.
 struct PeerControlResult {
     // True when the packet is a control message and must not enter the data plane.

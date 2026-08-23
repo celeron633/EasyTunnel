@@ -78,13 +78,13 @@ ftxui::screen
 
 - Rendezvous：Server address/port、Room ID、My peer ID、Auth token、Retry delay、Auto wait for peer
 - NAT liveness：Keepalive、Peer timeout
-- NAT Punch：Punch timeout、NAT4 端口起始/数量/偏移/轮次超时/round limit
+- NAT Punch：Punch timeout、STUN A/B 地址和端口
 - Log and misc：日志级别（横向 Toggle，占一行）、1 KiB/s dummy traffic
 
 右列
 
 - TUN adapter：Adapter name、Local TUN IPv4、Prefix、MTU、Auto configure IPv4
-- Traversal strategy 表格：普通 NAT、增强 NAT4、IPv6、IPv4 Relay 逐项开关、优先级和 `[^]` / `[v]` 排序
+- Traversal strategy 表格：Adaptive NAT Punch、IPv6、IPv4 Relay 逐项开关、优先级和 `[^]` / `[v]` 排序
 - IPv6 direct connection：主动入站声明、监听端口、TCP 探针主机/端口和超时
 
 底部单独一行显示 JSON 配置保存结果。
@@ -159,7 +159,7 @@ EasyTunnel.json
 
 `auth_token` 为明文，请限制配置文件权限。
 
-默认精确端口打洞和 NAT4 多 socket 回退的完整状态机见 [nat-traversal.md](nat-traversal.md)，
+双 STUN 与 Adaptive NAT Punch 的完整状态机见 [nat-traversal.md](nat-traversal.md)，
 最终服务器代理回退见 [ipv4-relay-fallback.md](ipv4-relay-fallback.md)。
 
 ## 自动等待

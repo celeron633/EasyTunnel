@@ -30,15 +30,15 @@ EasyTunnel 是一个面向 IPv4 的点对点 TUN-over-UDP 隧道，支持通过�
     |----------- REG ---------------->|<--------------- REG ------------|
     |<----- online list / PEER --------|-------- online list / PEER ----->|
     |                                 |                                 |
-    |================ PUNCH / UDP direct connection ====================>|
+    |=============== PUNCH2 / UDP direct connection ===================>|
     |<=============== TUN IPv4 packets + KEEPALIVE =====================|
     |              direct paths fail: optional UDP relay                 |
     |<========================= Rendezvous =============================>|
 ```
 
-会合服务器从控制数据报的真实源地址取得客户端公网 `IPv4:port`，因此不需要单独部署 STUN。默认模式复用会合 socket；NAT4 模式由 socket 池中实际收到 PUNCH 的 winner socket 接管隧道传输。
+客户端使用两台独立公网 IPv4 STUN 服务从同一个 punch socket 探测映射；会合服务器只交换双方 STUN 结果、分配 session/attempt 并同步开始时间，不再预测 NAT 端口。收到合法 `PUNCH2` 的 punch socket 直接接管隧道数据面。
 
-客户端代码中，`rendezvous_client.cpp` 负责会合服务器协议和响应解析，`peer_selection.cpp` 负责注册并选择明确的目标 Peer，`nat_traversal.cpp` 与 `nat4_traversal.cpp` 只负责各自的打洞状态机。由于同一个 UDP socket 同时接收服务器控制包与 Peer 打洞包，打洞收包循环会按来源把服务器消息交给 `RendezvousClient`。
+客户端代码中，`stun_client.cpp` 负责 RFC 8489 Binding，`nat_punch_plan.cpp` 负责动态计划，`adaptive_nat_traversal.cpp` 负责完整打洞状态机，`rendezvous_client.cpp` 负责会合协议。STUN 探测和 Peer 打洞复用 punch socket，注册/选 Peer 使用独立控制 socket。
 
 ## 构建
 
@@ -98,13 +98,13 @@ make -f Makefile.rendezvous rendezvous
 
 会合服务器使用 POSIX UDP socket，不创建 TUN，默认端口大于 `1024` 时不需要 root。
 
-会合服务器源码位于 `rendezvous/`：`main.cpp` 负责启动，`server.cpp` 负责 UDP 控制接收循环，`registry.cpp` 负责房间、配对和 NAT4 round 状态，`ipv4_relay_app.cpp` 独立负责 relay 端口、会话线程与数据透传，`config.cpp` 负责配置读写。
+会合服务器源码位于 `rendezvous/`：`main.cpp` 负责启动，`server.cpp` 负责 UDP 控制接收循环，`registry.cpp` 负责房间、配对和 NAT session/attempt 屏障，`ipv4_relay_app.cpp` 独立负责 relay 端口、会话线程与数据透传，`config.cpp` 负责配置读写。
 
 实现文档：
 
 - [客户端与会合服务器状态机、UML 风格协商时序](doc/state-machine.md)
 - [TUN 数据面与 Windows/Linux 适配器](doc/tun.md)
-- [NAT 会合、精确端口打洞、NAT4 socket 池与故障排查](doc/nat-traversal.md)
+- [双 STUN、自适应 NAT Punch 与故障排查](doc/nat-traversal.md)
 - [IPv6 Fallback：启用条件、角色协商、协议与故障排查](doc/ipv6-fallback.md)
 - [IPv4 Relay Fallback：会话线程、协议、部署与故障排查](doc/ipv4-relay-fallback.md)
 
@@ -137,7 +137,7 @@ EasyTunnel_rendezvous_tui [config.json]
 ```
 
 TUI 包含 Dashboard、Config、Logs 三个页签。Dashboard 实时列出全部活跃房间及
-其中的客户端、端点、空闲时间、配对/NAT4 状态和报文计数；Config 可以保存配置
+其中的客户端、端点、空闲时间、配对/NAT 状态和报文计数；Config 可以保存配置
 或保存后重启监听服务；Logs 显示带级别颜色的实时服务日志。原
 `EasyTunnel_rendezvous` console 程序及其构建目标保持不变。
 
@@ -236,7 +236,7 @@ Linux 客户端通常需要 root 或相应的 TUN/network capability。
 - 文件日志位于 `EasyTunnel_gui.exe` 同目录的 `EasyTunnel_gui.log`。
 - Connection 页面按 1 秒间隔显示最近 60 秒的 TX/RX 速度和延迟柱形图。
 - Settings → Rendezvous 中的 **Auto wait for peer** 默认关闭。启用后，GUI 会在启动、断开或错误退出连接后自动向会合服务器注册并等待其他 Peer。首次启动会立即注册；会合超时、其他错误或手动 Disconnect 后，会按同一区域的 **Retry Delay Seconds** 延迟重试（默认 5 秒，可配置 1–3600 秒）。
-- Settings → **Traversal strategy** 使用表格配置普通 NAT、增强 NAT4、IPv6 和 IPv4 Relay；每行可单独启用，并可通过 Up/Down 调整尝试顺序。
+- Settings → **Traversal strategy** 使用表格配置 Adaptive NAT Punch、IPv6 和 IPv4 Relay；每行可单独启用，并可通过 Up/Down 调整尝试顺序。
 
 ## TUI 客户端
 
@@ -278,25 +278,17 @@ B: Adapter Name = EasyTunnel-B, Local TUN IPv4 = 10.66.0.2
 
 ## NAT 适用范围
 
-典型 port-restricted cone NAT 同时具备 endpoint-independent mapping 时，双方持续发送 PUNCH 后通常可以建立直连。
+Adaptive NAT Punch 使用同一 UDP socket 依次探测两台独立 STUN，并根据两次公网映射选择 Direct 或动态 Range 计划。
 
-客户端先向会合服务器上报 `traversal_modes` 中已启用的模式，再选定对端。四个模式名分别是 `nat`（普通 NAT）、`nat4`（增强 NAT4）、`ipv6`（IPv6 直连）和 `ipv4_relay`（IPv4 流量中继）。每个模式必须恰好出现一次，`true/false` 控制开关。双方配置可以不同：服务器取双方能力交集，并严格保留连接发起方的顺序；没有共同模式时，发起方立即收到对端不支持错误。默认配置为：
+客户端先向会合服务器上报 `traversal_modes` 中已启用的模式，再选定对端。三个模式名分别是 `nat_punch`（自适应 NAT 穿透）、`ipv6`（IPv6 直连）和 `ipv4_relay`（IPv4 流量中继）。每个模式必须恰好出现一次，`true/false` 控制开关。双方配置可以不同：服务器取双方能力交集，并严格保留连接发起方的顺序。旧配置中的 `nat`/`nat4` 会自动合并迁移为 `nat_punch`。
 
 ```ini
-traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:false
+traversal_modes=nat_punch:true,ipv6:false,ipv4_relay:false
 ```
 
-普通 NAT 和增强 NAT4 是两个独立策略，各自使用一次 `punch_timeout`。NAT4 下双方默认分别绑定连续的本地 UDP 端口 `30000～30024`，全部向会合服务器观测到的对端端口 `+20` 发送 PUNCH。一轮默认等待 10 秒；失败后源端口段整体增加 25，再开始下一轮，最多尝试 3 个 round。收到对端 PUNCH 的 socket 会接管后续隧道数据面。
+`stun_servers` 必须包含两台解析到不同公网 IPv4 的标准 RFC 8489 STUN 服务。推荐分别部署 Coturn `stun-only`。easy/easy 使用 Direct；regular/easy 根据观测端口差计算预测中心与动态范围。当前 random、multi-public-IP 和 hard/hard regular 会转后续 IPv6/Relay，不会回退旧 fixed-offset 算法。完整协议见 [Adaptive NAT Punch 文档](doc/nat-traversal.md)。
 
-NAT4 模式需要同步升级会合服务器。每端创建好本轮 socket 池后发送带 round ID 的 `NAT4_JOIN`；服务器只有在同一对 Peer 都进入相同 round 后，才向双方发送 `NAT4_PEER` 和本轮观测到的公网端点。客户端收到该消息后才开始发送 PUNCH，避免一端使用新端口段、另一端仍处于旧端口段。
-
-- `nat4_source_port_start`：第一轮连续源端口的起点，默认 `30000`。
-- `nat4_source_port_count`：每轮 socket 数量，默认 `25`，范围 `1～60`。
-- `nat4_peer_port_offset`：对端公网端口预测增量，默认 `20`。
-- `nat4_round_timeout`：每轮端口池等待时间，默认 `10` 秒。
-- `nat4_round_limit`：一次 NAT4 策略最多尝试的 round 数，默认 `3`，范围 `1～1000`。
-
-普通 NAT、增强 NAT4 和 IPv4 Relay 各自使用一次 `punch_timeout`；IPv6 使用 `ipv6_fallback_timeout`。等待模式会在收到 PEER 后才开始执行策略列表。
+Adaptive NAT Punch 和 IPv4 Relay 各自使用一次 `punch_timeout`；IPv6 使用 `ipv6_fallback_timeout`。等待模式会在收到 PEER 后才开始执行策略列表。
 
 启用 IPv6 直连时，双方都必须在 `traversal_modes` 中将 `ipv6` 设为 `true`、都具有经公网 TCP 探针验证的 IPv6 GUA，并且至少一端设置
 `ipv6_accept_inbound=true`。会合服务器只交换 IPv6 UDP 端点和 `listen/connect` 角色，
@@ -310,8 +302,8 @@ UDP payload，不增加封装。服务器部署时必须放行配置的 UDP 端�
 
 以下情况可能失败：
 
-- 外部端口随机分配、递减，或递增量超过配置范围的 symmetric NAT
-- 双方 NAT4 的公网端口无法用相同固定正偏移近似预测
+- 外部端口随机分配或 multi-public-IP（aggressive 计划尚未完成）
+- 双方都是 port-dependent regular NAT（dual-range 尚未完成）
 - 企业或运营商网络禁止 P2P UDP
 - 不支持 hairpin 的同公网出口场景
 - NAT/CGN 主动改变或回收映射
