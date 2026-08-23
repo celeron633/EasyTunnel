@@ -56,13 +56,10 @@ IconMode StatusMode(bool unavailable, bool rxActive, bool txActive) {
 }
 
 const wchar_t* StatusTip(IconMode mode) {
-    switch (mode) {
-        case IconMode::Disconnected: return L"EasyTunnel TUI - disconnected / waiting";
-        case IconMode::Rx: return L"EasyTunnel TUI - receiving (RX)";
-        case IconMode::Tx: return L"EasyTunnel TUI - transmitting (TX)";
-        case IconMode::RxTx: return L"EasyTunnel TUI - receiving and transmitting";
-        default: return L"EasyTunnel TUI - connected";
+    if (mode == IconMode::Disconnected) {
+        return L"EasyTunnel - disconnected / waiting";
     }
+    return L"EasyTunnel - connected";
 }
 
 // Under classic conhost the console window is ours to show and hide. Under

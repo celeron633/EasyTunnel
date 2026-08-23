@@ -50,13 +50,10 @@ IconMode StatusMode(bool unavailable, bool rxActive, bool txActive) {
 }
 
 const wchar_t* StatusTip(IconMode mode) {
-    switch (mode) {
-        case IconMode::Disconnected: return L"EasyTunnel - disconnected / waiting";
-        case IconMode::Rx: return L"EasyTunnel - receiving (RX)";
-        case IconMode::Tx: return L"EasyTunnel - transmitting (TX)";
-        case IconMode::RxTx: return L"EasyTunnel - receiving and transmitting";
-        default: return L"EasyTunnel - connected";
+    if (mode == IconMode::Disconnected) {
+        return L"EasyTunnel - disconnected / waiting";
     }
+    return L"EasyTunnel - connected";
 }
 }  // namespace
 
