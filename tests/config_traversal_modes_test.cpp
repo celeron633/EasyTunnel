@@ -100,13 +100,23 @@ int main(int argc, char** argv) {
         Expect(SerializeTraversalModes(example.traversalModes)
                    == "nat:true,nat4:true,ipv6:false,ipv4_relay:false",
                "shared example traversal strategy");
+        Expect(example.nat4RoundLimit == 3,
+               "shared example NAT4 round limit");
         Expect(ValidateClientConfig(example, &error),
                "shared example config validates");
         const Config engine = ToEngineConfig(example, "node-b");
         Expect(engine.rendezvous_addr == example.rendezvousAddress
                    && engine.target_peer_id == "node-b"
-                   && engine.tun_mtu == 1452,
+                   && engine.tun_mtu == 1452
+                   && engine.nat4_round_limit == 3,
                "engine config mapping");
+
+        example.nat4RoundLimit = 2000;
+        Expect(ToEngineConfig(example, "node-b").nat4_round_limit == 1000,
+               "engine NAT4 round limit clamps high values");
+        example.nat4RoundLimit = 0;
+        Expect(ToEngineConfig(example, "node-b").nat4_round_limit == 1,
+               "engine NAT4 round limit clamps low values");
     }
 
     if (failures != 0) {

@@ -145,9 +145,11 @@ bool PunchNat4(socket_t* sock, const Config& cfg,
     Log(LogLevel::Debug, "NAT4 traversal started: expected_peer_id="
         + expectedPeerId + ", first_port=" + std::to_string(firstPort)
         + ", pool_size=" + std::to_string(cfg.nat4_source_port_count)
-        + ", round_timeout=" + std::to_string(cfg.nat4_round_timeout) + "s");
+        + ", round_timeout=" + std::to_string(cfg.nat4_round_timeout) + "s"
+        + ", round_limit=" + std::to_string(cfg.nat4_round_limit));
 
-    while (running.load() && std::chrono::steady_clock::now() < deadline) {
+    while (running.load() && std::chrono::steady_clock::now() < deadline
+           && round < cfg.nat4_round_limit) {
         if (firstPort + cfg.nat4_source_port_count - 1 > 65535) {
             *error = "NAT4 source port ranges exhausted before punch succeeded";
             Log(LogLevel::Error, *error + "; next_first_port="
@@ -341,7 +343,13 @@ bool PunchNat4(socket_t* sock, const Config& cfg,
         ++round;
     }
 
-    *error = running.load() ? "NAT4 punch timed out" : "NAT traversal stopped";
+    if (!running.load()) {
+        *error = "NAT traversal stopped";
+    } else if (round >= cfg.nat4_round_limit) {
+        *error = "NAT4 round limit reached";
+    } else {
+        *error = "NAT4 punch timed out";
+    }
     Log(running.load() ? LogLevel::Error : LogLevel::Debug,
         "NAT4 traversal finished without a connection: " + *error
         + ", rounds_attempted=" + std::to_string(round));

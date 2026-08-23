@@ -18,6 +18,7 @@
   "nat4_source_port_count": 25,
   "nat4_peer_port_offset": 20,
   "nat4_round_timeout": 10,
+  "nat4_round_limit": 3,
   "ipv6_accept_inbound": false,
   "ipv6_listen_port": 0,
   "ipv6_probe_host": "2400:3200::1",

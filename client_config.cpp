@@ -67,6 +67,7 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
     ReadInt(root, "nat4_source_port_count", &config->nat4SourcePortCount);
     ReadInt(root, "nat4_peer_port_offset", &config->nat4PeerPortOffset);
     ReadInt(root, "nat4_round_timeout", &config->nat4RoundTimeout);
+    ReadInt(root, "nat4_round_limit", &config->nat4RoundLimit);
     ReadBool(root, "ipv6_accept_inbound", &config->ipv6AcceptInbound);
     ReadInt(root, "ipv6_listen_port", &config->ipv6ListenPort);
     ReadString(root, "ipv6_probe_host", &config->ipv6ProbeHost);
@@ -91,6 +92,7 @@ bool LoadClientConfig(const std::string& path, ClientConfig* config,
         config->nat4SourcePortStart, 65536 - config->nat4SourcePortCount);
     config->nat4PeerPortOffset = std::clamp(config->nat4PeerPortOffset, 0, 256);
     config->nat4RoundTimeout = std::clamp(config->nat4RoundTimeout, 1, 60);
+    config->nat4RoundLimit = std::clamp(config->nat4RoundLimit, 1, 1000);
     config->ipv6ListenPort = std::clamp(config->ipv6ListenPort, 0, 65535);
     config->ipv6ProbePort = std::clamp(config->ipv6ProbePort, 1, 65535);
     config->ipv6FallbackTimeout = std::clamp(config->ipv6FallbackTimeout, 1, 120);
@@ -122,6 +124,7 @@ bool SaveClientConfig(const std::string& path, const ClientConfig& config,
     root["nat4_source_port_count"] = config.nat4SourcePortCount;
     root["nat4_peer_port_offset"] = config.nat4PeerPortOffset;
     root["nat4_round_timeout"] = config.nat4RoundTimeout;
+    root["nat4_round_limit"] = config.nat4RoundLimit;
     root["ipv6_accept_inbound"] = config.ipv6AcceptInbound;
     root["ipv6_listen_port"] = config.ipv6ListenPort;
     root["ipv6_probe_host"] = config.ipv6ProbeHost;
@@ -216,6 +219,8 @@ Config ToEngineConfig(const ClientConfig& config,
         std::clamp(config.nat4PeerPortOffset, 0, 256));
     output.nat4_round_timeout = static_cast<uint16_t>(
         std::clamp(config.nat4RoundTimeout, 1, 60));
+    output.nat4_round_limit = static_cast<uint16_t>(
+        std::clamp(config.nat4RoundLimit, 1, 1000));
     output.ipv6_accept_inbound = config.ipv6AcceptInbound;
     output.ipv6_listen_port = static_cast<uint16_t>(
         std::clamp(config.ipv6ListenPort, 0, 65535));

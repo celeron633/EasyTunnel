@@ -100,7 +100,7 @@ void GuiApp::RenderSettingsTab() {
     }
     ImGui::Spacing();
     ImGui::SeparatorText("NAT liveness");
-    if (BeginForm("##NatSettings")) {
+    if (BeginForm("##NatLivenessSettings")) {
         FormField("Keepalive (s)");
         configChanged |= ImGui::InputInt("##Keepalive", &config_.keepaliveInterval);
         config_.keepaliveInterval = std::clamp(config_.keepaliveInterval, 1, 300);
@@ -108,6 +108,11 @@ void GuiApp::RenderSettingsTab() {
         configChanged |= ImGui::InputInt("##PeerTimeout", &config_.peerTimeout);
         config_.peerTimeout = std::clamp(config_.peerTimeout,
                                          config_.keepaliveInterval + 1, 3600);
+        EndForm();
+    }
+    ImGui::Spacing();
+    ImGui::SeparatorText("NAT Punch");
+    if (BeginForm("##NatPunchSettings")) {
         FormField("Punch timeout (s)");
         configChanged |= ImGui::InputInt("##PunchTimeout", &config_.punchTimeout);
         config_.punchTimeout = std::clamp(config_.punchTimeout, 1, 600);
@@ -128,6 +133,9 @@ void GuiApp::RenderSettingsTab() {
         FormField("NAT4 round timeout (s)");
         configChanged |= ImGui::InputInt("##Nat4RoundTimeout", &config_.nat4RoundTimeout);
         config_.nat4RoundTimeout = std::clamp(config_.nat4RoundTimeout, 1, 60);
+        FormField("NAT4 round limit");
+        configChanged |= ImGui::InputInt("##Nat4RoundLimit", &config_.nat4RoundLimit);
+        config_.nat4RoundLimit = std::clamp(config_.nat4RoundLimit, 1, 1000);
         EndForm();
     }
     ImGui::Spacing();

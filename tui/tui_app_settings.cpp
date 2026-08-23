@@ -43,6 +43,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto nat4SourcePortCount = Input(&nat4SourcePortCountText_, "25");
     auto nat4PeerPortOffset = Input(&nat4PeerPortOffsetText_, "20");
     auto nat4RoundTimeout = Input(&nat4RoundTimeoutText_, "10");
+    auto nat4RoundLimit = Input(&nat4RoundLimitText_, "3");
     auto ipv6ListenPort = Input(&ipv6ListenPortText_, "0");
     auto ipv6ProbeHost = Input(&config_.ipv6ProbeHost, "2400:3200::1");
     auto ipv6ProbePort = Input(&ipv6ProbePortText_, "53");
@@ -84,7 +85,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
         serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay,
         autoWait, keepalive, peerTimeout, punchTimeout,
         nat4SourcePortStart, nat4SourcePortCount,
-        nat4PeerPortOffset, nat4RoundTimeout,
+        nat4PeerPortOffset, nat4RoundTimeout, nat4RoundLimit,
         logLevel, dummyTraffic,
     });
     Components rightControls = {adapter, tunIp, tunPrefix, tunMtu, autoConfig};
@@ -98,7 +99,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
          peerTimeout, punchTimeout, nat4SourcePortStart, nat4SourcePortCount,
-         nat4PeerPortOffset, nat4RoundTimeout, logLevel, serverAddress,
+         nat4PeerPortOffset, nat4RoundTimeout, nat4RoundLimit, logLevel, serverAddress,
          serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
          autoWait, ipv6Inbound, ipv6ListenPort,
          ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout,
@@ -117,11 +118,14 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             tui_theme::SectionTitle("NAT liveness"),
             row("Keepalive (s)", keepalive),
             row("Peer timeout (s)", peerTimeout),
+            separatorEmpty(),
+            tui_theme::SectionTitle("NAT Punch"),
             row("Punch timeout (s)", punchTimeout),
             row("NAT4 port start", nat4SourcePortStart),
             row("NAT4 port count", nat4SourcePortCount),
             row("NAT4 peer offset", nat4PeerPortOffset),
             row("NAT4 round timeout (s)", nat4RoundTimeout),
+            row("NAT4 round limit", nat4RoundLimit),
             separatorEmpty(),
             tui_theme::SectionTitle("Log and misc"),
             row("Log level", logLevel),
@@ -187,6 +191,7 @@ void TuiApp::SyncTextFromConfig() {
     nat4SourcePortCountText_ = std::to_string(config_.nat4SourcePortCount);
     nat4PeerPortOffsetText_ = std::to_string(config_.nat4PeerPortOffset);
     nat4RoundTimeoutText_ = std::to_string(config_.nat4RoundTimeout);
+    nat4RoundLimitText_ = std::to_string(config_.nat4RoundLimit);
     ipv6ListenPortText_ = std::to_string(config_.ipv6ListenPort);
     ipv6ProbePortText_ = std::to_string(config_.ipv6ProbePort);
     ipv6FallbackTimeoutText_ = std::to_string(config_.ipv6FallbackTimeout);
@@ -214,6 +219,8 @@ void TuiApp::SyncConfigFromText() {
         ParseInt(nat4PeerPortOffsetText_, config_.nat4PeerPortOffset), 0, 256);
     config_.nat4RoundTimeout = std::clamp(
         ParseInt(nat4RoundTimeoutText_, config_.nat4RoundTimeout), 1, 60);
+    config_.nat4RoundLimit = std::clamp(
+        ParseInt(nat4RoundLimitText_, config_.nat4RoundLimit), 1, 1000);
     config_.ipv6ListenPort = std::clamp(
         ParseInt(ipv6ListenPortText_, config_.ipv6ListenPort), 0, 65535);
     config_.ipv6ProbePort = std::clamp(
@@ -234,6 +241,7 @@ std::string TuiApp::ConfigSignature() const {
               << keepaliveText_ << '\n' << peerTimeoutText_ << '\n' << punchTimeoutText_ << '\n'
               << nat4SourcePortStartText_ << '\n' << nat4SourcePortCountText_ << '\n'
               << nat4PeerPortOffsetText_ << '\n' << nat4RoundTimeoutText_ << '\n'
+              << nat4RoundLimitText_ << '\n'
               << SerializeTraversalModes(config_.traversalModes) << '\n'
               << config_.ipv6AcceptInbound << '\n'
               << ipv6ListenPortText_ << '\n' << config_.ipv6ProbeHost << '\n'

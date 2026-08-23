@@ -77,6 +77,7 @@ private:
     std::string nat4SourcePortCountText_;
     std::string nat4PeerPortOffsetText_;
     std::string nat4RoundTimeoutText_;
+    std::string nat4RoundLimitText_;
     std::string ipv6ListenPortText_;
     std::string ipv6ProbePortText_;
     std::string ipv6FallbackTimeoutText_;

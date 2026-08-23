@@ -29,6 +29,7 @@ struct ClientConfig {
     int nat4SourcePortCount = 25;
     int nat4PeerPortOffset = 20;
     int nat4RoundTimeout = 10;
+    int nat4RoundLimit = 3;
     std::vector<TraversalModeSetting> traversalModes = DefaultTraversalModes();
     bool ipv6AcceptInbound = false;
     int ipv6ListenPort = 0;

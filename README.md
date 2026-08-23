@@ -286,7 +286,7 @@ B: Adapter Name = EasyTunnel-B, Local TUN IPv4 = 10.66.0.2
 traversal_modes=nat:true,nat4:true,ipv6:false,ipv4_relay:false
 ```
 
-普通 NAT 和增强 NAT4 是两个独立策略，各自使用一次 `punch_timeout`。NAT4 下双方默认分别绑定连续的本地 UDP 端口 `30000～30024`，全部向会合服务器观测到的对端端口 `+20` 发送 PUNCH。一轮默认等待 10 秒；失败后源端口段整体增加 25，再开始下一轮。收到对端 PUNCH 的 socket 会接管后续隧道数据面。
+普通 NAT 和增强 NAT4 是两个独立策略，各自使用一次 `punch_timeout`。NAT4 下双方默认分别绑定连续的本地 UDP 端口 `30000～30024`，全部向会合服务器观测到的对端端口 `+20` 发送 PUNCH。一轮默认等待 10 秒；失败后源端口段整体增加 25，再开始下一轮，最多尝试 3 个 round。收到对端 PUNCH 的 socket 会接管后续隧道数据面。
 
 NAT4 模式需要同步升级会合服务器。每端创建好本轮 socket 池后发送带 round ID 的 `NAT4_JOIN`；服务器只有在同一对 Peer 都进入相同 round 后，才向双方发送 `NAT4_PEER` 和本轮观测到的公网端点。客户端收到该消息后才开始发送 PUNCH，避免一端使用新端口段、另一端仍处于旧端口段。
 
@@ -294,6 +294,7 @@ NAT4 模式需要同步升级会合服务器。每端创建好本轮 socket 池�
 - `nat4_source_port_count`：每轮 socket 数量，默认 `25`，范围 `1～60`。
 - `nat4_peer_port_offset`：对端公网端口预测增量，默认 `20`。
 - `nat4_round_timeout`：每轮端口池等待时间，默认 `10` 秒。
+- `nat4_round_limit`：一次 NAT4 策略最多尝试的 round 数，默认 `3`，范围 `1～1000`。
 
 普通 NAT、增强 NAT4 和 IPv4 Relay 各自使用一次 `punch_timeout`；IPv6 使用 `ipv6_fallback_timeout`。等待模式会在收到 PEER 后才开始执行策略列表。
 

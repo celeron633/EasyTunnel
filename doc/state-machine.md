@@ -96,8 +96,8 @@ stateDiagram-v2
     Failed --> [*]
 ```
 
-普通 NAT、增强 NAT4 和 Relay 分别使用独立的 `punch_timeout`；IPv6 使用
-`ipv6_fallback_timeout`。
+普通 NAT、增强 NAT4 和 Relay 分别使用独立的 `punch_timeout`；NAT4 还受
+`nat4_round_limit` 限制，IPv6 使用 `ipv6_fallback_timeout`。
 
 ### 2.1 各阶段的 socket 接管
 
@@ -322,7 +322,7 @@ Hello 或 Ready 丢失时客户端继续发送 Hello，线程在双方已绑定�
 | 模式能力协商 | 双方没有共同启用模式 | 发起方立即 `Error`，等待方继续在线 |
 | 空目标等待模式 | 未收到 PEER | 保持 `Waiting`，直到 Stop |
 | 普通 NAT | `punch_timeout` | 策略列表下一项或 `Error` |
-| NAT4 | `punch_timeout` | 策略列表下一项或 `Error` |
+| NAT4 | `punch_timeout` 或 `nat4_round_limit` | 策略列表下一项或 `Error` |
 | IPv6 直连 | `ipv6_fallback_timeout` | 策略列表下一项或 `Error` |
 | IPv4 Relay 协商 | 独立的 `punch_timeout` | 策略列表下一项或 `Error` |
 | 已连接客户端 | `peer_timeout` 无合法 Peer 流量 | 客户端 `Error` |

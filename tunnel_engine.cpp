@@ -130,6 +130,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ ", nat4_source_ports=" + std::to_string(cfg.nat4_source_port_start)
 		+ "+" + std::to_string(cfg.nat4_source_port_count)
 		+ ", nat4_peer_port_offset=" + std::to_string(cfg.nat4_peer_port_offset)
+		+ ", nat4_round_timeout=" + std::to_string(cfg.nat4_round_timeout) + "s"
+		+ ", nat4_round_limit=" + std::to_string(cfg.nat4_round_limit)
 		+ ", traversal_modes=" + SerializeTraversalModes(cfg.traversal_modes)
 		+ ", ipv6_accept_inbound=" + (cfg.ipv6_accept_inbound ? "true" : "false")
 		+ ", ipv6_probe=" + cfg.ipv6_probe_host + ":"

@@ -157,6 +157,7 @@ nat4_source_port_start=30000
 nat4_source_port_count=25
 nat4_peer_port_offset=20
 nat4_round_timeout=10
+nat4_round_limit=3
 ```
 
 ### 1. 建立本轮 socket 池
@@ -248,7 +249,7 @@ NAT4 池 socket 带有 1 秒接收超时，因此 winner 接管后仍可正常�
 
 ### 5. 本轮失败和下一轮
 
-单轮最多等待 `nat4_round_timeout` 秒，同时不会超过剩余的总 `punch_timeout`。失败后：
+单轮最多等待 `nat4_round_timeout` 秒，同时不会超过剩余的总 `punch_timeout`。一次策略最多实际开始 `nat4_round_limit` 个 round；达到上限后放弃 NAT4 并继续后续策略。单轮失败后：
 
 ```text
 发送 UNREG
@@ -265,7 +266,7 @@ round 1: 30025～30049
 round 2: 30050～30074
 ```
 
-默认 `punch_timeout=30` 时，NAT4 通常可以运行两轮完整的 10 秒尝试和一轮缩短的尝试。需要更多轮次时应增大 `punch_timeout`。
+默认 `punch_timeout=30`、`nat4_round_limit=3` 时，NAT4 通常可以运行两轮完整的 10 秒尝试和一轮缩短的尝试。需要更多轮次时应同时确保 round limit 和总超时足够大。
 
 ## 成功后的数据面
 
@@ -295,6 +296,7 @@ KEEPALIVE       ──► winning UDP socket ──► confirmed peer endpoint
 | `nat4_source_port_count` | 25 | 1～60 | 每轮 socket 数量 |
 | `nat4_peer_port_offset` | 20 | 0～256 | 预测公网端口的固定正偏移 |
 | `nat4_round_timeout` | 10 | 1～60 秒 | 单轮 socket 池等待时间 |
+| `nat4_round_limit` | 3 | 1～1000 | 一次 NAT4 策略最多尝试的 round 数 |
 | `ipv6_accept_inbound` | false | `true/false` | 声明本端允许主动入站 IPv6 UDP |
 | `ipv6_listen_port` | 0 | 0～65535 | IPv6 数据端口；0 为自动分配 |
 | `ipv6_probe_host` | `2400:3200::1` | IPv6 地址或可解析 AAAA 的主机名 | IPv6 公网 TCP 探针目标 |

@@ -56,6 +56,7 @@ struct Config {
     uint16_t nat4_source_port_count = 25;
     uint16_t nat4_peer_port_offset = 20;
     uint16_t nat4_round_timeout = 10;
+    uint16_t nat4_round_limit = 3;
     bool ipv6_accept_inbound = false;
     uint16_t ipv6_listen_port = 0;
     std::string ipv6_probe_host = "2400:3200::1";
