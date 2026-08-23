@@ -8,6 +8,8 @@
 #include <ftxui/component/component_options.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include "../log.h"
+#include "../stun_client.h"
 #include "tui_theme.h"
 
 namespace {
@@ -57,6 +59,9 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto logLevel = Toggle(&logLevels_, &config_.logLevel);
 
     const ButtonOption flatButton = tui_theme::FlatButton();
+    auto stunDiagnostic = Button("Test STUN A/B", [this] {
+        StartStunDiagnostic();
+    }, flatButton);
     Components modeCheckboxes;
     Components modeUpButtons;
     Components modeDownButtons;
@@ -83,7 +88,7 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto leftColumn = Container::Vertical({
         serverAddress, serverPort, roomId, peerId, token, rendezvousRetryDelay,
         autoWait, keepalive, peerTimeout, punchTimeout,
-        stunAHost, stunAPort, stunBHost, stunBPort,
+        stunAHost, stunAPort, stunBHost, stunBPort, stunDiagnostic,
         logLevel, dummyTraffic,
     });
     Components rightControls = {adapter, tunIp, tunPrefix, tunMtu, autoConfig};
@@ -97,12 +102,24 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     return Renderer(controls,
         [this, adapter, tunIp, tunPrefix, tunMtu, autoConfig, keepalive,
          peerTimeout, punchTimeout, stunAHost, stunAPort, stunBHost, stunBPort,
-         logLevel, serverAddress,
+         stunDiagnostic, logLevel, serverAddress,
          serverPort, roomId, peerId, token, rendezvousRetryDelay, dummyTraffic,
          autoWait, ipv6Inbound, ipv6ListenPort,
          ipv6ProbeHost, ipv6ProbePort, ipv6FallbackTimeout,
          modeCheckboxes, modeUpButtons, modeDownButtons] {
         const auto row = tui_theme::LabeledRow;
+        std::string diagnosticMessage;
+        bool diagnosticCompleted = false;
+        bool diagnosticSucceeded = false;
+        {
+            std::lock_guard<std::mutex> lock(stunDiagnosticMutex_);
+            diagnosticMessage = stunDiagnosticMessage_;
+            diagnosticCompleted = stunDiagnosticCompleted_;
+            diagnosticSucceeded = stunDiagnosticSucceeded_;
+        }
+        const Color diagnosticColor = diagnosticSucceeded
+            ? Color::Green
+            : diagnosticCompleted ? Color::Red : Color::Yellow;
         Elements left = {
             tui_theme::SectionTitle("Rendezvous"),
             row("Server address", serverAddress),
@@ -123,6 +140,8 @@ ftxui::Component TuiApp::BuildSettingsTab() {
             row("STUN A port", stunAPort),
             row("STUN B host", stunBHost),
             row("STUN B port", stunBPort),
+            row("STUN diagnostic", stunDiagnostic),
+            paragraph(diagnosticMessage) | color(diagnosticColor),
             separatorEmpty(),
             tui_theme::SectionTitle("Log and misc"),
             row("Log level", logLevel),
@@ -175,6 +194,44 @@ ftxui::Component TuiApp::BuildSettingsTab() {
                 | color(configSaveOk_ ? Color::Green : Color::Red),
         }) | border | flex;
     });
+}
+
+void TuiApp::StartStunDiagnostic() {
+    if (stunDiagnosticRunning_.exchange(true)) return;
+    if (stunDiagnosticThread_.joinable()) stunDiagnosticThread_.join();
+
+    SyncConfigFromText();
+    const std::vector<StunServerConfig> servers = config_.stunServers;
+    {
+        std::lock_guard<std::mutex> lock(stunDiagnosticMutex_);
+        stunDiagnosticMessage_ = "Testing both STUN servers with one UDP socket...";
+        stunDiagnosticCompleted_ = false;
+        stunDiagnosticSucceeded_ = false;
+    }
+    stunDiagnosticThread_ = std::thread([this, servers] {
+        StunDiagnosticResult result;
+        std::string error;
+        const bool succeeded = DiagnoseStunServers(
+            servers, 800, 3, &result, &error);
+        const std::string message = succeeded
+            ? FormatStunDiagnosticSummary(result)
+            : "STUN diagnostic failed: " + error;
+        {
+            std::lock_guard<std::mutex> lock(stunDiagnosticMutex_);
+            stunDiagnosticMessage_ = message;
+            stunDiagnosticCompleted_ = true;
+            stunDiagnosticSucceeded_ = succeeded;
+        }
+        stunDiagnosticRunning_.store(false);
+        if (!exiting_.load()) {
+            Log(succeeded ? LogLevel::Info : LogLevel::Error, message);
+            screen_.PostEvent(ftxui::Event::Custom);
+        }
+    });
+}
+
+void TuiApp::JoinStunDiagnostic() {
+    if (stunDiagnosticThread_.joinable()) stunDiagnosticThread_.join();
 }
 
 void TuiApp::SyncTextFromConfig() {

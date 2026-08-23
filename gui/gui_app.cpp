@@ -136,6 +136,7 @@ void GuiApp::Shutdown() {
     shuttingDown_.store(true);
     autoWaitPending_.store(false);
     autoWaitEnabledRuntime_.store(false);
+    JoinStunDiagnostic();
     if (!window_) return;
     if (uiHeartbeat_) uiHeartbeat_->SetPhase(UiPhase::ShutdownEngine);
     engine_.Stop();

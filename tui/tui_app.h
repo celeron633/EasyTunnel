@@ -55,6 +55,8 @@ private:
     void SyncTextFromConfig();
     void SyncConfigFromText();
     void StopTicker();
+    void StartStunDiagnostic();
+    void JoinStunDiagnostic();
 
     ftxui::ScreenInteractive screen_;
 #ifdef _WIN32
@@ -96,6 +98,12 @@ private:
     std::string logCopyMessage_;
     bool logCopyOk_ = true;
     std::atomic<int64_t> lastLogRedrawMs_{0};
+    std::thread stunDiagnosticThread_;
+    std::atomic<bool> stunDiagnosticRunning_{false};
+    std::mutex stunDiagnosticMutex_;
+    std::string stunDiagnosticMessage_ = "Not tested";
+    bool stunDiagnosticCompleted_ = false;
+    bool stunDiagnosticSucceeded_ = false;
 
     int txTotalUnit_ = 0;
     int rxTotalUnit_ = 0;

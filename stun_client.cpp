@@ -341,6 +341,59 @@ bool ProbeStunServers(socket_t sock,
     return true;
 }
 
+bool DiagnoseStunServers(const std::vector<StunServerConfig>& servers,
+                         int timeoutMs, int attempts,
+                         StunDiagnosticResult* result,
+                         std::string* error) {
+    if (result == nullptr || servers.size() < 2) {
+        SetError(error, "At least two STUN servers are required");
+        return false;
+    }
+    *result = {};
+
+    socket_t sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == kInvalidSocket) {
+        SetError(error, "Cannot create STUN diagnostic socket. err="
+            + std::to_string(GetSocketError()));
+        return false;
+    }
+
+    const bool probed = ProbeStunServers(sock, servers, timeoutMs, attempts,
+                                         &result->probes, error);
+    CloseSocket(sock);
+    if (!probed) return false;
+
+    result->mapping = ClassifyNatMapping(
+        result->probes[0].mappedEndpoint,
+        result->probes[1].mappedEndpoint);
+    return true;
+}
+
+std::string FormatStunDiagnosticSummary(
+    const StunDiagnosticResult& result) {
+    if (result.probes.size() < 2) return "STUN diagnostic has no result";
+    const char* localPlan = "unsupported";
+    switch (result.mapping.behavior) {
+        case NatMappingBehavior::EndpointIndependent:
+            localPlan = "direct-or-range-ready";
+            break;
+        case NatMappingBehavior::PortDependentRegular:
+            localPlan = "regular-or-dual-range-ready";
+            break;
+        case NatMappingBehavior::PortDependentRandom:
+            localPlan = "random-required-pending";
+            break;
+        default:
+            break;
+    }
+    return std::string("classification=")
+        + NatMappingBehaviorName(result.mapping.behavior)
+        + "; A=" + FormatUdpEndpoint(result.probes[0].mappedEndpoint)
+        + "; B=" + FormatUdpEndpoint(result.probes[1].mappedEndpoint)
+        + "; delta=" + std::to_string(result.mapping.portDelta)
+        + "; local_plan=" + localPlan;
+}
+
 NatMappingAnalysis ClassifyNatMapping(const UdpEndpoint& first,
                                       const UdpEndpoint& second,
                                       uint16_t regularDeltaLimit) {

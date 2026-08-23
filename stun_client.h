@@ -30,6 +30,11 @@ struct StunProbeResult {
     UdpEndpoint mappedEndpoint{};
 };
 
+struct StunDiagnosticResult {
+    std::vector<StunProbeResult> probes;
+    NatMappingAnalysis mapping;
+};
+
 bool GenerateStunTransactionId(StunTransactionId* transactionId,
                                std::string* error);
 std::vector<uint8_t> MakeStunBindingRequest(
@@ -56,6 +61,15 @@ bool ProbeStunServers(socket_t sock,
                       int timeoutMs, int attempts,
                       std::vector<StunProbeResult>* results,
                       std::string* error);
+
+// Runs a standalone dual-STUN diagnostic. Both requests share one temporary
+// UDP socket, matching the mapping-classification behavior used by NAT Punch.
+bool DiagnoseStunServers(const std::vector<StunServerConfig>& servers,
+                         int timeoutMs, int attempts,
+                         StunDiagnosticResult* result,
+                         std::string* error);
+std::string FormatStunDiagnosticSummary(
+    const StunDiagnosticResult& result);
 
 NatMappingAnalysis ClassifyNatMapping(const UdpEndpoint& first,
                                       const UdpEndpoint& second,

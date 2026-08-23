@@ -216,6 +216,101 @@ int main() {
         CloseSocket(fakeServer);
     }
 
+    socket_t diagnosticServerA = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    socket_t diagnosticServerB = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    Expect(diagnosticServerA != kInvalidSocket
+               && diagnosticServerB != kInvalidSocket,
+           "dual diagnostic STUN sockets open");
+    if (diagnosticServerA != kInvalidSocket
+        && diagnosticServerB != kInvalidSocket) {
+        auto bindFakeServer = [](socket_t server, const char* ip,
+                                 sockaddr_in* address) {
+            *address = {};
+            address->sin_family = AF_INET;
+            address->sin_port = 0;
+            if (!ParseIpv4(ip, &address->sin_addr)) return false;
+            if (bind(server, reinterpret_cast<const sockaddr*>(address),
+                     static_cast<socket_len_t>(sizeof(*address))) != 0) {
+                return false;
+            }
+            SetSocketRecvTimeoutMs(server, 1000);
+            socket_len_t addressLen =
+                static_cast<socket_len_t>(sizeof(*address));
+            return getsockname(server, reinterpret_cast<sockaddr*>(address),
+                               &addressLen) == 0;
+        };
+
+        sockaddr_in diagnosticAddressA{};
+        sockaddr_in diagnosticAddressB{};
+        const bool diagnosticBoundA = bindFakeServer(
+            diagnosticServerA, "127.0.0.1", &diagnosticAddressA);
+        const bool diagnosticBoundB = bindFakeServer(
+            diagnosticServerB, "127.0.0.2", &diagnosticAddressB);
+        Expect(diagnosticBoundA && diagnosticBoundB,
+               "dual diagnostic STUN sockets bind to different IPs");
+
+        bool diagnosticHandledA = false;
+        bool diagnosticHandledB = false;
+        auto serveBinding = [](socket_t server, uint16_t mappedPort,
+                               bool* handled) {
+            std::array<uint8_t, 256> buffer{};
+            sockaddr_storage clientAddress{};
+            socket_len_t clientAddressLen =
+                static_cast<socket_len_t>(sizeof(clientAddress));
+            const int received = recvfrom(server,
+                reinterpret_cast<char*>(buffer.data()),
+                static_cast<int>(buffer.size()), 0,
+                reinterpret_cast<sockaddr*>(&clientAddress),
+                &clientAddressLen);
+            if (received != 20) return;
+            StunTransactionId receivedTransaction{};
+            std::copy(buffer.begin() + 8, buffer.begin() + 20,
+                      receivedTransaction.begin());
+            const auto reply = MakeIpv4Response(
+                receivedTransaction, {198, 51, 100, 30}, mappedPort);
+            *handled = sendto(server,
+                reinterpret_cast<const char*>(reply.data()),
+                static_cast<int>(reply.size()), 0,
+                reinterpret_cast<const sockaddr*>(&clientAddress),
+                clientAddressLen) == static_cast<int>(reply.size());
+        };
+
+        if (diagnosticBoundA && diagnosticBoundB) {
+            std::thread serverAThread(
+                serveBinding, diagnosticServerA, 40000,
+                &diagnosticHandledA);
+            std::thread serverBThread(
+                serveBinding, diagnosticServerB, 40003,
+                &diagnosticHandledB);
+            const std::vector<StunServerConfig> diagnosticServers{
+                {"127.0.0.1", ntohs(diagnosticAddressA.sin_port)},
+                {"127.0.0.2", ntohs(diagnosticAddressB.sin_port)},
+            };
+            StunDiagnosticResult diagnosticResult;
+            Expect(DiagnoseStunServers(diagnosticServers, 500, 1,
+                                       &diagnosticResult, &error),
+                   "standalone dual-STUN diagnostic succeeds");
+            serverAThread.join();
+            serverBThread.join();
+            Expect(diagnosticHandledA && diagnosticHandledB,
+                   "both diagnostic STUN servers handled a request");
+            Expect(diagnosticResult.probes.size() == 2,
+                   "diagnostic retains both mapped endpoints");
+            Expect(diagnosticResult.mapping.behavior
+                       == NatMappingBehavior::PortDependentRegular
+                       && diagnosticResult.mapping.portDelta == 3,
+                   "diagnostic classifies the same-socket port delta");
+            Expect(FormatStunDiagnosticSummary(diagnosticResult)
+                       == "classification=port-dependent-regular; "
+                          "A=198.51.100.30:40000; "
+                          "B=198.51.100.30:40003; delta=3; "
+                          "local_plan=regular-or-dual-range-ready",
+                   "diagnostic summary contains mappings and classification");
+        }
+        CloseSocket(diagnosticServerA);
+        CloseSocket(diagnosticServerB);
+    }
+
     if (failures != 0) {
         std::cerr << failures << " STUN test(s) failed\n";
 #ifdef _WIN32

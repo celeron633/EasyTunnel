@@ -18,6 +18,7 @@ TuiApp::TuiApp() : screen_(ftxui::ScreenInteractive::Fullscreen()) {}
 TuiApp::~TuiApp() {
     exiting_.store(true);
     StopTicker();
+    JoinStunDiagnostic();
     SetLogCallback({});
     engine_.Stop();
 }
@@ -128,6 +129,7 @@ int TuiApp::Run() {
     windowsTray_.reset();
 #endif
     StopTicker();
+    JoinStunDiagnostic();
     engine_.Stop();
     SaveIfChanged();
     return 0;

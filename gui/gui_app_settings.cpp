@@ -8,6 +8,7 @@
 #include "imgui_stdlib.h"
 
 #include "../log.h"
+#include "../stun_client.h"
 #ifdef _WIN32
 #include "windows_startup.h"
 #endif
@@ -37,7 +38,9 @@ void FormField(const char* label) {
 void FormMessage(const ImVec4& color, const char* text) {
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(1);
-    ImGui::TextColored(color, "%s", text);
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
 }
 }  // namespace
 
@@ -137,6 +140,29 @@ void GuiApp::RenderSettingsTab() {
                 std::clamp(stunBPort, 1, 65535));
             configChanged = true;
         }
+        FormField("STUN diagnostic");
+        const bool diagnosticRunning = stunDiagnosticRunning_.load();
+        if (diagnosticRunning) ImGui::BeginDisabled();
+        if (ImGui::Button(diagnosticRunning ? "Testing..." : "Test STUN A/B")) {
+            StartStunDiagnostic();
+        }
+        if (diagnosticRunning) ImGui::EndDisabled();
+        std::string diagnosticMessage;
+        bool diagnosticCompleted = false;
+        bool diagnosticSucceeded = false;
+        {
+            std::lock_guard<std::mutex> lock(stunDiagnosticMutex_);
+            diagnosticMessage = stunDiagnosticMessage_;
+            diagnosticCompleted = stunDiagnosticCompleted_;
+            diagnosticSucceeded = stunDiagnosticSucceeded_;
+        }
+        FormMessage(
+            diagnosticSucceeded
+                ? ImVec4(0.3f, 0.9f, 0.4f, 1.0f)
+                : diagnosticCompleted
+                    ? ImVec4(1.0f, 0.3f, 0.3f, 1.0f)
+                    : ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+            diagnosticMessage.c_str());
         EndForm();
     }
     ImGui::Spacing();
@@ -257,6 +283,40 @@ void GuiApp::RenderSettingsTab() {
     if (configChanged) SaveGuiConfig();
     ImGui::Spacing();
     RenderConfigSaveStatus();
+}
+
+void GuiApp::StartStunDiagnostic() {
+    if (stunDiagnosticRunning_.exchange(true)) return;
+    if (stunDiagnosticThread_.joinable()) stunDiagnosticThread_.join();
+
+    const std::vector<StunServerConfig> servers = config_.stunServers;
+    {
+        std::lock_guard<std::mutex> lock(stunDiagnosticMutex_);
+        stunDiagnosticMessage_ = "Testing both STUN servers with one UDP socket...";
+        stunDiagnosticCompleted_ = false;
+        stunDiagnosticSucceeded_ = false;
+    }
+    stunDiagnosticThread_ = std::thread([this, servers] {
+        StunDiagnosticResult result;
+        std::string error;
+        const bool succeeded = DiagnoseStunServers(
+            servers, 800, 3, &result, &error);
+        const std::string message = succeeded
+            ? FormatStunDiagnosticSummary(result)
+            : "STUN diagnostic failed: " + error;
+        {
+            std::lock_guard<std::mutex> lock(stunDiagnosticMutex_);
+            stunDiagnosticMessage_ = message;
+            stunDiagnosticCompleted_ = true;
+            stunDiagnosticSucceeded_ = succeeded;
+        }
+        stunDiagnosticRunning_.store(false);
+        Log(succeeded ? LogLevel::Info : LogLevel::Error, message);
+    });
+}
+
+void GuiApp::JoinStunDiagnostic() {
+    if (stunDiagnosticThread_.joinable()) stunDiagnosticThread_.join();
 }
 
 bool GuiApp::LoadGuiConfig() {

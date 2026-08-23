@@ -7,6 +7,7 @@
 #include <mutex>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../client_config.h"
@@ -50,6 +51,8 @@ private:
     bool SaveGuiConfig();
     void ShowConfigSaveMessage(std::string message, bool succeeded);
     void RenderConfigSaveStatus();
+    void StartStunDiagnostic();
+    void JoinStunDiagnostic();
     void UpdateLiveStats();
     void UpdateStatisticsHistory();
     void RenderStatisticsCharts();
@@ -82,6 +85,12 @@ private:
     std::string configSaveMessage_;
     bool configSaveSucceeded_ = true;
     std::chrono::steady_clock::time_point configSaveMessageExpiresAt_{};
+    std::thread stunDiagnosticThread_;
+    std::atomic<bool> stunDiagnosticRunning_{false};
+    std::mutex stunDiagnosticMutex_;
+    std::string stunDiagnosticMessage_ = "Not tested";
+    bool stunDiagnosticCompleted_ = false;
+    bool stunDiagnosticSucceeded_ = false;
 
     int statisticsTotalUnit_ = 0;
     int statisticsSpeedUnit_ = 0;
