@@ -112,7 +112,8 @@ int main() {
                && fields.size() == 10
                && fields[3] == "nat_punch"
                && fields[4] == "nat_punch"
-               && fields[7] == "initiator" && fields[8] == "2"
+               && fields[7] == "initiator"
+               && fields[8] == kNatPunchProtocolVersion
                && fields[9].size() == 64,
            "initiator receives peer capabilities and its preferred intersection");
     const std::string natSession = fields.size() == 10 ? fields[5] : "";
@@ -123,7 +124,8 @@ int main() {
                && fields[3] == "ipv4_relay,nat_punch"
                && fields[4] == "nat_punch"
                && fields[5] == natSession && fields[6] == natAttempt
-               && fields[7] == "responder" && fields[8] == "2"
+               && fields[7] == "responder"
+               && fields[8] == kNatPunchProtocolVersion
                && fields[9] == natPunchToken,
            "waiting peer receives the initiator's negotiated order");
 
@@ -151,13 +153,16 @@ int main() {
         aEndpoint, reinterpret_cast<const uint8_t*>(versionErrorPacket.data()),
         versionErrorPacket.size());
     Expect(versionError.type == RendezvousEventType::Error
-               && versionError.error.find("expected 2, received 1")
+               && versionError.error.find(
+                    "expected " + std::string(kNatPunchProtocolVersion)
+                        + ", received 1")
                     != std::string::npos,
            "client formats the server's protocol mismatch response");
 
     const std::string peerPacket = MakeControlMessage("PEER",
         {"203.0.113.20", "41000", "b", "nat_punch", "nat_punch",
-         natSession, natAttempt, "initiator", "2", natPunchToken});
+         natSession, natAttempt, "initiator", kNatPunchProtocolVersion,
+         natPunchToken});
     const RendezvousEvent parsedPeer = responseParser.HandlePacket(
         aEndpoint, reinterpret_cast<const uint8_t*>(peerPacket.data()),
         peerPacket.size());
@@ -176,14 +181,16 @@ int main() {
         reinterpret_cast<const uint8_t*>(incompatiblePeerPacket.data()),
         incompatiblePeerPacket.size());
     Expect(incompatiblePeer.type == RendezvousEventType::Error
-               && incompatiblePeer.error.find("expected 2, received 1")
+               && incompatiblePeer.error.find(
+                    "expected " + std::string(kNatPunchProtocolVersion)
+                        + ", received 1")
                     != std::string::npos,
            "client distinguishes an incompatible PEER from malformed data");
 
     const std::string peerInfoPacket = MakeControlMessage("NAT_PEER_INFO",
         {natSession, natAttempt, "b", "port-dependent-regular",
          "203.0.113.20", "41000", "203.0.113.20", "41002", "-",
-         "initiator", "2"});
+         "initiator", kNatPunchProtocolVersion});
     const RendezvousEvent parsedPeerInfo = responseParser.HandlePacket(
         aEndpoint, reinterpret_cast<const uint8_t*>(peerInfoPacket.data()),
         peerInfoPacket.size());
@@ -203,7 +210,9 @@ int main() {
         reinterpret_cast<const uint8_t*>(incompatiblePeerInfoPacket.data()),
         incompatiblePeerInfoPacket.size());
     Expect(incompatiblePeerInfo.type == RendezvousEventType::Error
-               && incompatiblePeerInfo.error.find("expected 2, received 1")
+               && incompatiblePeerInfo.error.find(
+                    "expected " + std::string(kNatPunchProtocolVersion)
+                        + ", received 1")
                     != std::string::npos,
            "client reports incompatible NAT_PEER_INFO protocol versions");
 
@@ -214,95 +223,118 @@ int main() {
     Expect(aPunch != kInvalidSocket && bPunch != kInvalidSocket,
            "separate NAT punch sockets open");
     registry.Handle(aPunchEndpoint, "NAT_INFO",
-        {"common", "a", "b", natSession, natAttempt, "2",
+        {"common", "a", "b", natSession, natAttempt,
+         kNatPunchProtocolVersion,
          "endpoint-independent", "198.51.100.10", "40000",
          "198.51.100.10", "40000", "-", ""},
-        std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_WAIT"
-               && fields.size() == 2 && fields[0] == natSession
-               && fields[1] == natAttempt,
-           "first NAT report waits for its peer");
-
-    registry.Handle(aPunchEndpoint, "NAT_ARMED",
-        {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
     Expect(ReceiveControl(aPunch, &type, &fields) && type == "ERROR"
                && fields.size() == 1
                && fields[0] == "invalid-nat-session",
-           "out-of-order NAT_ARMED is rejected before both NAT reports");
+           "NAT reports from the punch socket are rejected");
 
-    registry.Handle(aPunchEndpoint, "NAT_INFO",
-        {"common", "a", "b", natSession, natAttempt, "2",
+    registry.Handle(aEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt,
+         kNatPunchProtocolVersion,
          "endpoint-independent", "198.51.100.10", "40000",
          "198.51.100.10", "40000", "-", ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_WAIT"
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_WAIT"
+               && fields.size() == 2 && fields[0] == natSession
+               && fields[1] == natAttempt,
+           "first control-channel NAT report waits for its peer");
+
+    registry.Handle(aEndpoint, "NAT_ARMED",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(a, &type, &fields) && type == "ERROR"
+               && fields.size() == 1
+               && fields[0] == "invalid-nat-session",
+           "out-of-order NAT_ARMED is rejected before both NAT reports");
+
+    registry.Handle(aEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt,
+         kNatPunchProtocolVersion,
+         "endpoint-independent", "198.51.100.10", "40000",
+         "198.51.100.10", "40000", "-", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_WAIT"
                && fields.size() == 2 && fields[0] == natSession
                && fields[1] == natAttempt,
            "duplicate NAT_INFO resends NAT_WAIT after response loss");
 
-    registry.Handle(bPunchEndpoint, "NAT_INFO",
-        {"common", "b", "a", natSession, natAttempt, "2",
+    registry.Handle(bEndpoint, "NAT_INFO",
+        {"common", "b", "a", natSession, natAttempt,
+         kNatPunchProtocolVersion,
          "port-dependent-regular", "203.0.113.20", "41000",
          "203.0.113.20", "41002", "-", ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields)
+    Expect(ReceiveControl(a, &type, &fields)
                && type == "NAT_PEER_INFO" && fields.size() == 11
                && fields[0] == natSession && fields[1] == natAttempt
                && fields[2] == "b" && fields[3] == "port-dependent-regular"
                && fields[4] == "203.0.113.20" && fields[5] == "41000"
                && fields[7] == "41002" && fields[9] == "initiator",
            "initiator receives the responder's NAT report");
-    Expect(ReceiveControl(bPunch, &type, &fields)
+    Expect(ReceiveControl(b, &type, &fields)
                && type == "NAT_PEER_INFO" && fields.size() == 11
                && fields[2] == "a" && fields[3] == "endpoint-independent"
                && fields[9] == "responder",
            "responder receives the initiator's NAT report");
 
-    registry.Handle(aPunchEndpoint, "NAT_INFO",
-        {"common", "a", "b", natSession, natAttempt, "2",
+    registry.Handle(aEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt,
+         kNatPunchProtocolVersion,
          "endpoint-independent", "198.51.100.10", "40000",
          "198.51.100.10", "40000", "-", ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields)
+    Expect(ReceiveControl(a, &type, &fields)
                && type == "NAT_PEER_INFO" && fields[0] == natSession
                && fields[1] == natAttempt && fields[2] == "b",
            "duplicate NAT_INFO restores lost initiator peer information");
-    Expect(ReceiveControl(bPunch, &type, &fields)
+    Expect(ReceiveControl(b, &type, &fields)
                && type == "NAT_PEER_INFO" && fields[0] == natSession
                && fields[1] == natAttempt && fields[2] == "a",
            "duplicate NAT_INFO keeps both peer views synchronized");
 
-    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+    registry.Handle(aEndpoint, "NAT_ARMED",
         {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields)
+    Expect(ReceiveControl(a, &type, &fields)
                && type == "NAT_ARMED_ACK",
            "first armed peer waits at the synchronization barrier");
-    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+    registry.Handle(aEndpoint, "NAT_ARMED",
         {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields)
+    Expect(ReceiveControl(a, &type, &fields)
                && type == "NAT_ARMED_ACK"
                && fields[0] == natSession && fields[1] == natAttempt,
            "duplicate NAT_ARMED restores a lost barrier acknowledgement");
     registry.Handle(bPunchEndpoint, "NAT_ARMED",
         {"common", "b", "a", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_START"
+    Expect(ReceiveControl(bPunch, &type, &fields) && type == "ERROR"
+               && fields.size() == 1
+               && fields[0] == "invalid-nat-session",
+           "NAT barrier messages from the punch socket are rejected");
+
+    registry.Handle(bEndpoint, "NAT_ARMED",
+        {"common", "b", "a", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_START"
                && fields[0] == natSession && fields[1] == natAttempt,
            "initiator receives synchronized NAT start");
-    Expect(ReceiveControl(bPunch, &type, &fields) && type == "NAT_START"
+    Expect(ReceiveControl(b, &type, &fields) && type == "NAT_START"
                && fields[0] == natSession && fields[1] == natAttempt,
            "responder receives synchronized NAT start");
 
-    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+    registry.Handle(aEndpoint, "NAT_ARMED",
         {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_START"
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_START"
                && fields[0] == natSession && fields[1] == natAttempt,
            "duplicate NAT_ARMED restores a lost initiator NAT_START");
-    Expect(ReceiveControl(bPunch, &type, &fields) && type == "NAT_START"
+    Expect(ReceiveControl(b, &type, &fields) && type == "NAT_START"
                && fields[0] == natSession && fields[1] == natAttempt,
            "duplicate NAT_ARMED retransmits NAT_START to both peers");
 
@@ -328,7 +360,8 @@ int main() {
     Expect(ReceiveControl(a, &type, &fields) && type == "NAT_ATTEMPT"
                && fields.size() == 5 && fields[0] == natSession
                && fields[1] != natAttempt && fields[2] == "initiator"
-               && fields[3] == "2" && fields[4] != natPunchToken,
+               && fields[3] == kNatPunchProtocolVersion
+               && fields[4] != natPunchToken,
            "initiator receives a fresh retry attempt and token");
     if (fields.size() == 5) {
         nextAttempt = fields[1];
@@ -341,7 +374,8 @@ int main() {
            "responder receives the same fresh retry attempt");
 
     const std::string attemptPacket = MakeControlMessage("NAT_ATTEMPT",
-        {natSession, nextAttempt, "initiator", "2", nextPunchToken});
+        {natSession, nextAttempt, "initiator", kNatPunchProtocolVersion,
+         nextPunchToken});
     const RendezvousEvent parsedAttempt = responseParser.HandlePacket(
         aEndpoint, reinterpret_cast<const uint8_t*>(attemptPacket.data()),
         attemptPacket.size());
@@ -359,7 +393,9 @@ int main() {
         reinterpret_cast<const uint8_t*>(incompatibleAttemptPacket.data()),
         incompatibleAttemptPacket.size());
     Expect(incompatibleAttempt.type == RendezvousEventType::Error
-               && incompatibleAttempt.error.find("expected 2, received 1")
+               && incompatibleAttempt.error.find(
+                    "expected " + std::string(kNatPunchProtocolVersion)
+                        + ", received 1")
                     != std::string::npos,
            "client reports incompatible retry protocol versions");
 
@@ -370,20 +406,21 @@ int main() {
                && fields[1] == nextAttempt,
            "stale retry request resends the current attempt");
 
-    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+    registry.Handle(aEndpoint, "NAT_ARMED",
         {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields) && type == "ERROR"
+    Expect(ReceiveControl(a, &type, &fields) && type == "ERROR"
                && fields.size() == 1
                && fields[0] == "invalid-nat-session",
            "old attempt NAT_ARMED is rejected after retry synchronization");
 
-    registry.Handle(aPunchEndpoint, "NAT_INFO",
-        {"common", "a", "b", natSession, natAttempt, "2",
+    registry.Handle(aEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt,
+         kNatPunchProtocolVersion,
          "endpoint-independent", "198.51.100.10", "40000",
          "198.51.100.10", "40000", "-", ""},
         std::chrono::steady_clock::now());
-    Expect(ReceiveControl(aPunch, &type, &fields) && type == "ERROR"
+    Expect(ReceiveControl(a, &type, &fields) && type == "ERROR"
                && fields.size() == 1
                && fields[0] == "invalid-nat-session",
            "old attempt NAT reports are rejected after retry synchronization");

@@ -292,7 +292,7 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
             }
         }
         event.sessionId = fields[5];
-        event.natPunchVersion = 2;
+        event.natPunchVersion = kNatPunchProtocolVersionNumber;
         event.natPunchToken = fields[9];
         event.type = RendezvousEventType::Peer;
         return event;
@@ -324,7 +324,7 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
             return InvalidResponse();
         }
         event.sessionId = fields[0];
-        event.natPunchVersion = 2;
+        event.natPunchVersion = kNatPunchProtocolVersionNumber;
         event.natPunchToken = fields[4];
         event.type = RendezvousEventType::NatAttempt;
         return event;
@@ -352,7 +352,7 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
         event.peerId = fields[2];
         event.natPeerInfo.mappingBehavior = fields[3];
         event.natPeerInfo.localCandidates = fields[8];
-        event.natPunchVersion = 2;
+        event.natPunchVersion = kNatPunchProtocolVersionNumber;
         event.type = RendezvousEventType::NatPeerInfo;
         return event;
     }

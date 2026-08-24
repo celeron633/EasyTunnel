@@ -95,7 +95,7 @@ bool SendPeerDisconnect(socket_t sock, const Config& cfg,
         || !IsSafeControlField(cfg.peer_id)
         || !IsSafeControlField(punchSession.sessionId)
         || punchSession.attemptId == 0
-        || punchSession.protocolVersion != 2
+        || punchSession.protocolVersion != kNatPunchProtocolVersionNumber
         || !IsSafeControlField(punchSession.punchToken)) {
         return false;
     }

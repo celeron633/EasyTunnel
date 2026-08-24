@@ -14,7 +14,6 @@ namespace {
 struct NatPunchInfo {
     bool reported = false;
     bool armed = false;
-    UdpEndpoint endpoint{};
     std::string behavior;
     UdpEndpoint mappedA{};
     UdpEndpoint mappedB{};
@@ -60,9 +59,10 @@ bool Send(socket_t sock, const UdpEndpoint& endpoint, const std::string& data) {
         == static_cast<int>(data.size());
 }
 
-void SendMessage(socket_t sock, const UdpEndpoint& endpoint, const std::string& type,
+bool SendMessage(socket_t sock, const UdpEndpoint& endpoint,
+                 const std::string& type,
                  const std::vector<std::string>& fields = {}) {
-    Send(sock, endpoint, MakeControlMessage(type, fields));
+    return Send(sock, endpoint, MakeControlMessage(type, fields));
 }
 
 void SendProtocolVersionMismatch(socket_t sock, const UdpEndpoint& endpoint,
@@ -287,10 +287,20 @@ struct RendezvousRegistry::Impl {
     }
 
     void SendNatPeerInfo(Client* first, Client* second) {
-        SendMessage(sock, first->natPunch.endpoint, "NAT_PEER_INFO",
-                    NatPeerInfoFields(*first, *second));
-        SendMessage(sock, second->natPunch.endpoint, "NAT_PEER_INFO",
-                    NatPeerInfoFields(*second, *first));
+        if (!SendMessage(sock, first->endpoint, "NAT_PEER_INFO",
+                         NatPeerInfoFields(*first, *second))) {
+            Log(LogLevel::Warn, "Failed to send NAT_PEER_INFO to peer="
+                + first->node + " control_endpoint="
+                + FormatUdpEndpoint(first->endpoint) + ". err="
+                + std::to_string(GetSocketError()));
+        }
+        if (!SendMessage(sock, second->endpoint, "NAT_PEER_INFO",
+                         NatPeerInfoFields(*second, *first))) {
+            Log(LogLevel::Warn, "Failed to send NAT_PEER_INFO to peer="
+                + second->node + " control_endpoint="
+                + FormatUdpEndpoint(second->endpoint) + ". err="
+                + std::to_string(GetSocketError()));
+        }
     }
 
     void HandleNatInfo(Room& room, Room::iterator current,
@@ -312,21 +322,20 @@ struct RendezvousRegistry::Impl {
             || !ParseUdpEndpoint(fields[9], mappedBPort, &mappedB)
             || !IsSafeControlField(fields[11])
             || !ValidateNatSession(room, current, fields[2], fields[3],
-                                   attemptId, &target)) {
+                                   attemptId, &target)
+            || !SameUdpEndpoint(source, current->second.endpoint)) {
             SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
             return;
         }
 
         current->second.seen = now;
         const bool sameReport = current->second.natPunch.reported
-            && SameUdpEndpoint(current->second.natPunch.endpoint, source)
             && current->second.natPunch.behavior == fields[6]
             && SameUdpEndpoint(current->second.natPunch.mappedA, mappedA)
             && SameUdpEndpoint(current->second.natPunch.mappedB, mappedB)
             && current->second.natPunch.localCandidates == fields[11];
         current->second.natPunch.reported = true;
         if (!sameReport) current->second.natPunch.armed = false;
-        current->second.natPunch.endpoint = source;
         current->second.natPunch.behavior = fields[6];
         current->second.natPunch.mappedA = mappedA;
         current->second.natPunch.mappedB = mappedB;
@@ -341,7 +350,10 @@ struct RendezvousRegistry::Impl {
 
         Log(LogLevel::Info, "NAT info ready room=" + fields[0]
             + " session=" + fields[3] + " attempt_id=" + fields[4]
-            + " peer=" + current->first + " target=" + target->first);
+            + " peer=" + current->first + " control_endpoint="
+            + FormatUdpEndpoint(current->second.endpoint)
+            + " target=" + target->first + " control_endpoint="
+            + FormatUdpEndpoint(target->second.endpoint));
         SendNatPeerInfo(&current->second, &target->second);
     }
 
@@ -356,7 +368,7 @@ struct RendezvousRegistry::Impl {
                                    attemptId, &target)
             || !current->second.natPunch.reported
             || !target->second.natPunch.reported
-            || !SameUdpEndpoint(source, current->second.natPunch.endpoint)) {
+            || !SameUdpEndpoint(source, current->second.endpoint)) {
             SendMessage(sock, source, "ERROR", {"invalid-nat-session"});
             return;
         }
@@ -370,10 +382,20 @@ struct RendezvousRegistry::Impl {
         }
 
         const std::vector<std::string> startFields{fields[3], fields[4]};
-        SendMessage(sock, current->second.natPunch.endpoint,
-                    "NAT_START", startFields);
-        SendMessage(sock, target->second.natPunch.endpoint,
-                    "NAT_START", startFields);
+        if (!SendMessage(sock, current->second.endpoint,
+                         "NAT_START", startFields)) {
+            Log(LogLevel::Warn, "Failed to send NAT_START to peer="
+                + current->first + " control_endpoint="
+                + FormatUdpEndpoint(current->second.endpoint) + ". err="
+                + std::to_string(GetSocketError()));
+        }
+        if (!SendMessage(sock, target->second.endpoint,
+                         "NAT_START", startFields)) {
+            Log(LogLevel::Warn, "Failed to send NAT_START to peer="
+                + target->first + " control_endpoint="
+                + FormatUdpEndpoint(target->second.endpoint) + ". err="
+                + std::to_string(GetSocketError()));
+        }
         Log(LogLevel::Info, "NAT punch start room=" + fields[0]
             + " session=" + fields[3] + " attempt_id=" + fields[4]);
     }

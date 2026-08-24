@@ -243,7 +243,8 @@ bool RequestNextNatPunchAttempt(socket_t sock, const Config& cfg,
                                 std::string* error) {
     if (sock == kInvalidSocket || session == nullptr
         || matchedPeerId.empty() || session->sessionId.empty()
-        || session->attemptId == 0 || session->protocolVersion != 2) {
+        || session->attemptId == 0
+        || session->protocolVersion != kNatPunchProtocolVersionNumber) {
         if (error != nullptr) *error = "Cannot retry an invalid NAT session";
         return false;
     }
@@ -339,9 +340,11 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         return false;
     };
 
-    if (sock == nullptr || peer == nullptr || matchedPeerId.empty()
+    if (sock == nullptr || *sock == kInvalidSocket || peer == nullptr
+        || matchedPeerId.empty()
         || session.sessionId.empty() || session.attemptId == 0
-        || session.protocolVersion != 2 || session.punchToken.empty()) {
+        || session.protocolVersion != kNatPunchProtocolVersionNumber
+        || session.punchToken.empty()) {
         return fail(NatPunchAttemptOutcome::InvalidInput,
                     "Adaptive NAT traversal has no valid rendezvous session");
     }
@@ -350,6 +353,8 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                     "Adaptive NAT traversal requires exactly two STUN servers");
     }
 
+    socket_t controlSocket = *sock;
+    SetSocketRecvTimeoutMs(controlSocket, kReceiveTimeoutMs);
     const auto deadline = std::chrono::steady_clock::now()
         + std::chrono::seconds(cfg.punch_timeout);
     socket_t punchSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -398,7 +403,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         const auto now = std::chrono::steady_clock::now();
         if (now >= nextControlSend) {
             if (!rendezvous.SendNatInfo(
-                    punchSocket, matchedPeerId, session.sessionId,
+                    controlSocket, matchedPeerId, session.sessionId,
                     session.attemptId,
                     NatMappingBehaviorName(localAnalysis.behavior),
                     probes[0].mappedEndpoint, probes[1].mappedEndpoint, "-")) {
@@ -410,7 +415,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
 
         UdpEndpoint source{};
         int received = -1;
-        if (!ReceiveDatagram(punchSocket, &buffer, &source, &received, error)) {
+        if (!ReceiveDatagram(controlSocket, &buffer, &source, &received, error)) {
             CloseSocket(punchSocket);
             return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
@@ -557,7 +562,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         const auto now = std::chrono::steady_clock::now();
         if (now >= nextControlSend) {
             if (!rendezvous.SendNatArmed(
-                    punchSocket, matchedPeerId, session.sessionId,
+                    controlSocket, matchedPeerId, session.sessionId,
                     session.attemptId)) {
                 Log(LogLevel::Warn, "Failed to send NAT_ARMED. err="
                     + std::to_string(GetSocketError()));
@@ -567,7 +572,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
 
         UdpEndpoint source{};
         int received = -1;
-        if (!ReceiveDatagram(punchSocket, &buffer, &source, &received, error)) {
+        if (!ReceiveDatagram(controlSocket, &buffer, &source, &received, error)) {
             recordBarrierElapsed();
             return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
@@ -701,14 +706,6 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         }
         if (received < 0) continue;
 
-        const RendezvousEvent rendezvousEvent = rendezvous.HandlePacket(
-            source, buffer.data(), static_cast<size_t>(received));
-        if (rendezvousEvent.type == RendezvousEventType::Error) {
-            return fail(NatPunchAttemptOutcome::ControlError,
-                        rendezvousEvent.error);
-        }
-        if (rendezvousEvent.type != RendezvousEventType::None) continue;
-
         std::string type;
         std::vector<std::string> fields;
         if (!ParseControlMessage(buffer.data(), static_cast<size_t>(received),
@@ -739,7 +736,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
             return fail(NatPunchAttemptOutcome::SocketError,
                         "NAT punch winner is not owned by the socket pool");
         }
-        CloseSocket(*sock);
+        CloseSocket(controlSocket);
         *sock = receivingSocket;
         attempt.outcome = NatPunchAttemptOutcome::Success;
         attempt.confirmedPeer = source;

@@ -141,7 +141,7 @@ int main() {
     punchSession.sessionId = "peer-close-session";
     punchSession.attemptId = 42;
     punchSession.role = NatPunchRole::Initiator;
-    punchSession.protocolVersion = 2;
+    punchSession.protocolVersion = kNatPunchProtocolVersionNumber;
     punchSession.punchToken =
         "0123456789abcdef0123456789abcdef"
         "0123456789abcdef0123456789abcdef";

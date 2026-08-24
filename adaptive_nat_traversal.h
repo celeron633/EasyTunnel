@@ -71,9 +71,11 @@ bool RequestNextNatPunchAttempt(socket_t sock, const Config& cfg,
                                 NatPunchSession* session,
                                 std::string* error);
 
-// Runs the STUN-based adaptive NAT punch on a dedicated UDP socket. The
-// existing rendezvous socket is replaced only after the punch succeeds; on
-// failure it remains available to subsequent IPv6/relay strategies.
+// Exchanges NAT metadata and synchronization messages on the existing
+// rendezvous control socket, while STUN, pre-punch, peer confirmation and the
+// final data plane use a dedicated punch socket. The control socket is replaced
+// only after the punch succeeds; on failure it remains available to retries and
+// subsequent IPv6/relay strategies.
 bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                       const UdpEndpoint& server,
                       const std::atomic<bool>& running,

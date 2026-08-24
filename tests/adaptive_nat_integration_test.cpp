@@ -241,16 +241,16 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
             &randomPeer, &result.error, &result.attempt, attemptNumber);
     });
 
-    if (easyRendezvous.SendNatInfo(easyPunch, easyPeerId,
+    if (easyRendezvous.SendNatInfo(easyControl, easyPeerId,
             easySession.sessionId, easySession.attemptId,
             NatMappingBehaviorName(NatMappingBehavior::EndpointIndependent),
             easyPunchEndpoint, easyPunchEndpoint, "-")) {
         result.peerInfoReceived = WaitForNatPeerInfo(
-            easyPunch, &easyRendezvous, easySession, easyPeerId);
+            easyControl, &easyRendezvous, easySession, easyPeerId);
     }
     if (mode == InterruptedPunchMode::PunchTimeout
         && result.peerInfoReceived) {
-        easyRendezvous.SendNatArmed(easyPunch, easyPeerId,
+        easyRendezvous.SendNatArmed(easyControl, easyPeerId,
             easySession.sessionId, easySession.attemptId);
     }
     if (mode == InterruptedPunchMode::CancelAtBarrier) {
