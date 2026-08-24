@@ -65,6 +65,8 @@ ftxui::screen
 
 - `Online peers` 面板：Refresh / Wait for peer / Connect selected / Disconnect 与在线数量同处工具栏
 - 列表按列显示 Peer ID、公网端点、能力、TUN IP 和空闲时间，选中项下方显示该客户端能力的完整名称
+- 客户端进入 Wait for peer 并完成注册后立即上报配置中的 TUN IP，连接建立前即可在
+  GUI/TUI 的在线客户端列表中查看；等待期间每 5 秒低频重发以覆盖 UDP 丢包
 - 无在线客户端时面板居中显示提示，不再留下空白列表
 - `Traffic` 面板：TX/RX 两行对齐显示包数、累计字节和每秒速度，行首圆点表示最近一个采样周期内是否有流量，末行显示延迟
 - 累计字节和速度单元格可回车切换 Bytes/KB/MB，聚焦时反色

@@ -7,6 +7,8 @@
 #include "rendezvous_client.h"
 
 namespace {
+constexpr auto kTunIpReportInterval = std::chrono::seconds(5);
+
 UdpEndpoint FromSockaddr(const sockaddr_storage& address, socket_len_t len) {
     UdpEndpoint endpoint{};
     endpoint.addr = address;
@@ -66,7 +68,25 @@ bool SelectPeer(socket_t sock, const Config& config,
                ? std::chrono::hours(24 * 365)
                : std::chrono::seconds(config.punch_timeout));
     auto nextProbe = std::chrono::steady_clock::time_point{};
+    auto nextTunIpReport = std::chrono::steady_clock::time_point{};
+    bool registered = false;
+    bool tunIpReported = config.local_tun_ipv4.empty();
     std::vector<uint8_t> buffer(2048);
+
+    const auto reportTunIp = [&](std::chrono::steady_clock::time_point now) {
+        if (config.local_tun_ipv4.empty()) return;
+        if (!ReportRendezvousTunIp(sock, config, server)) {
+            Log(LogLevel::Warn,
+                "Failed to report configured TUN IP during peer selection. err="
+                + std::to_string(GetSocketError()));
+        } else if (!tunIpReported) {
+            Log(LogLevel::Info,
+                "Reported configured TUN IP during rendezvous registration: "
+                + config.local_tun_ipv4);
+            tunIpReported = true;
+        }
+        nextTunIpReport = now + kTunIpReportInterval;
+    };
 
     Log(LogLevel::Debug, "Peer selection started: mode="
         + std::string(config.target_peer_id.empty() ? "wait" : "connect")
@@ -96,6 +116,9 @@ bool SelectPeer(socket_t sock, const Config& config,
                     + FormatUdpEndpoint(server));
             }
             nextProbe = now + std::chrono::milliseconds(500);
+        }
+        if (registered && now >= nextTunIpReport) {
+            reportTunIp(now);
         }
 
         sockaddr_storage sourceAddress{};
@@ -142,9 +165,20 @@ bool SelectPeer(socket_t sock, const Config& config,
             Log(LogLevel::Error, "Rendezvous packet rejected: " + *error);
             return false;
         }
+        if (event.type == RendezvousEventType::Registered) {
+            registered = true;
+            const auto registeredAt = std::chrono::steady_clock::now();
+            if (registeredAt >= nextTunIpReport) {
+                reportTunIp(registeredAt);
+            }
+            continue;
+        }
         if (event.type == RendezvousEventType::Peer
             && (config.target_peer_id.empty()
                 || event.peerId == config.target_peer_id)) {
+            if (!tunIpReported) {
+                reportTunIp(std::chrono::steady_clock::now());
+            }
             *peer = event.peer;
             *matchedPeerId = event.peerId;
             *traversalModes = event.traversalModes;

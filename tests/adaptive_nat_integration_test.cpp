@@ -130,6 +130,27 @@ bool WaitForNatPeerInfo(socket_t sock, RendezvousClient* rendezvous,
     return false;
 }
 
+bool WaitForListedTunIp(const Config& config, const std::string& expectedTunIp) {
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::vector<RendezvousPeerInfo> clients;
+        std::string error;
+        if (ListRendezvousClients(
+                config.rendezvous_addr, config.rendezvous_port,
+                config.room_id, config.auth_token, &clients, &error)) {
+            for (const RendezvousPeerInfo& client : clients) {
+                if (client.peerId == config.peer_id
+                    && client.tunIp == expectedTunIp) {
+                    return true;
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
 struct InterruptedPunchResult {
     bool setup = false;
     bool peerInfoReceived = false;
@@ -449,6 +470,42 @@ int main() {
     bConfig.target_peer_id.clear();
     bConfig.stun_servers[1] = {
         "127.0.0.3", EndpointPort(stunRandomEndpoint)};
+
+    Config waitingConfig = bConfig;
+    waitingConfig.room_id = "tun-ip-wait";
+    waitingConfig.peer_id = "waiting-peer";
+    waitingConfig.local_tun_ipv4 = "10.66.0.99";
+    socket_t waitingSocket = kInvalidSocket;
+    UdpEndpoint waitingServer{};
+    std::string waitingError;
+    const bool waitingSocketOpened = OpenRendezvousSocket(
+        waitingConfig, 100, &waitingSocket, &waitingServer, &waitingError);
+    Expect(waitingSocketOpened,
+           "waiting client opens its rendezvous control socket");
+    if (waitingSocketOpened) {
+        std::atomic<bool> waitingRunning{true};
+        UdpEndpoint waitingPeer{};
+        std::string waitingPeerId;
+        std::vector<TraversalMode> waitingModes;
+        NatPunchSession waitingSession;
+        bool waitingSelected = false;
+        std::thread waitingThread([&] {
+            waitingSelected = SelectPeer(
+                waitingSocket, waitingConfig, waitingServer, waitingRunning,
+                &waitingPeer, &waitingPeerId, &waitingModes, &waitingSession,
+                &waitingError);
+        });
+        const bool tunIpVisible = WaitForListedTunIp(
+            waitingConfig, waitingConfig.local_tun_ipv4);
+        Expect(tunIpVisible,
+               "waiting client reports configured TUN IP before peer selection");
+        waitingRunning.store(false);
+        waitingThread.join();
+        Expect(!waitingSelected,
+               "TUN IP reporting does not require a completed connection");
+        UnregisterRendezvous(waitingSocket, waitingConfig, waitingServer);
+        CloseSocket(waitingSocket);
+    }
 
     socket_t aSocket = kInvalidSocket;
     socket_t bSocket = kInvalidSocket;

@@ -237,6 +237,7 @@ Linux 客户端通常需要 root 或相应的 TUN/network capability。
 - 文件日志位于 `EasyTunnel_gui.exe` 同目录的 `EasyTunnel_gui.log`。
 - Connection 页面按 1 秒间隔显示最近 60 秒的 TX/RX 速度和延迟柱形图。
 - Settings → Rendezvous 中的 **Auto wait for peer** 默认关闭。启用后，GUI 会在启动、断开或错误退出连接后自动向会合服务器注册并等待其他 Peer。首次启动会立即注册；会合超时、其他错误或手动 Disconnect 后，会按同一区域的 **Retry Delay Seconds** 延迟重试（默认 5 秒，可配置 1–3600 秒）。
+- 进入 **Wait for peer** 并完成注册后会立即上报配置中的 TUN IPv4，因此 GUI/TUI 的在线客户端列表在连接建立前即可显示该地址。
 - Settings → **Traversal strategy** 使用表格配置 Adaptive NAT Punch、IPv6 和 IPv4 Relay；每行可单独启用，并可通过 Up/Down 调整尝试顺序。
 
 ## TUI 客户端
