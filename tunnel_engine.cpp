@@ -138,6 +138,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		+ std::to_string(cfg.ipv6_probe_port));
 
 	socket_t sock = kInvalidSocket;
+	socket_t natPunchControlSocket = kInvalidSocket;
 	UdpEndpoint server{};
 	UdpEndpoint peer{};
 	std::unique_ptr<TunAdapter> tunAdapter(TunAdapter::Create());
@@ -202,10 +203,17 @@ void TunnelEngine::WorkerThread(Config cfg) {
 								+ std::to_string(attemptNumber) + "/"
 								+ std::to_string(cfg.nat_punch_attempt_limit));
 							NatPunchAttemptResult attemptResult;
+							socket_t punchedSocket = kInvalidSocket;
 							traversalConnected = PunchAdaptiveNat(
-								&sock, cfg, server, running_, matchedPeerId,
+								sock, &punchedSocket, cfg, server, running_, matchedPeerId,
 								natPunchSession, &peer, &strategyError,
 								&attemptResult, attemptNumber);
+							if (traversalConnected) {
+								natPunchControlSocket = sock;
+								sock = punchedSocket;
+							} else if (punchedSocket != kInvalidSocket) {
+								CloseSocket(punchedSocket);
+							}
 							if (traversalConnected || !running_.load()
 								|| attemptNumber >= cfg.nat_punch_attempt_limit
 								|| !IsRetryableNatPunchOutcome(
@@ -497,7 +505,10 @@ void TunnelEngine::WorkerThread(Config cfg) {
 	} while (false);
 
 	running_.store(false);
-	if (sock != kInvalidSocket && server.family == peer.family) {
+	if (natPunchControlSocket != kInvalidSocket) {
+		UnregisterRendezvous(natPunchControlSocket, cfg, server);
+		CloseSocket(natPunchControlSocket);
+	} else if (sock != kInvalidSocket && server.family == peer.family) {
 		UnregisterRendezvous(sock, cfg, server);
 	}
 	CloseSocket(sock);

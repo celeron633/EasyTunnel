@@ -73,10 +73,11 @@ bool RequestNextNatPunchAttempt(socket_t sock, const Config& cfg,
 
 // Exchanges NAT metadata and synchronization messages on the existing
 // rendezvous control socket, while STUN, pre-punch, peer confirmation and the
-// final data plane use a dedicated punch socket. The control socket is replaced
-// only after the punch succeeds; on failure it remains available to retries and
-// subsequent IPv6/relay strategies.
-bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
+// final data plane use a dedicated punch socket. The caller retains ownership
+// of the control socket. On success, punchSocket receives the winning data-plane
+// socket; on failure it remains invalid.
+bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocket,
+                      const Config& cfg,
                       const UdpEndpoint& server,
                       const std::atomic<bool>& running,
                       const std::string& matchedPeerId,

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -151,6 +152,31 @@ bool WaitForListedTunIp(const Config& config, const std::string& expectedTunIp) 
     return false;
 }
 
+bool WaitForPeersUnlisted(const Config& config,
+                          const std::vector<std::string>& peerIds) {
+    const auto deadline = std::chrono::steady_clock::now()
+        + std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::vector<RendezvousPeerInfo> clients;
+        std::string error;
+        if (ListRendezvousClients(
+                config.rendezvous_addr, config.rendezvous_port,
+                config.room_id, config.auth_token, &clients, &error)) {
+            bool found = false;
+            for (const RendezvousPeerInfo& client : clients) {
+                if (std::find(peerIds.begin(), peerIds.end(), client.peerId)
+                    != peerIds.end()) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+}
+
 struct InterruptedPunchResult {
     bool setup = false;
     bool peerInfoReceived = false;
@@ -181,6 +207,7 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
 
     socket_t easyControl = kInvalidSocket;
     socket_t randomControl = kInvalidSocket;
+    socket_t randomPunch = kInvalidSocket;
     UdpEndpoint easyServer{};
     UdpEndpoint randomServer{};
     std::string easyError;
@@ -236,7 +263,8 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     std::thread randomPunchThread([&] {
         const uint16_t attemptNumber =
             mode == InterruptedPunchMode::BarrierTimeout ? 1 : 3;
-        result.punched = PunchAdaptiveNat(&randomControl, randomConfig,
+        result.punched = PunchAdaptiveNat(randomControl, &randomPunch,
+            randomConfig,
             randomServer, running, randomPeerId, randomSession,
             &randomPeer, &result.error, &result.attempt, attemptNumber);
     });
@@ -263,6 +291,7 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     UnregisterRendezvous(easyControl, easyConfig, easyServer);
     UnregisterRendezvous(randomControl, randomConfig, randomServer);
     CloseSocket(easyPunch);
+    CloseSocket(randomPunch);
     CloseSocket(easyControl);
     CloseSocket(randomControl);
     return result;
@@ -284,6 +313,8 @@ PairedPunchResult RunPairedPunch(Config firstConfig, Config secondConfig,
     PairedPunchResult result;
     socket_t firstSocket = kInvalidSocket;
     socket_t secondSocket = kInvalidSocket;
+    socket_t firstPunch = kInvalidSocket;
+    socket_t secondPunch = kInvalidSocket;
     UdpEndpoint firstServer{};
     UdpEndpoint secondServer{};
     if (!OpenRendezvousSocket(firstConfig, 100, &firstSocket,
@@ -322,13 +353,13 @@ PairedPunchResult RunPairedPunch(Config firstConfig, Config secondConfig,
     result.selected = firstSelected && secondSelected;
     if (result.selected) {
         std::thread firstPunchThread([&] {
-            result.firstPunched = PunchAdaptiveNat(&firstSocket,
+            result.firstPunched = PunchAdaptiveNat(firstSocket, &firstPunch,
                 firstConfig, firstServer, running, firstPeerId,
                 firstSession, &firstPeer, &result.firstError,
                 &result.firstAttempt, attemptNumber);
         });
         std::thread secondPunchThread([&] {
-            result.secondPunched = PunchAdaptiveNat(&secondSocket,
+            result.secondPunched = PunchAdaptiveNat(secondSocket, &secondPunch,
                 secondConfig, secondServer, running, secondPeerId,
                 secondSession, &secondPeer, &result.secondError,
                 &result.secondAttempt, attemptNumber);
@@ -338,6 +369,10 @@ PairedPunchResult RunPairedPunch(Config firstConfig, Config secondConfig,
     }
 
     running.store(false);
+    UnregisterRendezvous(firstSocket, firstConfig, firstServer);
+    UnregisterRendezvous(secondSocket, secondConfig, secondServer);
+    CloseSocket(firstPunch);
+    CloseSocket(secondPunch);
     CloseSocket(firstSocket);
     CloseSocket(secondSocket);
     return result;
@@ -510,6 +545,8 @@ int main() {
 
     socket_t aSocket = kInvalidSocket;
     socket_t bSocket = kInvalidSocket;
+    socket_t aPunchSocket = kInvalidSocket;
+    socket_t bPunchSocket = kInvalidSocket;
     UdpEndpoint aServer{};
     UdpEndpoint bServer{};
     std::string aError;
@@ -587,12 +624,14 @@ int main() {
     if (aSelected && bSelected) {
         natArmedDropsRemaining.store(2);
         std::thread aPunchThread([&] {
-            aPunched = PunchAdaptiveNat(&aSocket, aConfig, aServer,
+            aPunched = PunchAdaptiveNat(aSocket, &aPunchSocket,
+                aConfig, aServer,
                 clientsRunning, aPeerId, aSession, &aPeer, &aError,
                 &aAttempt, 3);
         });
         std::thread bPunchThread([&] {
-            bPunched = PunchAdaptiveNat(&bSocket, bConfig, bServer,
+            bPunched = PunchAdaptiveNat(bSocket, &bPunchSocket,
+                bConfig, bServer,
                 clientsRunning, bPeerId, bSession, &bPeer, &bError,
                 &bAttempt, 3);
         });
@@ -601,6 +640,9 @@ int main() {
     }
     Expect(aPunched && bPunched,
            "two clients complete STUN, barrier and PUNCH");
+    Expect(aPunchSocket != kInvalidSocket && bPunchSocket != kInvalidSocket
+               && aPunchSocket != aSocket && bPunchSocket != bSocket,
+           "punch sockets remain separate from rendezvous control sockets");
     Expect(natArmedDropsRemaining.load() == 0,
            "clients retransmit NAT_ARMED after initial packet loss");
     if (!aPunched) std::cerr << "A error: " << aError << '\n';
@@ -786,7 +828,7 @@ int main() {
         const std::string legacyPunch = MakeControlMessage(
             "PUNCH", {aConfig.room_id, aPeerId});
         const PeerControlResult legacyResult = HandlePeerControl(
-            aSocket, aConfig, aPeer, aPeer, aPeerId, aSession,
+            aPunchSocket, aConfig, aPeer, aPeer, aPeerId, aSession,
             reinterpret_cast<const uint8_t*>(legacyPunch.data()),
             legacyPunch.size());
         Expect(legacyResult.handled && !legacyResult.peerSeen,
@@ -796,7 +838,7 @@ int main() {
             {aSession.sessionId, std::to_string(aSession.attemptId),
              aPeerId, "delayed-nonce", aSession.punchToken});
         const PeerControlResult currentResult = HandlePeerControl(
-            aSocket, aConfig, aPeer, aPeer, aPeerId, aSession,
+            aPunchSocket, aConfig, aPeer, aPeer, aPeerId, aSession,
             reinterpret_cast<const uint8_t*>(currentPunch.data()),
             currentPunch.size());
         Expect(currentResult.handled && currentResult.peerSeen,
@@ -804,6 +846,12 @@ int main() {
     }
 
     clientsRunning.store(false);
+    UnregisterRendezvous(aSocket, aConfig, aServer);
+    UnregisterRendezvous(bSocket, bConfig, bServer);
+    Expect(WaitForPeersUnlisted(aConfig, {"a", "b"}),
+           "control-socket UNREG removes punched peers from rendezvous");
+    CloseSocket(aPunchSocket);
+    CloseSocket(bPunchSocket);
     CloseSocket(aSocket);
     CloseSocket(bSocket);
     servicesRunning.store(false);

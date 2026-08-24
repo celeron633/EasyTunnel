@@ -312,7 +312,8 @@ bool RequestNextNatPunchAttempt(socket_t sock, const Config& cfg,
     return false;
 }
 
-bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
+bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
+                      const Config& cfg,
                       const UdpEndpoint& server,
                       const std::atomic<bool>& running,
                       const std::string& matchedPeerId,
@@ -340,7 +341,8 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         return false;
     };
 
-    if (sock == nullptr || *sock == kInvalidSocket || peer == nullptr
+    if (controlSocket == kInvalidSocket || punchSocketOut == nullptr
+        || *punchSocketOut != kInvalidSocket || peer == nullptr
         || matchedPeerId.empty()
         || session.sessionId.empty() || session.attemptId == 0
         || session.protocolVersion != kNatPunchProtocolVersionNumber
@@ -353,7 +355,6 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
                     "Adaptive NAT traversal requires exactly two STUN servers");
     }
 
-    socket_t controlSocket = *sock;
     SetSocketRecvTimeoutMs(controlSocket, kReceiveTimeoutMs);
     const auto deadline = std::chrono::steady_clock::now()
         + std::chrono::seconds(cfg.punch_timeout);
@@ -736,8 +737,7 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
             return fail(NatPunchAttemptOutcome::SocketError,
                         "NAT punch winner is not owned by the socket pool");
         }
-        CloseSocket(controlSocket);
-        *sock = receivingSocket;
+        *punchSocketOut = receivingSocket;
         attempt.outcome = NatPunchAttemptOutcome::Success;
         attempt.confirmedPeer = source;
         attempt.detail = "Authenticated PUNCH/PUNCH_ACK confirmed";
