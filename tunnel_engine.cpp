@@ -291,6 +291,7 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		}
 		SetState(TunnelState::Connected, "Data plane is up");
 		Log(LogLevel::Info, "Data plane is up.");
+		std::atomic<bool> peerDisconnectReceived{false};
 
 		// TUN -> network thread
 		std::thread tunToNet([&]() {
@@ -373,6 +374,15 @@ void TunnelEngine::WorkerThread(Config cfg) {
 						// control packet consumed
 						const auto receivedAt = std::chrono::steady_clock::now();
 						if (control.peerSeen) lastPeerSeen = receivedAt;
+						if (control.peerDisconnectRequested) {
+							peerDisconnectReceived.store(true);
+							setExitReason("peer requested disconnect");
+							Log(LogLevel::Info,
+								"Authenticated peer disconnect received; stopping tunnel");
+							SetState(TunnelState::Disconnected, "Peer disconnected");
+							running_.store(false);
+							break;
+						}
 						if (control.receivedKeepaliveAck && !pendingKeepaliveId.empty()
 							&& (control.keepaliveAckId.empty()
 								|| control.keepaliveAckId == pendingKeepaliveId)) {
@@ -436,6 +446,16 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		}
 		if (getExitReason() == "worker completed") setExitReason("stop requested");
 		Log(LogLevel::Debug, "Data-plane shutdown started: reason=" + getExitReason());
+		if (!peerDisconnectReceived.load()) {
+			if (SendPeerDisconnect(sock, cfg, peer, natPunchSession)) {
+				Log(LogLevel::Info, "Sent authenticated PEER_CLOSE to "
+					+ matchedPeerId + " at " + FormatUdpEndpoint(peer));
+			} else {
+				Log(LogLevel::Warn, "Failed to send authenticated PEER_CLOSE to "
+					+ matchedPeerId + ". err="
+					+ std::to_string(GetSocketError()));
+			}
+		}
 
 		ShutdownSocket(sock);
 
@@ -453,7 +473,8 @@ void TunnelEngine::WorkerThread(Config cfg) {
 		tunAdapter->Close();
 	}
 
-	if (state_.load() != TunnelState::Error) {
+	if (state_.load() != TunnelState::Error
+		&& state_.load() != TunnelState::Disconnected) {
 		SetState(TunnelState::Disconnected, "Tunnel stopped");
 	}
 

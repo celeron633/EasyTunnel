@@ -170,6 +170,8 @@ frp xTCP 的流程、五种模式和源码索引见
       `NAT_START` 丢失重发，以及过期和未来 attempt 消息拒绝。
 - [x] 日志使用 `attempt_id` 表示服务端单调 ID，使用 `attempt_index` 表示本地尝试序号，
       避免 `attempt 1/3` 与 `attempt=3` 同时出现造成歧义。
+- [x] 连接后主动 Disconnect 发送冗余的会话认证 `PEER_CLOSE`，对端立即关闭并保留
+      Peer timeout 兜底；测试覆盖正常关闭、错误 token、错误来源和无效会话。
 
 ### 待完成
 

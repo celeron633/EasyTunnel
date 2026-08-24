@@ -43,6 +43,18 @@ PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
         return result;
     }
 
+    if (type == "PEER_CLOSE") {
+        const bool validClose = fields.size() == 4
+            && fields[0] == punchSession.sessionId
+            && fields[1] == std::to_string(punchSession.attemptId)
+            && fields[2] == matchedPeerId
+            && fields[3] == punchSession.punchToken;
+        if (!validClose) return result;
+        result.peerSeen = true;
+        result.peerDisconnectRequested = true;
+        return result;
+    }
+
     if (fields.empty() || fields[0] != cfg.room_id) return result;
     if (type == "KEEPALIVE") {
         std::vector<std::string> ackFields{cfg.room_id, cfg.peer_id};
@@ -73,4 +85,26 @@ bool SendPeerDummyTraffic(socket_t sock, const Config& cfg, const UdpEndpoint& p
     if (packet.size() > kPeerDummyTrafficPacketSize) return false;
     packet.resize(kPeerDummyTrafficPacketSize, '0');
     return Send(sock, peer, packet);
+}
+
+bool SendPeerDisconnect(socket_t sock, const Config& cfg,
+                        const UdpEndpoint& peer,
+                        const NatPunchSession& punchSession,
+                        uint8_t copies) {
+    if (sock == kInvalidSocket || peer.family == AF_UNSPEC || copies == 0
+        || !IsSafeControlField(cfg.peer_id)
+        || !IsSafeControlField(punchSession.sessionId)
+        || punchSession.attemptId == 0
+        || punchSession.protocolVersion != 2
+        || !IsSafeControlField(punchSession.punchToken)) {
+        return false;
+    }
+    const std::string packet = MakeControlMessage("PEER_CLOSE",
+        {punchSession.sessionId, std::to_string(punchSession.attemptId),
+         cfg.peer_id, punchSession.punchToken});
+    bool sent = false;
+    for (uint8_t copy = 0; copy < copies; ++copy) {
+        sent = Send(sock, peer, packet) || sent;
+    }
+    return sent;
 }

@@ -176,6 +176,8 @@ if(BUILD_TESTING)
     add_executable(EasyTunnel_nat_punch_transport_tests
         tests/nat_punch_transport_test.cpp
         nat_punch_transport.cpp
+        nat_traversal.cpp
+        nat_protocol.cpp
         util.cpp
         config.cpp
         log.cpp)

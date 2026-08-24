@@ -11,6 +11,7 @@ EasyTunnel 是一个面向 IPv4 的点对点 TUN-over-UDP 隧道，支持通过�
 - 会合服务器在线客户端列表和指定 Peer 连接
 - 可排序的会合服务器 IPv4 UDP relay 模式
 - KEEPALIVE/ACK 维持 NAT/CGN 映射
+- Disconnect 发送会话认证的 `PEER_CLOSE`，让对端立即关闭；丢包时仍由 Peer timeout 兜底
 - 对端超时检测和非预期 UDP 来源过滤
 - Windows Wintun 与 Linux TUN 支持
 - Windows/Linux Console 客户端

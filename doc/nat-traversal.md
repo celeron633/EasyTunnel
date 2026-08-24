@@ -254,6 +254,9 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
 本地第几次尝试以及总尝试次数，二者不再共用 `attempt` 名称。
 
 `keepalive_interval` 和 `peer_timeout` 仅属于连接后的 NAT liveness，不参与打洞计划。
+Disconnect 会通过 winner socket 连续发送 3 份会话认证的 `PEER_CLOSE`，对端验证来源
+端点、session、attempt、Peer ID 和 punch token 后立即退出；全部丢包时继续由
+`peer_timeout` 兜底。
 
 ## 排障
 

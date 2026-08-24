@@ -133,12 +133,14 @@ stateDiagram-v2
     Connected --> Connected: KEEPALIVE / KEEPALIVE_ACK
     Connected --> Connected: optional PADDING
     Connected --> Error: peer_timeout
-    Connected --> Disconnected: stop
+    Connected --> Disconnected: local stop / authenticated PEER_CLOSE
 ```
 
 客户端只把确认 Peer 端点发来的 IPv4 payload 写入 TUN。控制包先由
 `HandlePeerControl` 消费。`keepalive_interval` 和 `peer_timeout` 只属于连接后的
-liveness，不影响打洞计划。
+liveness，不影响打洞计划。主动 Disconnect 会在当前数据 socket 上连续发送 3 份
+`PEER_CLOSE(session_id, attempt_id, sender, punch_token)`；对端同时校验来源端点和当前
+会话凭据后立即关闭。报文全部丢失时仍由 `peer_timeout` 被动回收。
 
 ## 主要超时
 

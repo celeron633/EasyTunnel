@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <string>
 #include "config.h"
 #include "rendezvous_client.h"
@@ -18,6 +19,8 @@ struct PeerControlResult {
     bool consumedDummyTraffic = false;
     // True when the message is a KEEPALIVE_ACK.
     bool receivedKeepaliveAck = false;
+    // True when the authenticated peer requests immediate tunnel shutdown.
+    bool peerDisconnectRequested = false;
     // Echoed heartbeat request ID; empty for ACKs from older peers.
     std::string keepaliveAckId;
 };
@@ -31,3 +34,7 @@ PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
 bool SendPeerKeepalive(socket_t sock, const Config& cfg, const UdpEndpoint& peer,
                        const std::string& requestId = "");
 bool SendPeerDummyTraffic(socket_t sock, const Config& cfg, const UdpEndpoint& peer);
+bool SendPeerDisconnect(socket_t sock, const Config& cfg,
+                        const UdpEndpoint& peer,
+                        const NatPunchSession& punchSession,
+                        uint8_t copies = 3);
