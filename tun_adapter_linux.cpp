@@ -84,8 +84,12 @@ public:
 		}
 	}
 
-	bool ReadPacket(uint8_t* buf, size_t bufSize, size_t& outLen) override {
+	TunReadResult ReadPacket(
+		uint8_t* buf, size_t bufSize, size_t& outLen) override {
 		outLen = 0;
+		if (fd_ < 0) {
+			return TunReadResult::Closed;
+		}
 
 		struct pollfd pfd {};
 		pfd.fd = fd_;
@@ -94,14 +98,17 @@ public:
 		const int ret = ::poll(&pfd, 1, kReadTimeoutMs);
 		if (ret < 0) {
 			if (errno == EINTR) {
-				return true;  // interrupted by signal, let caller check g_running
+				return TunReadResult::NoPacket;
 			}
 			Log(LogLevel::Error,
 				std::string("poll() on TUN fd failed: ") + std::strerror(errno));
-			return false;
+			return TunReadResult::Error;
 		}
 		if (ret == 0) {
-			return true;  // timeout, no packet
+			return TunReadResult::NoPacket;
+		}
+		if ((pfd.revents & (POLLHUP | POLLNVAL)) != 0) {
+			return TunReadResult::Closed;
 		}
 
 		const ssize_t n = ::read(fd_, buf, bufSize);
@@ -109,22 +116,31 @@ public:
 			// poll() can produce spurious POLLIN on some kernels; treat
 			// EAGAIN / EWOULDBLOCK as a soft timeout rather than a fatal error.
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				return true;  // no packet yet
+				return TunReadResult::NoPacket;
 			}
 			Log(LogLevel::Error,
 				std::string("read() from TUN fd failed: ") + std::strerror(errno));
-			return false;
+			return TunReadResult::Error;
+		}
+		if (n == 0) {
+			return TunReadResult::Closed;
 		}
 		outLen = static_cast<size_t>(n);
-		return true;
+		return TunReadResult::Packet;
 	}
 
-	bool WritePacket(const uint8_t* data, size_t len) override {
+	TunWriteResult WritePacket(const uint8_t* data, size_t len) override {
+		if (fd_ < 0) {
+			return TunWriteResult::Closed;
+		}
 		const ssize_t n = ::write(fd_, data, len);
 		if (n < 0) {
+			if (errno == EBADF || errno == ENODEV || errno == EIO) {
+				return TunWriteResult::Closed;
+			}
 			Log(LogLevel::Error,
 				std::string("write() to TUN fd failed: ") + std::strerror(errno));
-			return false;
+			return TunWriteResult::Error;
 		}
 		// TUN writes are atomic (one write = one IP packet), but guard against
 		// the unexpected case of a partial write.
@@ -132,9 +148,9 @@ public:
 			Log(LogLevel::Error,
 				"write() to TUN fd: partial write, expected="
 				+ std::to_string(len) + " got=" + std::to_string(n));
-			return false;
+			return TunWriteResult::Error;
 		}
-		return true;
+		return TunWriteResult::Written;
 	}
 
 private:

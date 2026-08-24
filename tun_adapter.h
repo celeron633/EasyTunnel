@@ -5,6 +5,20 @@
 
 #include "config.h"
 
+enum class TunReadResult {
+	Packet,
+	NoPacket,
+	Closed,
+	Error
+};
+
+enum class TunWriteResult {
+	Written,
+	RingFull,
+	Closed,
+	Error
+};
+
 // Platform-agnostic TUN adapter interface.
 // Concrete implementations:
 //   tun_adapter_windows.cpp  – Windows, uses Wintun driver.
@@ -24,15 +38,14 @@ public:
 
 	// Read one packet from the TUN device.
 	// Blocks for up to ~500 ms waiting for a packet.
-	// Returns true with outLen > 0  : a packet was placed in buf.
-	// Returns true with outLen == 0 : timeout, no packet yet (caller should
-	//                                 check g_running and retry).
-	// Returns false                 : fatal error or session closed.
-	virtual bool ReadPacket(uint8_t* buf, size_t bufSize, size_t& outLen) = 0;
+	// Packet means buf/outLen contain a packet; NoPacket is a soft timeout or
+	// interrupt; Closed and Error are terminal and deliberately distinct.
+	virtual TunReadResult ReadPacket(
+		uint8_t* buf, size_t bufSize, size_t& outLen) = 0;
 
 	// Write one packet to the TUN device.
-	// Returns true on success, false on error (error already logged).
-	virtual bool WritePacket(const uint8_t* data, size_t len) = 0;
+	// RingFull is a non-fatal packet drop. Closed and Error are terminal.
+	virtual TunWriteResult WritePacket(const uint8_t* data, size_t len) = 0;
 
 	// Factory – returns the platform-appropriate implementation.
 	static TunAdapter* Create();

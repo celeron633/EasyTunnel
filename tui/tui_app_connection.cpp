@@ -178,7 +178,9 @@ ftxui::Component TuiApp::BuildConnectionTab() {
             hbox({text(" Latency ") | bold,
                   text(rttMilliseconds < 0
                        ? "-- ms"
-                       : std::to_string(rttMilliseconds) + " ms")}),
+                       : std::to_string(rttMilliseconds) + " ms"),
+                  filler(), text("TUN ring drops ") | bold,
+                  text(std::to_string(stats.tunRingFullDrops.load())), text(" ")}),
             filler(),
         });
 

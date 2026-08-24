@@ -73,6 +73,7 @@ bool TunnelEngine::Start(const Config& cfg) {
 	stats_.rxPackets.store(0);
 	stats_.txBytes.store(0);
 	stats_.rxBytes.store(0);
+	stats_.tunRingFullDrops.store(0);
 	stats_.rttMilliseconds.store(-1);
 
 	running_.store(true);
@@ -298,14 +299,24 @@ void TunnelEngine::WorkerThread(Config cfg) {
 			std::vector<uint8_t> buf(kMaxPacketSize);
 			while (running_.load()) {
 				size_t pktLen = 0;
-				if (!tunAdapter->ReadPacket(buf.data(), buf.size(), pktLen)) {
-					Log(LogLevel::Error, "TUN read failed; stopping.");
-					setExitReason("TUN read failed");
+				const TunReadResult readResult =
+					tunAdapter->ReadPacket(buf.data(), buf.size(), pktLen);
+				if (readResult == TunReadResult::NoPacket) {
+					continue;
+				}
+				if (readResult == TunReadResult::Closed) {
+					Log(LogLevel::Warn, "TUN session closed; stopping.");
+					setExitReason("TUN session closed");
+					SetState(TunnelState::Error, "TUN session closed unexpectedly");
 					running_.store(false);
 					break;
 				}
-				if (pktLen == 0) {
-					continue;
+				if (readResult == TunReadResult::Error) {
+					Log(LogLevel::Error, "TUN read failed; stopping.");
+					setExitReason("TUN read failed");
+					SetState(TunnelState::Error, "TUN read failed");
+					running_.store(false);
+					break;
 				}
 
 				if (IsIpv4Packet(buf.data(), pktLen)) {
@@ -400,13 +411,35 @@ void TunnelEngine::WorkerThread(Config cfg) {
 							+ FormatUdpEndpoint(source));
 					} else if (!IsIpv4Packet(buf.data(), static_cast<size_t>(recvLen))) {
 						Log(LogLevel::Debug, "RX non-IPv4 drop, bytes=" + std::to_string(recvLen));
-					} else if (tunAdapter->WritePacket(buf.data(), static_cast<size_t>(recvLen))) {
+					} else {
 						lastPeerSeen = std::chrono::steady_clock::now();
-						stats_.rxPackets.fetch_add(1);
-						stats_.rxBytes.fetch_add(static_cast<uint64_t>(recvLen));
-						Log(LogLevel::Debug, "RX IPv4 ["
-							+ Ipv4ProtocolToString(buf.data(), static_cast<size_t>(recvLen))
-							+ "] bytes=" + std::to_string(recvLen));
+						const TunWriteResult writeResult = tunAdapter->WritePacket(
+							buf.data(), static_cast<size_t>(recvLen));
+						if (writeResult == TunWriteResult::Written) {
+							stats_.rxPackets.fetch_add(1);
+							stats_.rxBytes.fetch_add(static_cast<uint64_t>(recvLen));
+							Log(LogLevel::Debug, "RX IPv4 ["
+								+ Ipv4ProtocolToString(buf.data(), static_cast<size_t>(recvLen))
+								+ "] bytes=" + std::to_string(recvLen));
+						} else if (writeResult == TunWriteResult::RingFull) {
+							const uint64_t drops =
+								stats_.tunRingFullDrops.fetch_add(1) + 1;
+							if (drops == 1 || drops % 256 == 0) {
+								Log(LogLevel::Warn,
+									"Wintun send ring full; dropped packets="
+									+ std::to_string(drops));
+							}
+						} else {
+							const bool closed = writeResult == TunWriteResult::Closed;
+							const std::string reason = closed
+								? "TUN session closed" : "TUN write failed";
+							Log(closed ? LogLevel::Warn : LogLevel::Error,
+								reason + "; stopping.");
+							setExitReason(reason);
+							SetState(TunnelState::Error, reason);
+							running_.store(false);
+							break;
+						}
 					}
 				}
 

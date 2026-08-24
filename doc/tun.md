@@ -68,7 +68,7 @@ TUN 读取循环最长阻塞约 500 ms，便于及时响应 Stop：
 4. IPv4 包通过最终 UDP socket 发往直连 Peer 或已确认的 relay 端点；
 5. 成功发送后更新 TX 包数和字节数。
 
-致命 TUN 读取错误会停止引擎。单次 UDP `sendto` 失败只记录错误，不立即拆除隧道。
+TUN 读取会区分空等、session 关闭和致命错误；后两者会停止引擎并进入错误状态。单次 UDP `sendto` 失败只记录错误，不立即拆除隧道。
 
 ### UDP → TUN
 
@@ -78,7 +78,8 @@ UDP 接收循环先区分控制包和数据包：
 2. 丢弃最终确认端点以外的 UDP 来源；
 3. 丢弃非 IPv4 payload；
 4. 把合法 IPv4 包写入 TUN；
-5. 成功写入后更新 RX 包数和字节数。
+5. Wintun send ring 满时丢弃当前包、累计 `TUN ring drops` 并继续运行；
+6. session 关闭或其他写入错误会停止引擎，成功写入则更新 RX 包数和字节数。
 
 缓冲区上限为 65535 字节。实际可用包长还受 TUN MTU、路径 MTU 和 UDP/IPv4 分片行为限制。
 

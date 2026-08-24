@@ -219,23 +219,33 @@ public:
 		readEvent_ = nullptr;
 	}
 
-	bool ReadPacket(uint8_t* buf, size_t bufSize, size_t& outLen) override {
+	TunReadResult ReadPacket(
+		uint8_t* buf, size_t bufSize, size_t& outLen) override {
 		outLen = 0;
+		if (session_ == nullptr) {
+			return TunReadResult::Closed;
+		}
+
 		DWORD pktSize = 0;
 		BYTE* pkt = WtReceivePacket(session_, &pktSize);
 		if (pkt == nullptr) {
 			const DWORD err = GetLastError();
 			if (err == ERROR_NO_MORE_ITEMS) {
-				WaitForSingleObject(readEvent_, kReadWaitMs);
-				return true;  // timeout – outLen stays 0
+				const DWORD waitResult = WaitForSingleObject(readEvent_, kReadWaitMs);
+				if (waitResult == WAIT_OBJECT_0 || waitResult == WAIT_TIMEOUT) {
+					return TunReadResult::NoPacket;
+				}
+				Log(LogLevel::Error,
+					"WaitForSingleObject on Wintun failed. err="
+					+ std::to_string(GetLastError()));
+				return TunReadResult::Error;
 			}
 			if (err == ERROR_HANDLE_EOF) {
-				Log(LogLevel::Warn, "Wintun session EOF");
-				return false;
+				return TunReadResult::Closed;
 			}
 			Log(LogLevel::Error,
 				"WintunReceivePacket failed. err=" + std::to_string(err));
-			return false;  // unexpected receive error is fatal
+			return TunReadResult::Error;
 		}
 
 		if (pktSize > static_cast<DWORD>(bufSize)) {
@@ -243,26 +253,42 @@ public:
 				"Wintun packet too large for buffer, drop. size="
 				+ std::to_string(pktSize));
 			WtReleaseReceivePacket(session_, pkt);
-			return true;
+			return TunReadResult::NoPacket;
 		}
 
 		std::memcpy(buf, pkt, pktSize);
 		outLen = pktSize;
 		WtReleaseReceivePacket(session_, pkt);
-		return true;
+		return TunReadResult::Packet;
 	}
 
-	bool WritePacket(const uint8_t* data, size_t len) override {
+	TunWriteResult WritePacket(const uint8_t* data, size_t len) override {
+		if (session_ == nullptr) {
+			return TunWriteResult::Closed;
+		}
+		if (len > WINTUN_MAX_IP_PACKET_SIZE) {
+			Log(LogLevel::Error,
+				"Packet exceeds Wintun maximum IP packet size: "
+				+ std::to_string(len));
+			return TunWriteResult::Error;
+		}
+
 		BYTE* out = WtAllocateSendPacket(session_, static_cast<DWORD>(len));
 		if (out == nullptr) {
-			Log(LogLevel::Warn,
-				"WintunAllocateSendPacket failed, drop packet. err="
-				+ std::to_string(GetLastError()));
-			return false;
+			const DWORD err = GetLastError();
+			if (err == ERROR_BUFFER_OVERFLOW) {
+				return TunWriteResult::RingFull;
+			}
+			if (err == ERROR_HANDLE_EOF) {
+				return TunWriteResult::Closed;
+			}
+			Log(LogLevel::Error,
+				"WintunAllocateSendPacket failed. err=" + std::to_string(err));
+			return TunWriteResult::Error;
 		}
 		std::memcpy(out, data, len);
 		WtSendPacket(session_, out);
-		return true;
+		return TunWriteResult::Written;
 	}
 
 private:

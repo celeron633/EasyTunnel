@@ -41,6 +41,9 @@ struct TunnelStats {
 	std::atomic<uint64_t> rxPackets{0};
 	std::atomic<uint64_t> txBytes{0};
 	std::atomic<uint64_t> rxBytes{0};
+	// Packets received from the peer but dropped because Wintun's send ring
+	// had no free space. This is non-fatal and indicates local backpressure.
+	std::atomic<uint64_t> tunRingFullDrops{0};
 	// Latest heartbeat round-trip time. -1 means no sample is available yet.
 	std::atomic<int64_t> rttMilliseconds{-1};
 };

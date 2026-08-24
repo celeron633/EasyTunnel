@@ -197,6 +197,9 @@ void GuiApp::RenderConnectionTab() {
     const int64_t rttMilliseconds = stats.rttMilliseconds.load();
     if (rttMilliseconds < 0) ImGui::TextUnformatted("Latency  -- ms");
     else ImGui::Text("Latency  %lld ms", static_cast<long long>(rttMilliseconds));
+    ImGui::SameLine();
+    ImGui::Text("  TUN ring drops  %llu",
+                static_cast<unsigned long long>(stats.tunRingFullDrops.load()));
     RenderStatisticsCharts();
 }
 

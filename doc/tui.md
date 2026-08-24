@@ -177,7 +177,7 @@ EasyTunnel.json
 
 ## 统计实现
 
-- 包数和累计字节直接读取 `TunnelStats` 原子计数器
+- 包数、累计字节和 Wintun send ring 满丢包数直接读取 `TunnelStats` 原子计数器
 - 速度每 1 秒按字节差值除以实际时间计算
 - 速度与延迟历史每 1 秒采样，最多保留最近 60 秒
 - 单位可在 Bytes、KB、MB 之间独立切换
