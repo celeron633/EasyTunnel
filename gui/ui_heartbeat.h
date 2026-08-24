@@ -11,6 +11,8 @@ enum class UiPhase : uint8_t {
     Starting,
     PollEvents,
     ProcessAutoWait,
+    WaitForNextFrame,
+    WaitWhileHidden,
     OpenGLNewFrame,
     GlfwNewFrame,
     ImGuiNewFrame,
