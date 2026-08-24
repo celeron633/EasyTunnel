@@ -337,8 +337,13 @@ endif()
 # Windows-only: Wintun SDK
 # ---------------------------------------------------------------------------
 if(WIN32)
-    set(WINTUN_VERSION "0.14.1" CACHE STRING "Wintun SDK version used for auto-download")
+    set(WINTUN_VERSION "0.14.1")
+    set(WINTUN_ARCHIVE_SHA256
+        "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51")
     set(WINTUN_SDK_DIR "" CACHE PATH "Optional local Wintun SDK directory override")
+    set(WINTUN_VERIFY_OFFICIAL_SDK OFF)
+    set(WINTUN_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")
+    set(WINTUN_EXTRACT_DIR "${WINTUN_BASE_DIR}/wintun-${WINTUN_VERSION}")
 
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|AARCH64|aarch64)$")
         set(WINTUN_ARCH "arm64")
@@ -349,14 +354,14 @@ if(WIN32)
     endif()
 
     if(NOT WINTUN_SDK_DIR)
+        set(WINTUN_VERIFY_OFFICIAL_SDK ON)
         set(WINTUN_URL "https://www.wintun.net/builds/wintun-${WINTUN_VERSION}.zip")
-        set(WINTUN_BASE_DIR "${CMAKE_BINARY_DIR}/_deps")
         set(WINTUN_ZIP_PATH "${WINTUN_BASE_DIR}/wintun-${WINTUN_VERSION}.zip")
-        set(WINTUN_EXTRACT_DIR "${WINTUN_BASE_DIR}/wintun-${WINTUN_VERSION}")
 
         file(MAKE_DIRECTORY "${WINTUN_BASE_DIR}")
 
-        if(NOT EXISTS "${WINTUN_EXTRACT_DIR}/include/wintun.h")
+        if(NOT EXISTS "${WINTUN_EXTRACT_DIR}/include/wintun.h" AND
+           NOT EXISTS "${WINTUN_EXTRACT_DIR}/wintun/include/wintun.h")
             message(STATUS "Downloading Wintun SDK from ${WINTUN_URL}")
             file(DOWNLOAD
                 "${WINTUN_URL}"
@@ -364,6 +369,7 @@ if(WIN32)
                 SHOW_PROGRESS
                 STATUS WINTUN_DOWNLOAD_STATUS
                 TLS_VERIFY ON
+                EXPECTED_HASH "SHA256=${WINTUN_ARCHIVE_SHA256}"
             )
             list(GET WINTUN_DOWNLOAD_STATUS 0 WINTUN_DOWNLOAD_CODE)
             list(GET WINTUN_DOWNLOAD_STATUS 1 WINTUN_DOWNLOAD_MSG)
@@ -378,6 +384,10 @@ if(WIN32)
         endif()
 
         set(WINTUN_SDK_DIR "${WINTUN_EXTRACT_DIR}")
+    elseif("${WINTUN_SDK_DIR}" STREQUAL "${WINTUN_EXTRACT_DIR}" OR
+           "${WINTUN_SDK_DIR}" STREQUAL "${WINTUN_EXTRACT_DIR}/wintun")
+        # Older build directories may have cached the auto-downloaded SDK path.
+        set(WINTUN_VERIFY_OFFICIAL_SDK ON)
     endif()
 
     # Some archives extract as <root>/wintun/include, others as <root>/include.
@@ -395,6 +405,35 @@ if(WIN32)
 
     if(NOT EXISTS "${WINTUN_DLL_PATH}")
         message(FATAL_ERROR "wintun.dll not found, checked ${WINTUN_DLL_PATH}")
+    endif()
+
+    if(WINTUN_VERIFY_OFFICIAL_SDK)
+        set(WINTUN_HEADER_SHA256
+            "510a5984fbf73efd21a61ada60edfe05e1a38a77c8c47f6d62e0ab1cdbdd460f")
+        set(WINTUN_DLL_SHA256_amd64
+            "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce")
+        set(WINTUN_DLL_SHA256_arm
+            "daad267411ecdc70a0535e274d2c3e9da3d0084bdac7662cb8424dd4a031b4d9")
+        set(WINTUN_DLL_SHA256_arm64
+            "f7ba89005544be9d85231a9e0d5f23b2d15b3311667e2dad0debd344918a3f80")
+        set(WINTUN_DLL_SHA256_x86
+            "d694fa46ab4cfebcb2632d094c7aa97278eef2f8052438621766d863ae98a931")
+
+        file(SHA256 "${WINTUN_INCLUDE_DIR}/wintun.h" WINTUN_HEADER_ACTUAL_SHA256)
+        if(NOT WINTUN_HEADER_ACTUAL_SHA256 STREQUAL WINTUN_HEADER_SHA256)
+            message(FATAL_ERROR
+                "Wintun SDK header checksum mismatch: ${WINTUN_INCLUDE_DIR}/wintun.h")
+        endif()
+
+        set(WINTUN_DLL_EXPECTED_SHA256 "${WINTUN_DLL_SHA256_${WINTUN_ARCH}}")
+        file(SHA256 "${WINTUN_DLL_PATH}" WINTUN_DLL_ACTUAL_SHA256)
+        if(NOT WINTUN_DLL_ACTUAL_SHA256 STREQUAL WINTUN_DLL_EXPECTED_SHA256)
+            message(FATAL_ERROR
+                "Wintun DLL checksum mismatch: ${WINTUN_DLL_PATH}")
+        endif()
+    else()
+        message(STATUS
+            "Using local Wintun SDK override; official SDK checksum verification is disabled")
     endif()
 
     target_include_directories(EasyTunnel PRIVATE "${WINTUN_INCLUDE_DIR}")

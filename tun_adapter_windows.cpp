@@ -150,11 +150,13 @@ public:
 	~WintunAdapter() override { Close(); }
 
 	bool Open(const Config& cfg) override {
-		if (!LoadWintunLibrary(L"wintun.dll")) {
+		if (!LoadWintunLibrary()) {
 			Log(LogLevel::Error,
 				std::string("Failed to load Wintun: ") + GetWintunLoadError());
 			return false;
 		}
+		Log(LogLevel::Info,
+			std::string("Loaded Wintun DLL from ") + GetWintunLibraryPath());
 
 		const std::wstring name = Utf8ToWide(cfg.adapter_name);
 		const std::wstring type = L"EasyTunnel";

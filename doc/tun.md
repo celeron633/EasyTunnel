@@ -135,13 +135,13 @@ MTU 过大可能导致外层 UDP 分片，而部分 NAT、防火墙或运营商�
 
 Windows 实现位于 `tun_adapter_windows.cpp`：
 
-- 从可执行文件搜索路径动态加载 `wintun.dll`；
+- 从可执行文件所在目录的绝对路径动态加载 `wintun.dll`，依赖项只允许从该目录和 Windows 系统目录解析；
 - 按 `adapter_name` 打开已有适配器，不存在时创建类型为 `EasyTunnel` 的适配器；
 - 使用 4 MiB Wintun ring 启动 session；
 - 通过 Wintun read event 最长等待 500 ms；
 - 关闭连接时结束 session 并关闭 adapter handle，但不删除系统中的适配器。
 
-构建系统会把 `wintun.dll` 复制到客户端输出目录。客户端 manifest 请求管理员权限，因为创建/配置网络适配器需要提升权限。
+官方 Wintun SDK 只提供头文件和各架构 `wintun.dll`，没有可供静态链接的库，因此构建系统继续把 DLL 复制到客户端输出目录。自动下载的 SDK 压缩包、头文件和所选架构 DLL 都有固定 SHA-256 校验；显式设置 `WINTUN_SDK_DIR` 时视为使用者信任的本地依赖，不套用官方包哈希。客户端 manifest 请求管理员权限，因为创建/配置网络适配器需要提升权限。
 
 当 `auto_config_ipv4=true` 时，EasyTunnel 根据 Wintun adapter LUID 调用 Windows IP Helper API：
 
@@ -183,7 +183,7 @@ ip link set <adapter_name> mtu <tun_mtu>
 
 ### `Failed to load Wintun`
 
-确认 `wintun.dll` 与客户端可执行文件位于同一输出目录、架构一致，并检查日志中的 `LoadLibraryW` 或缺失 symbol 信息。
+确认 `wintun.dll` 与客户端可执行文件位于同一输出目录、架构一致，并检查日志中的 `LoadLibraryExW`、绝对加载路径或缺失 symbol 信息。当前工作目录和 `PATH` 中的同名 DLL 不会被加载。
 
 ### `WintunCreateAdapter` 或接口配置失败
 

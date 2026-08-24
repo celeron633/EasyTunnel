@@ -2,12 +2,15 @@
 
 #ifdef _WIN32
 
+#include <filesystem>
 #include <string>
+#include <vector>
 
 namespace {
 
 HMODULE g_wintunModule = nullptr;
 std::string g_lastError;
+std::string g_loadedPath;
 
 WINTUN_OPEN_ADAPTER_FUNC* g_openAdapter = nullptr;
 WINTUN_CREATE_ADAPTER_FUNC* g_createAdapter = nullptr;
@@ -30,17 +33,69 @@ bool LoadSymbol(void** out, const char* name) {
     return true;
 }
 
+std::string WideToUtf8(const std::wstring& value) {
+    if (value.empty()) {
+        return {};
+    }
+    const int size = WideCharToMultiByte(
+        CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+        nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+        return {};
+    }
+    std::string result(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(
+        CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+        result.data(), size, nullptr, nullptr);
+    return result;
+}
+
+bool GetExecutableDirectory(std::filesystem::path* directory) {
+    std::vector<wchar_t> buffer(MAX_PATH);
+    for (;;) {
+        const DWORD length = GetModuleFileNameW(
+            nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (length == 0) {
+            g_lastError = "GetModuleFileNameW failed, last_error=" +
+                std::to_string(GetLastError());
+            return false;
+        }
+        if (length < buffer.size()) {
+            *directory = std::filesystem::path(
+                std::wstring(buffer.data(), length)).parent_path();
+            return true;
+        }
+        if (buffer.size() >= 32768) {
+            g_lastError = "Executable path exceeds Windows path limit";
+            return false;
+        }
+        buffer.resize(buffer.size() * 2);
+    }
+}
+
 }  // namespace
 
-bool LoadWintunLibrary(const std::wstring& dllPath) {
+bool LoadWintunLibrary() {
     if (g_wintunModule != nullptr) {
         return true;
     }
 
-    const wchar_t* path = dllPath.empty() ? L"wintun.dll" : dllPath.c_str();
-    g_wintunModule = LoadLibraryW(path);
+    g_lastError.clear();
+    g_loadedPath.clear();
+
+    std::filesystem::path executableDirectory;
+    if (!GetExecutableDirectory(&executableDirectory)) {
+        return false;
+    }
+    const std::filesystem::path dllPath = executableDirectory / L"wintun.dll";
+    g_loadedPath = WideToUtf8(dllPath.wstring());
+
+    g_wintunModule = LoadLibraryExW(
+        dllPath.c_str(), nullptr,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (g_wintunModule == nullptr) {
-        g_lastError = "LoadLibraryW(wintun.dll) failed, last_error=" + std::to_string(GetLastError());
+        g_lastError = "LoadLibraryExW(" + g_loadedPath +
+            ") failed, last_error=" + std::to_string(GetLastError());
         return false;
     }
 
@@ -83,6 +138,10 @@ void UnloadWintunLibrary() {
 
 const char* GetWintunLoadError() {
     return g_lastError.c_str();
+}
+
+const char* GetWintunLibraryPath() {
+    return g_loadedPath.c_str();
 }
 
 WINTUN_ADAPTER_HANDLE WtOpenAdapter(const WCHAR* name) {

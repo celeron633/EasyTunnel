@@ -13,9 +13,10 @@
 #pragma GCC diagnostic pop
 #endif
 
-bool LoadWintunLibrary(const std::wstring& dllPath);
+bool LoadWintunLibrary();
 void UnloadWintunLibrary();
 const char* GetWintunLoadError();
+const char* GetWintunLibraryPath();
 
 WINTUN_ADAPTER_HANDLE WtOpenAdapter(const WCHAR* name);
 WINTUN_ADAPTER_HANDLE WtCreateAdapter(const WCHAR* name, const WCHAR* tunnelType, const GUID* requestedGUID);
