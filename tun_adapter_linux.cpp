@@ -10,6 +10,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <string>
@@ -19,6 +20,7 @@
 
 namespace {
 constexpr int kReadTimeoutMs = 500;
+constexpr size_t kMaxIpPacketSize = 65535;
 constexpr const char* kTunDevPath = "/dev/net/tun";
 }  // namespace
 
@@ -84,9 +86,8 @@ public:
 		}
 	}
 
-	TunReadResult ReadPacket(
-		uint8_t* buf, size_t bufSize, size_t& outLen) override {
-		outLen = 0;
+	TunReadResult ReadPacket(TunReadPacket& packet) override {
+		ResetReadPacket(packet);
 		if (fd_ < 0) {
 			return TunReadResult::Closed;
 		}
@@ -111,7 +112,7 @@ public:
 			return TunReadResult::Closed;
 		}
 
-		const ssize_t n = ::read(fd_, buf, bufSize);
+		const ssize_t n = ::read(fd_, readBuffer_.data(), readBuffer_.size());
 		if (n < 0) {
 			// poll() can produce spurious POLLIN on some kernels; treat
 			// EAGAIN / EWOULDBLOCK as a soft timeout rather than a fatal error.
@@ -125,7 +126,7 @@ public:
 		if (n == 0) {
 			return TunReadResult::Closed;
 		}
-		outLen = static_cast<size_t>(n);
+		SetReadPacket(packet, readBuffer_.data(), static_cast<size_t>(n));
 		return TunReadResult::Packet;
 	}
 
@@ -153,8 +154,12 @@ public:
 		return TunWriteResult::Written;
 	}
 
+protected:
+	void ReleaseReadPacket(const uint8_t*) override {}
+
 private:
 	int fd_ = -1;
+	std::array<uint8_t, kMaxIpPacketSize> readBuffer_{};
 };
 
 TunAdapter* TunAdapter::Create() {

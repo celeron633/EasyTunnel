@@ -62,11 +62,11 @@ EasyTunnel 使用三层 TUN，而不是二层 TAP。TUN 每次读写的是一个
 
 TUN 读取循环最长阻塞约 500 ms，便于及时响应 Stop：
 
-1. 读取一个完整包；
+1. 读取一个完整包；Windows 直接借用 Wintun receive ring 指针，Linux 借用适配器内部读缓冲区；
 2. 空读取表示超时，继续检查运行状态；
 3. 非 IPv4 包记录 Debug 日志并丢弃；
-4. IPv4 包通过最终 UDP socket 发往直连 Peer 或已确认的 relay 端点；
-5. 成功发送后更新 TX 包数和字节数。
+4. IPv4 包通过最终 UDP socket 发往直连 Peer 或已确认的 relay 端点；Windows 路径不再先复制到引擎的中间缓冲区；
+5. `sendto` 返回后自动释放借用的包，成功发送则更新 TX 包数和字节数。
 
 TUN 读取会区分空等、session 关闭和致命错误；后两者会停止引擎并进入错误状态。单次 UDP `sendto` 失败只记录错误，不立即拆除隧道。
 

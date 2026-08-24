@@ -219,9 +219,8 @@ public:
 		readEvent_ = nullptr;
 	}
 
-	TunReadResult ReadPacket(
-		uint8_t* buf, size_t bufSize, size_t& outLen) override {
-		outLen = 0;
+	TunReadResult ReadPacket(TunReadPacket& packet) override {
+		ResetReadPacket(packet);
 		if (session_ == nullptr) {
 			return TunReadResult::Closed;
 		}
@@ -248,17 +247,7 @@ public:
 			return TunReadResult::Error;
 		}
 
-		if (pktSize > static_cast<DWORD>(bufSize)) {
-			Log(LogLevel::Warn,
-				"Wintun packet too large for buffer, drop. size="
-				+ std::to_string(pktSize));
-			WtReleaseReceivePacket(session_, pkt);
-			return TunReadResult::NoPacket;
-		}
-
-		std::memcpy(buf, pkt, pktSize);
-		outLen = pktSize;
-		WtReleaseReceivePacket(session_, pkt);
+		SetReadPacket(packet, pkt, pktSize);
 		return TunReadResult::Packet;
 	}
 
@@ -289,6 +278,13 @@ public:
 		std::memcpy(out, data, len);
 		WtSendPacket(session_, out);
 		return TunWriteResult::Written;
+	}
+
+protected:
+	void ReleaseReadPacket(const uint8_t* data) override {
+		if (session_ != nullptr && data != nullptr) {
+			WtReleaseReceivePacket(session_, data);
+		}
 	}
 
 private:

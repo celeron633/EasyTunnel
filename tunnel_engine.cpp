@@ -296,11 +296,10 @@ void TunnelEngine::WorkerThread(Config cfg) {
 
 		// TUN -> network thread
 		std::thread tunToNet([&]() {
-			std::vector<uint8_t> buf(kMaxPacketSize);
 			while (running_.load()) {
-				size_t pktLen = 0;
+				TunReadPacket packet;
 				const TunReadResult readResult =
-					tunAdapter->ReadPacket(buf.data(), buf.size(), pktLen);
+					tunAdapter->ReadPacket(packet);
 				if (readResult == TunReadResult::NoPacket) {
 					continue;
 				}
@@ -319,11 +318,11 @@ void TunnelEngine::WorkerThread(Config cfg) {
 					break;
 				}
 
-				if (IsIpv4Packet(buf.data(), pktLen)) {
+				if (IsIpv4Packet(packet.Data(), packet.Size())) {
 					const int sent = sendto(
 						sock,
-						reinterpret_cast<const char*>(buf.data()),
-						static_cast<int>(pktLen),
+						reinterpret_cast<const char*>(packet.Data()),
+						static_cast<int>(packet.Size()),
 						0,
 						reinterpret_cast<const sockaddr*>(&peer.addr),
 						peer.addr_len);
@@ -334,13 +333,13 @@ void TunnelEngine::WorkerThread(Config cfg) {
 						stats_.txPackets.fetch_add(1);
 						stats_.txBytes.fetch_add(static_cast<uint64_t>(sent));
 						Log(LogLevel::Debug,
-							"TX IPv4 [" + Ipv4ProtocolToString(buf.data(), pktLen)
+							"TX IPv4 [" + Ipv4ProtocolToString(packet.Data(), packet.Size())
 							+ "] bytes=" + std::to_string(sent));
 					}
 				} else {
 					Log(LogLevel::Debug,
-						"Skip non-IPv4 [" + NonIpv4PacketType(buf.data(), pktLen)
-						+ "] from TUN, bytes=" + std::to_string(pktLen));
+						"Skip non-IPv4 [" + NonIpv4PacketType(packet.Data(), packet.Size())
+						+ "] from TUN, bytes=" + std::to_string(packet.Size()));
 				}
 			}
 		});
