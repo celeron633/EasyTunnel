@@ -12,6 +12,7 @@ std::string g_lastError;
 WINTUN_OPEN_ADAPTER_FUNC* g_openAdapter = nullptr;
 WINTUN_CREATE_ADAPTER_FUNC* g_createAdapter = nullptr;
 WINTUN_CLOSE_ADAPTER_FUNC* g_closeAdapter = nullptr;
+WINTUN_GET_ADAPTER_LUID_FUNC* g_getAdapterLuid = nullptr;
 WINTUN_START_SESSION_FUNC* g_startSession = nullptr;
 WINTUN_END_SESSION_FUNC* g_endSession = nullptr;
 WINTUN_GET_READ_WAIT_EVENT_FUNC* g_getReadWaitEvent = nullptr;
@@ -46,6 +47,7 @@ bool LoadWintunLibrary(const std::wstring& dllPath) {
     if (!LoadSymbol(reinterpret_cast<void**>(&g_openAdapter), "WintunOpenAdapter") ||
         !LoadSymbol(reinterpret_cast<void**>(&g_createAdapter), "WintunCreateAdapter") ||
         !LoadSymbol(reinterpret_cast<void**>(&g_closeAdapter), "WintunCloseAdapter") ||
+        !LoadSymbol(reinterpret_cast<void**>(&g_getAdapterLuid), "WintunGetAdapterLUID") ||
         !LoadSymbol(reinterpret_cast<void**>(&g_startSession), "WintunStartSession") ||
         !LoadSymbol(reinterpret_cast<void**>(&g_endSession), "WintunEndSession") ||
         !LoadSymbol(reinterpret_cast<void**>(&g_getReadWaitEvent), "WintunGetReadWaitEvent") ||
@@ -64,6 +66,7 @@ void UnloadWintunLibrary() {
     g_openAdapter = nullptr;
     g_createAdapter = nullptr;
     g_closeAdapter = nullptr;
+    g_getAdapterLuid = nullptr;
     g_startSession = nullptr;
     g_endSession = nullptr;
     g_getReadWaitEvent = nullptr;
@@ -92,6 +95,10 @@ WINTUN_ADAPTER_HANDLE WtCreateAdapter(const WCHAR* name, const WCHAR* tunnelType
 
 void WtCloseAdapter(WINTUN_ADAPTER_HANDLE adapter) {
     g_closeAdapter(adapter);
+}
+
+void WtGetAdapterLuid(WINTUN_ADAPTER_HANDLE adapter, NET_LUID* luid) {
+    g_getAdapterLuid(adapter, luid);
 }
 
 WINTUN_SESSION_HANDLE WtStartSession(WINTUN_ADAPTER_HANDLE adapter, DWORD capacity) {

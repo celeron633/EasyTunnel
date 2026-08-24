@@ -13,6 +13,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <netioapi.h>
 
 #include <cstring>
 #include <string>
@@ -24,6 +25,124 @@
 namespace {
 constexpr DWORD kWintunRingCapacity = 0x400000;
 constexpr DWORD kReadWaitMs = 500;
+
+std::string FormatNetworkError(NETIO_STATUS status) {
+	char* message = nullptr;
+	DWORD length = FormatMessageA(
+		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+			FORMAT_MESSAGE_IGNORE_INSERTS,
+		nullptr, status, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		reinterpret_cast<char*>(&message), 0, nullptr);
+
+	std::string result = "error=" + std::to_string(status);
+	if (length != 0 && message != nullptr) {
+		while (length > 0 &&
+			   (message[length - 1] == '\r' || message[length - 1] == '\n')) {
+			message[--length] = '\0';
+		}
+		result += " (";
+		result += message;
+		result += ')';
+	}
+	if (message != nullptr) {
+		LocalFree(message);
+	}
+	return result;
+}
+
+bool ConfigureTunIpv4(const Config& cfg, const NET_LUID& adapterLuid) {
+	in_addr address{};
+	if (!ParseIpv4(cfg.local_tun_ipv4, &address)) {
+		Log(LogLevel::Error, "Invalid TUN IPv4 address: " + cfg.local_tun_ipv4);
+		return false;
+	}
+
+	bool addressExists = false;
+	MIB_UNICASTIPADDRESS_TABLE* table = nullptr;
+	NETIO_STATUS status = GetUnicastIpAddressTable(AF_INET, &table);
+	if (status != NO_ERROR) {
+		Log(LogLevel::Error,
+			"GetUnicastIpAddressTable failed: " + FormatNetworkError(status));
+		return false;
+	}
+
+	for (ULONG i = 0; i < table->NumEntries; ++i) {
+		MIB_UNICASTIPADDRESS_ROW& existing = table->Table[i];
+		if (existing.InterfaceLuid.Value != adapterLuid.Value) {
+			continue;
+		}
+
+		const bool isDesired =
+			existing.Address.si_family == AF_INET &&
+			existing.Address.Ipv4.sin_addr.S_un.S_addr == address.S_un.S_addr &&
+			existing.OnLinkPrefixLength == cfg.tun_prefix;
+		if (isDesired) {
+			addressExists = true;
+			continue;
+		}
+
+		status = DeleteUnicastIpAddressEntry(&existing);
+		if (status != NO_ERROR && status != ERROR_NOT_FOUND) {
+			Log(LogLevel::Error,
+				"DeleteUnicastIpAddressEntry failed: " + FormatNetworkError(status));
+			FreeMibTable(table);
+			return false;
+		}
+	}
+	FreeMibTable(table);
+
+	if (!addressExists) {
+		MIB_UNICASTIPADDRESS_ROW row{};
+		InitializeUnicastIpAddressEntry(&row);
+		row.InterfaceLuid = adapterLuid;
+		row.Address.Ipv4.sin_family = AF_INET;
+		row.Address.Ipv4.sin_addr = address;
+		row.OnLinkPrefixLength = cfg.tun_prefix;
+		row.PrefixOrigin = IpPrefixOriginManual;
+		row.SuffixOrigin = IpSuffixOriginManual;
+		row.ValidLifetime = 0xFFFFFFFF;
+		row.PreferredLifetime = 0xFFFFFFFF;
+
+		status = CreateUnicastIpAddressEntry(&row);
+		if (status != NO_ERROR && status != ERROR_OBJECT_ALREADY_EXISTS) {
+			Log(LogLevel::Error,
+				"CreateUnicastIpAddressEntry failed: " + FormatNetworkError(status));
+			return false;
+		}
+	}
+
+	Log(LogLevel::Info,
+		"Configured adapter IPv4 " + cfg.local_tun_ipv4 + "/" +
+			std::to_string(cfg.tun_prefix) + " via IP Helper API.");
+	return true;
+}
+
+bool ConfigureTunMtu(const Config& cfg, const NET_LUID& adapterLuid) {
+	MIB_IPINTERFACE_ROW row{};
+	InitializeIpInterfaceEntry(&row);
+	row.Family = AF_INET;
+	row.InterfaceLuid = adapterLuid;
+
+	NETIO_STATUS status = GetIpInterfaceEntry(&row);
+	if (status != NO_ERROR) {
+		Log(LogLevel::Error,
+			"GetIpInterfaceEntry failed: " + FormatNetworkError(status));
+		return false;
+	}
+
+	row.NlMtu = cfg.tun_mtu;
+	status = SetIpInterfaceEntry(&row);
+	if (status != NO_ERROR) {
+		Log(LogLevel::Error,
+			"SetIpInterfaceEntry failed: " + FormatNetworkError(status));
+		return false;
+	}
+
+	Log(LogLevel::Info,
+		"Configured adapter IPv4 MTU " + std::to_string(cfg.tun_mtu) +
+			" via IP Helper API.");
+	return true;
+}
 }  // namespace
 
 class WintunAdapter : public TunAdapter {
@@ -54,25 +173,23 @@ public:
 			Log(LogLevel::Info, "Opened existing adapter.");
 		}
 
+		NET_LUID adapterLuid{};
+		WtGetAdapterLuid(adapter_, &adapterLuid);
+
 		if (cfg.auto_config_ipv4) {
-			if (!ConfigureTunIpv4(cfg)) {
+			if (!ConfigureTunIpv4(cfg, adapterLuid)) {
 				Log(LogLevel::Error,
 					"Failed to set adapter IPv4. Run as administrator.");
 				return false;
 			}
-			if (!ConfigureTunMtu(cfg)) {
+			if (!ConfigureTunMtu(cfg, adapterLuid)) {
 				Log(LogLevel::Error,
 					"Failed to set adapter MTU. Run as administrator.");
 				return false;
 			}
-			if (!DisableTunIpv6(cfg)) {
-				Log(LogLevel::Error,
-					"Failed to disable adapter IPv6 binding. Run as administrator.");
-				return false;
-			}
 		} else {
 			Log(LogLevel::Info,
-				"auto_config_ipv4=false, skip adapter IPv4/MTU/IPv6 setup.");
+				"auto_config_ipv4=false, skip adapter IPv4/MTU setup.");
 		}
 
 		session_ = WtStartSession(adapter_, kWintunRingCapacity);

@@ -62,10 +62,6 @@ bool IsUdpDestinationUnreachable(int err);
 // Packet / protocol helpers
 // ---------------------------------------------------------------------------
 bool IsIpv4Packet(const uint8_t* data, size_t len);
-std::string PrefixToMask(uint8_t prefix);
-bool RunCommand(const std::string& cmd);
-bool ConfigureTunIpv4(const Config& cfg);
-bool ConfigureTunMtu(const Config& cfg);
 bool ParseIpv4(const std::string& ip, in_addr* out);
 bool ParseIpv6(const std::string& ip, in6_addr* out);
 bool ParseUdpEndpoint(const std::string& ip, uint16_t port, UdpEndpoint* out);
@@ -81,5 +77,8 @@ std::string Ipv4ProtocolToString(const uint8_t* packet, size_t len);
 
 #ifdef _WIN32
 std::wstring Utf8ToWide(const std::string& s);
-bool DisableTunIpv6(const Config& cfg);
+#else
+bool RunCommand(const std::string& cmd);
+bool ConfigureTunIpv4(const Config& cfg);
+bool ConfigureTunMtu(const Config& cfg);
 #endif

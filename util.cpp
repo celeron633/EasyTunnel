@@ -173,21 +173,7 @@ bool IsIpv4Packet(const uint8_t* data, size_t len) {
     return version == 4;
 }
 
-std::string PrefixToMask(uint8_t prefix) {
-    uint32_t mask = 0;
-    if (prefix == 0) {
-        mask = 0;
-    } else {
-        mask = (0xFFFFFFFFu << (32 - prefix));
-    }
-    std::ostringstream ss;
-    ss << ((mask >> 24) & 0xFF) << '.'
-       << ((mask >> 16) & 0xFF) << '.'
-       << ((mask >> 8) & 0xFF) << '.'
-       << (mask & 0xFF);
-    return ss.str();
-}
-
+#ifndef _WIN32
 bool RunCommand(const std::string& cmd) {
     Log(LogLevel::Info, "Execute: " + cmd);
     const int code = std::system(cmd.c_str());
@@ -197,6 +183,7 @@ bool RunCommand(const std::string& cmd) {
     }
     return true;
 }
+#endif
 
 #ifdef _WIN32
 
@@ -211,47 +198,6 @@ std::wstring Utf8ToWide(const std::string& s) {
     std::wstring w(size - 1, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &w[0], size);
     return w;
-}
-
-bool ConfigureTunIpv4(const Config& cfg) {
-    const std::string mask = PrefixToMask(cfg.tun_prefix);
-    std::ostringstream ss;
-    ss << "netsh interface ipv4 set address name=\""
-       << cfg.adapter_name
-       << "\" static "
-       << cfg.local_tun_ipv4 << ' ' << mask;
-    return RunCommand(ss.str());
-}
-
-bool ConfigureTunMtu(const Config& cfg) {
-    std::ostringstream ss;
-    ss << "netsh interface ipv4 set subinterface \""
-       << cfg.adapter_name
-       << "\" mtu=" << cfg.tun_mtu << " store=persistent";
-    return RunCommand(ss.str());
-}
-
-bool DisableTunIpv6(const Config& cfg) {
-    // Use adapter binding toggle for reliable suppression of IPv6 noise on this tunnel NIC.
-    // This is reversible. Restore command example:
-    //   Enable-NetAdapterBinding -Name "<adapter>" -ComponentID ms_tcpip6
-    std::ostringstream ps;
-    ps << "powershell -NoProfile -ExecutionPolicy Bypass -Command \""
-       << "$ErrorActionPreference='Stop';"
-       << "$name='" << cfg.adapter_name << "';"
-       << "$b=Get-NetAdapterBinding -Name $name -ComponentID ms_tcpip6 -ErrorAction Stop;"
-       << "if($b.Enabled){Disable-NetAdapterBinding -Name $name -ComponentID ms_tcpip6 -Confirm:$false -ErrorAction Stop | Out-Null}"
-       << "\"";
-
-    if (!RunCommand(ps.str())) {
-        return false;
-    }
-
-    Log(LogLevel::Info,
-        "IPv6 binding disabled on adapter. To restore later: Enable-NetAdapterBinding -Name \""
-        + cfg.adapter_name + "\" -ComponentID ms_tcpip6");
-
-    return true;
 }
 
 bool ParseIpv6(const std::string& ip, in6_addr* out) {

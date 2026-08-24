@@ -10,7 +10,7 @@ tun_adapter_windows.cpp    Windows Wintun 实现
 tun_adapter_linux.cpp      Linux /dev/net/tun 实现
 wintun_loader.cpp          Wintun DLL 动态加载
 tunnel_engine.cpp          TUN 与 UDP 之间的数据转发
-util.cpp                   地址、MTU 和接口配置命令
+util.cpp                   地址、MTU 和接口配置
 ```
 
 ## 作用边界
@@ -123,7 +123,7 @@ tun_mtu=1452
 
 若需要通过 Peer 访问其后方 LAN，必须另外配置双方路由，并在作为网关的一端启用 IP forwarding；是否需要 NAT 取决于网络拓扑。TUN 网段也应避免与本机现有 LAN、VPN、容器网络重叠，否则系统可能选择错误路由。
 
-`auto_config_ipv4=false` 时，EasyTunnel 只打开 TUN，不执行任何地址或 MTU 命令，以上内容全部由管理员预先配置。
+`auto_config_ipv4=false` 时，EasyTunnel 只打开 TUN，不执行任何地址或 MTU 配置，以上内容全部由管理员预先配置。
 
 ## MTU
 
@@ -143,19 +143,14 @@ Windows 实现位于 `tun_adapter_windows.cpp`：
 
 构建系统会把 `wintun.dll` 复制到客户端输出目录。客户端 manifest 请求管理员权限，因为创建/配置网络适配器需要提升权限。
 
-当 `auto_config_ipv4=true` 时依次执行：
+当 `auto_config_ipv4=true` 时，EasyTunnel 根据 Wintun adapter LUID 调用 Windows IP Helper API：
 
 ```text
-netsh interface ipv4 set address name="<adapter>" static <ip> <mask>
-netsh interface ipv4 set subinterface "<adapter>" mtu=<mtu> store=persistent
-Disable-NetAdapterBinding -Name "<adapter>" -ComponentID ms_tcpip6
+GetUnicastIpAddressTable / DeleteUnicastIpAddressEntry / CreateUnicastIpAddressEntry
+GetIpInterfaceEntry / SetIpInterfaceEntry
 ```
 
-这些设置会保留在系统中。尤其是 IPv6 binding 被显式禁用，EasyTunnel 退出时不会自动恢复。需要恢复时执行：
-
-```powershell
-Enable-NetAdapterBinding -Name "EasyTunnel-A" -ComponentID ms_tcpip6
-```
+该路径不再启动 `netsh` 或 PowerShell 子进程，也不再修改适配器的 IPv6 binding。当前数据面仍只转发 IPv4，读到的 IPv6 包会在引擎中丢弃。IPv4 地址和 MTU 设置会保留在系统中，EasyTunnel 退出时不会自动恢复。
 
 同一台 Windows 主机运行两个客户端时必须使用不同适配器名。两个进程复用同一 Wintun 适配器可能导致 `WintunStartSession` 失败，重复的 TUN 地址和路由也会让数据面测试失真。
 
@@ -190,9 +185,9 @@ ip link set <adapter_name> mtu <tun_mtu>
 
 确认 `wintun.dll` 与客户端可执行文件位于同一输出目录、架构一致，并检查日志中的 `LoadLibraryW` 或缺失 symbol 信息。
 
-### `WintunCreateAdapter` 或配置命令失败
+### `WintunCreateAdapter` 或接口配置失败
 
-以管理员权限运行，确认适配器名有效，并检查是否被终端安全软件或网络管理策略阻止。自动配置命令及退出码会写入日志。
+以管理员权限运行，确认适配器名有效，并检查是否被终端安全软件或网络管理策略阻止。失败的 IP Helper API 名称、状态码和系统错误信息会写入日志。
 
 ### `WintunStartSession failed`
 

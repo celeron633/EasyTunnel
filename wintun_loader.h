@@ -20,6 +20,7 @@ const char* GetWintunLoadError();
 WINTUN_ADAPTER_HANDLE WtOpenAdapter(const WCHAR* name);
 WINTUN_ADAPTER_HANDLE WtCreateAdapter(const WCHAR* name, const WCHAR* tunnelType, const GUID* requestedGUID);
 void WtCloseAdapter(WINTUN_ADAPTER_HANDLE adapter);
+void WtGetAdapterLuid(WINTUN_ADAPTER_HANDLE adapter, NET_LUID* luid);
 WINTUN_SESSION_HANDLE WtStartSession(WINTUN_ADAPTER_HANDLE adapter, DWORD capacity);
 void WtEndSession(WINTUN_SESSION_HANDLE session);
 HANDLE WtGetReadWaitEvent(WINTUN_SESSION_HANDLE session);
