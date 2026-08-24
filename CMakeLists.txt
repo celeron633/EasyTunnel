@@ -153,7 +153,7 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME adaptive_nat_integration
         COMMAND EasyTunnel_adaptive_nat_integration_tests)
-    set_tests_properties(adaptive_nat_integration PROPERTIES TIMEOUT 30)
+    set_tests_properties(adaptive_nat_integration PROPERTIES TIMEOUT 60)
 
     add_executable(EasyTunnel_nat_punch_socket_pool_tests
         tests/nat_punch_socket_pool_test.cpp

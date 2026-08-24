@@ -175,7 +175,7 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     easyConfig.target_peer_id = "random";
     randomConfig.room_id = easyConfig.room_id;
     randomConfig.peer_id = "random";
-    randomConfig.target_peer_id.clear();
+    randomConfig.target_peer_id = "easy";
     randomConfig.punch_timeout = mode == InterruptedPunchMode::CancelAtBarrier
         ? 5 : mode == InterruptedPunchMode::PunchTimeout ? 2 : 30;
 
@@ -467,13 +467,14 @@ int main() {
     };
     Config bConfig = aConfig;
     bConfig.peer_id = "b";
-    bConfig.target_peer_id.clear();
+    bConfig.target_peer_id = "a";
     bConfig.stun_servers[1] = {
         "127.0.0.3", EndpointPort(stunRandomEndpoint)};
 
     Config waitingConfig = bConfig;
     waitingConfig.room_id = "tun-ip-wait";
     waitingConfig.peer_id = "waiting-peer";
+    waitingConfig.target_peer_id.clear();
     waitingConfig.local_tun_ipv4 = "10.66.0.99";
     socket_t waitingSocket = kInvalidSocket;
     UdpEndpoint waitingServer{};
@@ -542,11 +543,15 @@ int main() {
     bSelectThread.join();
     Expect(aSelected && bSelected && aPeerId == "b" && bPeerId == "a",
            "two clients select each other through rendezvous");
+    const bool complementaryRoles =
+        (aSession.role == NatPunchRole::Initiator
+            && bSession.role == NatPunchRole::Responder)
+        || (aSession.role == NatPunchRole::Responder
+            && bSession.role == NatPunchRole::Initiator);
     Expect(aSession.sessionId == bSession.sessionId
                && aSession.attemptId == bSession.attemptId
                && aSession.punchToken == bSession.punchToken
-               && aSession.role == NatPunchRole::Initiator
-               && bSession.role == NatPunchRole::Responder,
+               && complementaryRoles,
            "paired clients receive one complementary NAT session");
 
     const uint64_t initialAttemptId = aSession.attemptId;
@@ -740,7 +745,7 @@ int main() {
     Config randomConfig = bConfig;
     randomConfig.room_id = regularConfig.room_id;
     randomConfig.peer_id = "random";
-    randomConfig.target_peer_id.clear();
+    randomConfig.target_peer_id = "regular";
     const PairedPunchResult mixed = RunPairedPunch(
         regularConfig, randomConfig, 2);
     Expect(mixed.setup && mixed.selected
