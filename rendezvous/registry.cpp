@@ -11,8 +11,6 @@
 #include "ipv4_relay_app.h"
 
 namespace {
-constexpr const char* kNatPunchProtocolVersion = "2";
-
 struct NatPunchInfo {
     bool reported = false;
     bool armed = false;
@@ -65,6 +63,15 @@ bool Send(socket_t sock, const UdpEndpoint& endpoint, const std::string& data) {
 void SendMessage(socket_t sock, const UdpEndpoint& endpoint, const std::string& type,
                  const std::vector<std::string>& fields = {}) {
     Send(sock, endpoint, MakeControlMessage(type, fields));
+}
+
+void SendProtocolVersionMismatch(socket_t sock, const UdpEndpoint& endpoint,
+                                 const std::string& received) {
+    const std::string safeReceived = IsSafeControlField(received)
+        ? received : received.empty() ? "legacy" : "invalid";
+    SendMessage(sock, endpoint, "ERROR",
+        {"nat-punch-version-mismatch", kNatPunchProtocolVersion,
+         safeReceived});
 }
 
 std::pair<std::string, std::string> IpAndPort(const UdpEndpoint& endpoint) {
@@ -678,8 +685,15 @@ struct RendezvousRegistry::Impl {
                        const std::vector<std::string>& fields,
                        std::chrono::steady_clock::time_point now) {
         size_t expectedFields = 0;
-        if (type == "REG") expectedFields = 4;
-        else if (type == "CONNECT") expectedFields = 5;
+        if ((type == "REG" && fields.size() == 4)
+            || (type == "CONNECT" && fields.size() == 5)) {
+            Log(LogLevel::Warn, "Rejected legacy rendezvous handshake type="
+                + type + " from " + FormatUdpEndpoint(source));
+            SendProtocolVersionMismatch(sock, source, "legacy");
+            return;
+        }
+        if (type == "REG") expectedFields = 5;
+        else if (type == "CONNECT") expectedFields = 6;
         else if (type == "UNREG") expectedFields = 3;
         else if (type == "NAT_INFO") expectedFields = 13;
         else if (type == "NAT_ARMED") expectedFields = 6;
@@ -716,6 +730,18 @@ struct RendezvousRegistry::Impl {
         const bool isIpv4RelayJoin = type == "RELAY_JOIN";
         const bool isTunIp = type == "TUN_IP";
 
+        if ((isRegister && fields[3] != kNatPunchProtocolVersion)
+            || (isConnect && fields[4] != kNatPunchProtocolVersion)
+            || (isNatInfo && fields[5] != kNatPunchProtocolVersion)) {
+            const std::string& received = fields[
+                isRegister ? 3 : isConnect ? 4 : 5];
+            Log(LogLevel::Warn, "Rejected NAT punch protocol version="
+                + received + " type=" + type + " from "
+                + FormatUdpEndpoint(source));
+            SendProtocolVersionMismatch(sock, source, received);
+            return;
+        }
+
         if (isTunIp) {
             HandleTunIp(source, fields, now);
             return;
@@ -728,8 +754,9 @@ struct RendezvousRegistry::Impl {
                                       || isIpv4RelayJoin)
             ? fields[2] : "";
         size_t tokenIndex = 2;
-        if (isRegister || isIpv4RelayJoin) tokenIndex = 3;
-        if (isConnect) tokenIndex = 4;
+        if (isRegister) tokenIndex = 4;
+        if (isConnect) tokenIndex = 5;
+        if (isIpv4RelayJoin) tokenIndex = 3;
         if (isNatArmed) tokenIndex = 5;
         if (isNatRetry) tokenIndex = 5;
         if (isIpv6Join) tokenIndex = 6;
@@ -819,7 +846,8 @@ struct RendezvousRegistry::Impl {
         }
         if (isRegister) {
             current->second.ipv6Joined = false;
-            SendMessage(sock, source, "REGISTERED");
+            SendMessage(sock, source, "REGISTERED",
+                        {kNatPunchProtocolVersion});
         } else if (isNatInfo) {
             HandleNatInfo(room, current, source, fields, now);
         } else if (isNatArmed) {

@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+inline constexpr char kNatPunchProtocolVersion[] = "2";
+
 std::string MakeControlMessage(const std::string& type,
                                const std::vector<std::string>& fields = {});
 bool ParseControlMessage(const uint8_t* data, size_t len,

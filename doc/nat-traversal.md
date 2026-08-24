@@ -62,6 +62,10 @@ transaction ID，并包含合法的 `XOR-MAPPED-ADDRESS`。
 
 双方通过 `REG` / `CONNECT` 协商 `nat_punch` 后，会合服务器为配对生成：
 
+`REG`、`CONNECT` 和 `REGISTERED` 会携带 NAT Punch 协议版本。客户端与会合服务器
+版本不一致时返回 `nat-punch-version-mismatch`，不会继续进入 STUN 或等待屏障；旧字段
+格式按 `legacy` 版本报告，不提供旧协议兼容执行路径。
+
 - 128-bit 随机 `session_id`；
 - 单调 `attempt_id`；
 - initiator/responder 角色；
@@ -259,3 +263,5 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
 - `Timed out at the NAT synchronization barrier`：`barrier_armed_ack=false` 表示本端未收到
   会合服务器确认，应检查版本和 punch socket 的 UDP 返回流量；值为 `true` 表示本端已
   就绪但对端未在 8 秒内进入同一 attempt 的屏障。
+- `NAT punch protocol version mismatch`：客户端、对端或会合服务器版本不一致，需要同步
+  升级；当前版本不会回退到旧 NAT/NAT4 协议。

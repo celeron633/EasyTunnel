@@ -58,7 +58,7 @@ void Register(RendezvousRegistry* registry, const UdpEndpoint& endpoint,
               const std::string& room, const std::string& node,
               const std::string& capabilities) {
     registry->Handle(endpoint, "REG",
-        {room, node, capabilities, ""},
+        {room, node, capabilities, kNatPunchProtocolVersion, ""},
         std::chrono::steady_clock::now());
 }
 }  // namespace
@@ -95,13 +95,18 @@ int main() {
     Register(&registry, aEndpoint, "common", "a",
              "ipv4_relay,nat_punch");
     Register(&registry, bEndpoint, "common", "b", "nat_punch");
-    Expect(ReceiveControl(a, &type, &fields) && type == "REGISTERED",
+    Expect(ReceiveControl(a, &type, &fields) && type == "REGISTERED"
+               && fields.size() == 1
+               && fields[0] == kNatPunchProtocolVersion,
            "initiator registers capabilities");
-    Expect(ReceiveControl(b, &type, &fields) && type == "REGISTERED",
+    Expect(ReceiveControl(b, &type, &fields) && type == "REGISTERED"
+               && fields.size() == 1
+               && fields[0] == kNatPunchProtocolVersion,
            "waiting peer registers capabilities");
 
     registry.Handle(aEndpoint, "CONNECT",
-        {"common", "a", "b", "ipv4_relay,nat_punch", ""},
+        {"common", "a", "b", "ipv4_relay,nat_punch",
+         kNatPunchProtocolVersion, ""},
         std::chrono::steady_clock::now());
     Expect(ReceiveControl(a, &type, &fields) && type == "PEER"
                && fields.size() == 10
@@ -127,6 +132,29 @@ int main() {
     parserConfig.peer_id = "a";
     parserConfig.target_peer_id = "b";
     RendezvousClient responseParser(parserConfig, aEndpoint);
+    const std::string legacyRegisteredPacket =
+        MakeControlMessage("REGISTERED");
+    const RendezvousEvent legacyRegistered = responseParser.HandlePacket(
+        aEndpoint,
+        reinterpret_cast<const uint8_t*>(legacyRegisteredPacket.data()),
+        legacyRegisteredPacket.size());
+    Expect(legacyRegistered.type == RendezvousEventType::Error
+               && legacyRegistered.error.find("version mismatch")
+                    != std::string::npos
+               && legacyRegistered.error.find("received legacy")
+                    != std::string::npos,
+           "client reports an explicit error for a legacy server handshake");
+
+    const std::string versionErrorPacket = MakeControlMessage("ERROR",
+        {"nat-punch-version-mismatch", kNatPunchProtocolVersion, "1"});
+    const RendezvousEvent versionError = responseParser.HandlePacket(
+        aEndpoint, reinterpret_cast<const uint8_t*>(versionErrorPacket.data()),
+        versionErrorPacket.size());
+    Expect(versionError.type == RendezvousEventType::Error
+               && versionError.error.find("expected 2, received 1")
+                    != std::string::npos,
+           "client formats the server's protocol mismatch response");
+
     const std::string peerPacket = MakeControlMessage("PEER",
         {"203.0.113.20", "41000", "b", "nat_punch", "nat_punch",
          natSession, natAttempt, "initiator", "2", natPunchToken});
@@ -140,6 +168,18 @@ int main() {
                && parsedPeer.natPunchToken == natPunchToken,
            "client parses NAT session metadata from PEER");
 
+    const std::string incompatiblePeerPacket = MakeControlMessage("PEER",
+        {"203.0.113.20", "41000", "b", "nat_punch", "nat_punch",
+         natSession, natAttempt, "initiator", "1", natPunchToken});
+    const RendezvousEvent incompatiblePeer = responseParser.HandlePacket(
+        aEndpoint,
+        reinterpret_cast<const uint8_t*>(incompatiblePeerPacket.data()),
+        incompatiblePeerPacket.size());
+    Expect(incompatiblePeer.type == RendezvousEventType::Error
+               && incompatiblePeer.error.find("expected 2, received 1")
+                    != std::string::npos,
+           "client distinguishes an incompatible PEER from malformed data");
+
     const std::string peerInfoPacket = MakeControlMessage("NAT_PEER_INFO",
         {natSession, natAttempt, "b", "port-dependent-regular",
          "203.0.113.20", "41000", "203.0.113.20", "41002", "-",
@@ -152,6 +192,20 @@ int main() {
                && FormatUdpEndpoint(parsedPeerInfo.natPeerInfo.mappedB)
                     == "203.0.113.20:41002",
            "client parses peer STUN mappings from NAT_PEER_INFO");
+
+    const std::string incompatiblePeerInfoPacket = MakeControlMessage(
+        "NAT_PEER_INFO",
+        {natSession, natAttempt, "b", "port-dependent-regular",
+         "203.0.113.20", "41000", "203.0.113.20", "41002", "-",
+         "initiator", "1"});
+    const RendezvousEvent incompatiblePeerInfo = responseParser.HandlePacket(
+        aEndpoint,
+        reinterpret_cast<const uint8_t*>(incompatiblePeerInfoPacket.data()),
+        incompatiblePeerInfoPacket.size());
+    Expect(incompatiblePeerInfo.type == RendezvousEventType::Error
+               && incompatiblePeerInfo.error.find("expected 2, received 1")
+                    != std::string::npos,
+           "client reports incompatible NAT_PEER_INFO protocol versions");
 
     UdpEndpoint aPunchEndpoint{};
     UdpEndpoint bPunchEndpoint{};
@@ -297,6 +351,18 @@ int main() {
                && parsedAttempt.natPunchToken == nextPunchToken,
            "client parses synchronized retry metadata");
 
+    const std::string incompatibleAttemptPacket = MakeControlMessage(
+        "NAT_ATTEMPT",
+        {natSession, nextAttempt, "initiator", "1", nextPunchToken});
+    const RendezvousEvent incompatibleAttempt = responseParser.HandlePacket(
+        aEndpoint,
+        reinterpret_cast<const uint8_t*>(incompatibleAttemptPacket.data()),
+        incompatibleAttemptPacket.size());
+    Expect(incompatibleAttempt.type == RendezvousEventType::Error
+               && incompatibleAttempt.error.find("expected 2, received 1")
+                    != std::string::npos,
+           "client reports incompatible retry protocol versions");
+
     registry.Handle(aEndpoint, "NAT_RETRY",
         {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
@@ -332,15 +398,40 @@ int main() {
                && fields[0] == "invalid-nat-session",
            "future retry attempt is rejected instead of skipping synchronization");
 
+    registry.Handle(cEndpoint, "REG",
+        {"legacy", "legacy-client", "nat_punch", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(c, &type, &fields) && type == "ERROR"
+               && fields.size() == 3
+               && fields[0] == "nat-punch-version-mismatch"
+               && fields[1] == kNatPunchProtocolVersion
+               && fields[2] == "legacy",
+           "server rejects a legacy registration with an explicit version error");
+
+    registry.Handle(cEndpoint, "REG",
+        {"wrong-version", "wrong-version-client", "nat_punch", "1", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(c, &type, &fields) && type == "ERROR"
+               && fields.size() == 3
+               && fields[0] == "nat-punch-version-mismatch"
+               && fields[1] == kNatPunchProtocolVersion
+               && fields[2] == "1",
+           "server rejects an explicit incompatible registration version");
+
     Register(&registry, cEndpoint, "incompatible", "c", "ipv6");
     Register(&registry, dEndpoint, "incompatible", "d", "ipv4_relay");
-    Expect(ReceiveControl(c, &type, &fields) && type == "REGISTERED",
+    Expect(ReceiveControl(c, &type, &fields) && type == "REGISTERED"
+               && fields.size() == 1
+               && fields[0] == kNatPunchProtocolVersion,
            "incompatible initiator registers");
-    Expect(ReceiveControl(d, &type, &fields) && type == "REGISTERED",
+    Expect(ReceiveControl(d, &type, &fields) && type == "REGISTERED"
+               && fields.size() == 1
+               && fields[0] == kNatPunchProtocolVersion,
            "incompatible waiting peer registers");
 
     registry.Handle(cEndpoint, "CONNECT",
-        {"incompatible", "c", "d", "ipv6", ""},
+        {"incompatible", "c", "d", "ipv6",
+         kNatPunchProtocolVersion, ""},
         std::chrono::steady_clock::now());
     Expect(ReceiveControl(c, &type, &fields) && type == "ERROR"
                && fields.size() == 2

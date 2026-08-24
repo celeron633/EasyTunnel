@@ -13,7 +13,6 @@ constexpr const char* kNoResponseError = "Rendezvous server did not respond";
 constexpr size_t kClientFields = 5;
 constexpr size_t kMaxControlMessageBytes = 8192;
 constexpr const char* kUnknownField = "-";
-constexpr const char* kNatPunchProtocolVersion = "2";
 
 bool Send(socket_t sock, const UdpEndpoint& endpoint, const std::string& data) {
     return sendto(sock, data.data(), static_cast<int>(data.size()), 0,
@@ -132,6 +131,18 @@ RendezvousEvent InvalidResponse() {
     event.error = "Invalid rendezvous response";
     return event;
 }
+
+RendezvousEvent ProtocolVersionMismatch(const std::string& received) {
+    RendezvousEvent event;
+    event.type = RendezvousEventType::Error;
+    const std::string safeReceived = IsSafeControlField(received)
+        ? received : received.empty() ? "legacy" : "invalid";
+    event.error = "NAT punch protocol version mismatch: expected "
+        + std::string(kNatPunchProtocolVersion) + ", received "
+        + safeReceived
+        + "; update EasyTunnel clients and rendezvous server together";
+    return event;
+}
 }  // namespace
 
 RendezvousClient::RendezvousClient(const Config& config,
@@ -145,11 +156,12 @@ bool RendezvousClient::SendProbe(socket_t sock) const {
     const std::string capabilities = SerializeTraversalModeSequence(
         EnabledTraversalModes(config_.traversal_modes));
     bool sent = Send(sock, server_, MakeControlMessage("REG",
-        {config_.room_id, config_.peer_id, capabilities, config_.auth_token}));
+        {config_.room_id, config_.peer_id, capabilities,
+         kNatPunchProtocolVersion, config_.auth_token}));
     if (!config_.target_peer_id.empty()) {
         sent = Send(sock, server_, MakeControlMessage("CONNECT",
             {config_.room_id, config_.peer_id,
-             config_.target_peer_id, capabilities,
+             config_.target_peer_id, capabilities, kNatPunchProtocolVersion,
              config_.auth_token})) && sent;
     }
     return sent;
@@ -211,6 +223,13 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
 
     RendezvousEvent event;
     if (type == "REGISTERED") {
+        if (fields.size() != 1) {
+            return ProtocolVersionMismatch(
+                fields.empty() ? "legacy" : fields[0]);
+        }
+        if (fields[0] != kNatPunchProtocolVersion) {
+            return ProtocolVersionMismatch(fields[0]);
+        }
         event.type = RendezvousEventType::Registered;
         return event;
     }
@@ -230,6 +249,9 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
             event.error = "Peer " + config_.target_peer_id
                 + " does not support any enabled traversal mode"
                 + " (peer supports: " + fields[1] + ")";
+        } else if (fields.size() == 3
+                   && fields[0] == "nat-punch-version-mismatch") {
+            return ProtocolVersionMismatch(fields[2]);
         } else {
             event.type = RendezvousEventType::Error;
             event.error = fields.empty()
@@ -239,9 +261,14 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
         return event;
     }
     if (type == "PEER") {
+        if (fields.size() != 10) {
+            return ProtocolVersionMismatch("legacy");
+        }
+        if (fields[8] != kNatPunchProtocolVersion) {
+            return ProtocolVersionMismatch(fields[8]);
+        }
         std::string parseError;
-        if (fields.size() != 10
-            || !ParsePeer(fields, &event.peer, &event.peerId)
+        if (!ParsePeer(fields, &event.peer, &event.peerId)
             || !ParseTraversalModeSequence(
                 fields[3], &event.peerCapabilities, &parseError)
             || !ParseTraversalModeSequence(
@@ -249,7 +276,6 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
             || !IsSafeControlField(fields[5])
             || !ParseAttemptId(fields[6], &event.attemptId)
             || !ParseRole(fields[7], &event.natPunchRole)
-            || fields[8] != kNatPunchProtocolVersion
             || !IsSafeControlField(fields[9])
             || event.traversalModes.empty()) {
             return InvalidResponse();
@@ -285,10 +311,15 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
         return event;
     }
     if (type == "NAT_ATTEMPT") {
-        if (fields.size() != 5 || !IsSafeControlField(fields[0])
+        if (fields.size() != 5) {
+            return ProtocolVersionMismatch("legacy");
+        }
+        if (fields[3] != kNatPunchProtocolVersion) {
+            return ProtocolVersionMismatch(fields[3]);
+        }
+        if (!IsSafeControlField(fields[0])
             || !ParseAttemptId(fields[1], &event.attemptId)
             || !ParseRole(fields[2], &event.natPunchRole)
-            || fields[3] != kNatPunchProtocolVersion
             || fields[4].empty() || !IsSafeControlField(fields[4])) {
             return InvalidResponse();
         }
@@ -299,7 +330,13 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
         return event;
     }
     if (type == "NAT_PEER_INFO") {
-        if (fields.size() != 11 || !IsSafeControlField(fields[0])
+        if (fields.size() != 11) {
+            return ProtocolVersionMismatch("legacy");
+        }
+        if (fields[10] != kNatPunchProtocolVersion) {
+            return ProtocolVersionMismatch(fields[10]);
+        }
+        if (!IsSafeControlField(fields[0])
             || !ParseAttemptId(fields[1], &event.attemptId)
             || !IsSafeControlField(fields[2])
             || !IsNatMappingBehavior(fields[3])
@@ -308,8 +345,7 @@ RendezvousEvent RendezvousClient::HandlePacket(const UdpEndpoint& source,
             || !ParseMappedEndpoint(fields[6], fields[7],
                                     &event.natPeerInfo.mappedB)
             || !IsSafeControlField(fields[8])
-            || !ParseRole(fields[9], &event.natPunchRole)
-            || fields[10] != kNatPunchProtocolVersion) {
+            || !ParseRole(fields[9], &event.natPunchRole)) {
             return InvalidResponse();
         }
         event.sessionId = fields[0];
