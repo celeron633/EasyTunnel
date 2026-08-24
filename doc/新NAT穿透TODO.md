@@ -164,6 +164,8 @@ frp xTCP 的流程、五种模式和源码索引见
       集成测试覆盖最大池在 barrier 取消和 PUNCH 超时后的自动回收。
 - [x] 增加低 TTL unit test，覆盖 `IP_TTL` 设置、显式/析构恢复、无效 socket 和可取消
       sender delay；集成测试覆盖 Mode 2 TTL 4 与 Mode 4 TTL 7 双端成功路径。
+- [x] 将 `NAT_ARMED` 屏障限制为不超过 8 秒，记录本端 ACK 和屏障耗时；集成测试覆盖
+      首批 ARMED 报文丢失重传、正常启动以及对端未就绪时的快速超时。
 
 ### 待完成
 

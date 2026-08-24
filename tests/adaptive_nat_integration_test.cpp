@@ -138,9 +138,15 @@ struct InterruptedPunchResult {
     std::string error;
 };
 
+enum class InterruptedPunchMode {
+    CancelAtBarrier,
+    PunchTimeout,
+    BarrierTimeout,
+};
+
 InterruptedPunchResult RunInterruptedRandomReceiver(
         Config easyConfig, Config randomConfig,
-        const UdpEndpoint& rendezvousEndpoint, bool cancelAtBarrier,
+        const UdpEndpoint& rendezvousEndpoint, InterruptedPunchMode mode,
         int sequence) {
     InterruptedPunchResult result;
     easyConfig.room_id = "interrupt-" + std::to_string(sequence);
@@ -149,7 +155,8 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     randomConfig.room_id = easyConfig.room_id;
     randomConfig.peer_id = "random";
     randomConfig.target_peer_id.clear();
-    randomConfig.punch_timeout = cancelAtBarrier ? 5 : 2;
+    randomConfig.punch_timeout = mode == InterruptedPunchMode::CancelAtBarrier
+        ? 5 : mode == InterruptedPunchMode::PunchTimeout ? 2 : 30;
 
     socket_t easyControl = kInvalidSocket;
     socket_t randomControl = kInvalidSocket;
@@ -206,9 +213,11 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     result.setup = true;
     RendezvousClient easyRendezvous(easyConfig, rendezvousEndpoint);
     std::thread randomPunchThread([&] {
+        const uint16_t attemptNumber =
+            mode == InterruptedPunchMode::BarrierTimeout ? 1 : 3;
         result.punched = PunchAdaptiveNat(&randomControl, randomConfig,
             randomServer, running, randomPeerId, randomSession,
-            &randomPeer, &result.error, &result.attempt, 3);
+            &randomPeer, &result.error, &result.attempt, attemptNumber);
     });
 
     if (easyRendezvous.SendNatInfo(easyPunch, easyPeerId,
@@ -218,11 +227,12 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
         result.peerInfoReceived = WaitForNatPeerInfo(
             easyPunch, &easyRendezvous, easySession, easyPeerId);
     }
-    if (!cancelAtBarrier && result.peerInfoReceived) {
+    if (mode == InterruptedPunchMode::PunchTimeout
+        && result.peerInfoReceived) {
         easyRendezvous.SendNatArmed(easyPunch, easyPeerId,
             easySession.sessionId, easySession.attemptId);
     }
-    if (cancelAtBarrier) {
+    if (mode == InterruptedPunchMode::CancelAtBarrier) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         running.store(false);
     }
@@ -322,6 +332,11 @@ int main() {
     }
 #endif
 
+    Expect(LimitNatPunchBarrierWaitMs(30000) == 8000
+               && LimitNatPunchBarrierWaitMs(2500) == 2500
+               && LimitNatPunchBarrierWaitMs(0) == 0,
+           "barrier wait is capped without extending attempt time");
+
     UdpEndpoint rendezvousEndpoint{};
     UdpEndpoint stunAEndpoint{};
     UdpEndpoint stunBEndpoint{};
@@ -358,6 +373,7 @@ int main() {
     rendezvousConfig.clientTimeoutSeconds = 30;
     RendezvousRegistry registry(rendezvousSocket, rendezvousConfig);
     std::atomic<bool> servicesRunning{true};
+    std::atomic<int> natArmedDropsRemaining{0};
 
     std::thread rendezvousThread([&] {
         std::vector<uint8_t> buffer(8192);
@@ -374,6 +390,11 @@ int main() {
             std::vector<std::string> fields;
             if (!ParseControlMessage(buffer.data(),
                     static_cast<size_t>(received), &type, &fields)) {
+                continue;
+            }
+            if (type == "NAT_ARMED"
+                && natArmedDropsRemaining.load() > 0) {
+                natArmedDropsRemaining.fetch_sub(1);
                 continue;
             }
             registry.Handle(FromSockaddr(sourceAddress, sourceLen),
@@ -502,6 +523,7 @@ int main() {
     NatPunchAttemptResult aAttempt;
     NatPunchAttemptResult bAttempt;
     if (aSelected && bSelected) {
+        natArmedDropsRemaining.store(2);
         std::thread aPunchThread([&] {
             aPunched = PunchAdaptiveNat(&aSocket, aConfig, aServer,
                 clientsRunning, aPeerId, aSession, &aPeer, &aError,
@@ -517,6 +539,8 @@ int main() {
     }
     Expect(aPunched && bPunched,
            "two clients complete STUN, barrier and PUNCH");
+    Expect(natArmedDropsRemaining.load() == 0,
+           "clients retransmit NAT_ARMED after initial packet loss");
     if (!aPunched) std::cerr << "A error: " << aError << '\n';
     if (!bPunched) std::cerr << "B error: " << bError << '\n';
     Expect(aPeer.family == AF_INET && bPeer.family == AF_INET,
@@ -537,6 +561,10 @@ int main() {
                && aAttempt.executionRole == "sender"
                && aAttempt.prePunchTtl == 0
                && aAttempt.senderDelayMs == 1000
+               && (aAttempt.barrierArmedAcknowledged
+                   || bAttempt.barrierArmedAcknowledged)
+               && aAttempt.barrierElapsedMs < 3000
+               && bAttempt.barrierElapsedMs < 3000
                && bAttempt.executionRole == "receiver"
                && bAttempt.prePunchTtl == 4
                && bAttempt.senderDelayMs == 0
@@ -553,17 +581,27 @@ int main() {
                     != std::string::npos
                && attemptSummary.find("sender_delay_ms=1000")
                     != std::string::npos
+               && attemptSummary.find("barrier_armed_ack=")
+                    != std::string::npos
+               && attemptSummary.find("barrier_elapsed_ms=")
+                    != std::string::npos
                && attemptSummary.find("attempt="
                    + std::to_string(aSession.attemptId)) != std::string::npos,
            "formatted attempt summary exposes correlated result fields");
 
     NatPunchAttemptResult failureSummary;
     failureSummary.outcome = NatPunchAttemptOutcome::BarrierTimeout;
+    failureSummary.barrierArmedAcknowledged = true;
+    failureSummary.barrierElapsedMs = 8000;
     failureSummary.detail = "barrier timed out\nfalling back";
     const std::string formattedFailure =
         FormatNatPunchAttemptResult(failureSummary);
     Expect(formattedFailure.find("outcome=barrier-timeout")
                != std::string::npos
+               && formattedFailure.find("barrier_armed_ack=true")
+                    != std::string::npos
+               && formattedFailure.find("barrier_elapsed_ms=8000")
+                    != std::string::npos
                && formattedFailure.find('\n') == std::string::npos,
            "failure summary has a stable category and remains one line");
     Expect(std::string(NatPunchAttemptOutcomeName(
@@ -584,7 +622,8 @@ int main() {
            "only transient NAT attempt outcomes schedule another attempt");
 
     const InterruptedPunchResult cancelled = RunInterruptedRandomReceiver(
-        aConfig, bConfig, rendezvousEndpoint, true, 1);
+        aConfig, bConfig, rendezvousEndpoint,
+        InterruptedPunchMode::CancelAtBarrier, 1);
     Expect(cancelled.setup && cancelled.peerInfoReceived
                && !cancelled.punched
                && cancelled.attempt.outcome
@@ -597,7 +636,8 @@ int main() {
     }
 
     const InterruptedPunchResult timedOut = RunInterruptedRandomReceiver(
-        aConfig, bConfig, rendezvousEndpoint, false, 2);
+        aConfig, bConfig, rendezvousEndpoint,
+        InterruptedPunchMode::PunchTimeout, 2);
     Expect(timedOut.setup && timedOut.peerInfoReceived
                && !timedOut.punched
                && timedOut.attempt.outcome
@@ -608,6 +648,28 @@ int main() {
            "PUNCH timeout closes a maximum random receiver pool");
     if (timedOut.attempt.outcome != NatPunchAttemptOutcome::PunchTimeout) {
         std::cerr << "Timeout error: " << timedOut.error << '\n';
+    }
+
+    const InterruptedPunchResult barrierTimedOut =
+        RunInterruptedRandomReceiver(
+            aConfig, bConfig, rendezvousEndpoint,
+            InterruptedPunchMode::BarrierTimeout, 3);
+    Expect(barrierTimedOut.setup && barrierTimedOut.peerInfoReceived
+               && !barrierTimedOut.punched
+               && barrierTimedOut.attempt.outcome
+                      == NatPunchAttemptOutcome::BarrierTimeout
+               && barrierTimedOut.attempt.barrierArmedAcknowledged
+               && barrierTimedOut.attempt.barrierElapsedMs >= 7500
+               && barrierTimedOut.attempt.barrierElapsedMs < 12000
+               && barrierTimedOut.attempt.elapsedMs < 15000
+               && barrierTimedOut.attempt.datagramsSent == 0
+               && barrierTimedOut.error.find("peer did not become ready")
+                      != std::string::npos,
+           "barrier timeout is capped and reports acknowledged local state");
+    if (barrierTimedOut.attempt.outcome
+        != NatPunchAttemptOutcome::BarrierTimeout) {
+        std::cerr << "Barrier timeout error: "
+                  << barrierTimedOut.error << '\n';
     }
 
     Config regularConfig = aConfig;

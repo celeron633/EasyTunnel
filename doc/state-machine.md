@@ -146,7 +146,7 @@ liveness，不影响打洞计划。
 |---|---|---|
 | 首次会合响应 | 5 秒 | `Rendezvous server did not respond` |
 | 主动端选 Peer | `punch_timeout` | Error |
-| 单次 Adaptive NAT attempt | `punch_timeout` | 重试或下一个策略 |
+| 单次 Adaptive NAT attempt | `punch_timeout`；其中屏障最多等待 8 秒 | 重试或下一个策略 |
 | 等待双方同步新 attempt | `punch_timeout` + 5 秒 | 下一个策略 |
 | IPv6 | `ipv6_fallback_timeout` | 下一个策略 |
 | Relay 协商 | `punch_timeout` | 下一个策略 |

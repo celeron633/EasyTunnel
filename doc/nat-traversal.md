@@ -237,7 +237,8 @@ Punch token 用于阻止无关 UDP 包误接管连接，不加密后续 TUN 流�
 ## 超时与回退
 
 单次 adaptive NAT attempt（STUN、信息交换、屏障和直连确认）共享
-`punch_timeout`。`nat_punch_attempt_limit` 范围为 1～10、默认 3，包含第一次尝试；
+`punch_timeout`；屏障等待还会额外受 8 秒上限约束，并且不会延长该 attempt 的剩余时间。
+`nat_punch_attempt_limit` 范围为 1～10、默认 3，包含第一次尝试；
 每次重试重新创建 punch socket、重新执行 STUN，并使用新 attempt ID 和 token。
 STUN 超时、Peer 信息超时、屏障超时和 PUNCH 超时允许重试；无效配置、确定不支持的
 NAT 组合和控制协议错误不会盲目重试。达到上限后按 `traversal_modes` 继续 IPv6 或
@@ -255,5 +256,6 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
   random port-dependent，请启用 Relay。
 - `NAT mapping combination with multi-public-IP is unsupported`：两次 STUN 映射的公网
   IPv4 不同，当前无法按单地址预测或扫描，请启用 Relay。
-- `Timed out at the NAT synchronization barrier`：检查客户端/会合服务器版本是否一致，
-  以及 punch socket 到会合服务器的 UDP 返回流量。
+- `Timed out at the NAT synchronization barrier`：`barrier_armed_ack=false` 表示本端未收到
+  会合服务器确认，应检查版本和 punch socket 的 UDP 返回流量；值为 `true` 表示本端已
+  就绪但对端未在 8 秒内进入同一 attempt 的屏障。

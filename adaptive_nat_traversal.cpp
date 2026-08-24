@@ -18,6 +18,7 @@ constexpr int kStunTimeoutMs = 800;
 constexpr int kStunAttempts = 3;
 constexpr auto kControlRetryInterval = std::chrono::milliseconds(500);
 constexpr auto kAttemptRetryGrace = std::chrono::seconds(5);
+constexpr auto kBarrierTimeout = std::chrono::seconds(8);
 
 const char* NatPunchRoleName(NatPunchRole role) {
     switch (role) {
@@ -162,6 +163,14 @@ bool ReceiveDatagram(socket_t sock, std::vector<uint8_t>* buffer,
 
 }  // namespace
 
+uint32_t LimitNatPunchBarrierWaitMs(uint64_t remainingAttemptMs) {
+    const uint64_t barrierTimeoutMs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            kBarrierTimeout).count());
+    return static_cast<uint32_t>((std::min)(
+        remainingAttemptMs, barrierTimeoutMs));
+}
+
 const char* NatPunchAttemptOutcomeName(NatPunchAttemptOutcome outcome) {
     switch (outcome) {
         case NatPunchAttemptOutcome::InvalidInput: return "invalid-input";
@@ -214,6 +223,10 @@ std::string FormatNatPunchAttemptResult(
         + ", sender_delay_ms=" + std::to_string(result.senderDelayMs)
         + ", pre_punch_datagrams="
         + std::to_string(result.prePunchDatagrams)
+        + ", barrier_armed_ack="
+        + (result.barrierArmedAcknowledged ? "true" : "false")
+        + ", barrier_elapsed_ms="
+        + std::to_string(result.barrierElapsedMs)
         + ", wave_interval_ms=" + std::to_string(result.waveIntervalMs)
         + ", datagrams=" + std::to_string(result.datagramsSent)
         + "/" + std::to_string(result.datagramBudget)
@@ -525,9 +538,22 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         }
     }
 
+    const auto barrierStartedAt = std::chrono::steady_clock::now();
+    const auto remainingAttemptMs = std::chrono::duration_cast<
+        std::chrono::milliseconds>(deadline - barrierStartedAt).count();
+    const uint32_t barrierWaitMs = LimitNatPunchBarrierWaitMs(
+        static_cast<uint64_t>((std::max)(int64_t{0}, remainingAttemptMs)));
+    const auto barrierDeadline = barrierStartedAt
+        + std::chrono::milliseconds(barrierWaitMs);
+    const auto recordBarrierElapsed = [&]() {
+        attempt.barrierElapsedMs = static_cast<uint32_t>((std::max)(
+            int64_t{0}, std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - barrierStartedAt).count()));
+    };
     nextControlSend = std::chrono::steady_clock::time_point{};
     bool startReceived = false;
-    while (running.load() && std::chrono::steady_clock::now() < deadline) {
+    while (running.load()
+           && std::chrono::steady_clock::now() < barrierDeadline) {
         const auto now = std::chrono::steady_clock::now();
         if (now >= nextControlSend) {
             if (!rendezvous.SendNatArmed(
@@ -542,13 +568,20 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
         UdpEndpoint source{};
         int received = -1;
         if (!ReceiveDatagram(punchSocket, &buffer, &source, &received, error)) {
+            recordBarrierElapsed();
             return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
         if (received < 0) continue;
         const RendezvousEvent event = rendezvous.HandlePacket(
             source, buffer.data(), static_cast<size_t>(received));
         if (event.type == RendezvousEventType::Error) {
+            recordBarrierElapsed();
             return fail(NatPunchAttemptOutcome::ControlError, event.error);
+        }
+        if (event.type == RendezvousEventType::NatArmedAck
+            && MatchesSession(event, session)) {
+            attempt.barrierArmedAcknowledged = true;
+            continue;
         }
         if (event.type == RendezvousEventType::NatStart
             && MatchesSession(event, session)) {
@@ -556,13 +589,20 @@ bool PunchAdaptiveNat(socket_t* sock, const Config& cfg,
             break;
         }
     }
+    recordBarrierElapsed();
     if (!startReceived) {
         const bool stillRunning = running.load();
         return fail(stillRunning
                         ? NatPunchAttemptOutcome::BarrierTimeout
                         : NatPunchAttemptOutcome::Stopped,
                     stillRunning
-                        ? "Timed out at the NAT synchronization barrier"
+                        ? attempt.barrierArmedAcknowledged
+                            ? "Timed out at the NAT synchronization barrier; "
+                              "local NAT_ARMED was acknowledged but the peer "
+                              "did not become ready"
+                            : "Timed out at the NAT synchronization barrier; "
+                              "the rendezvous did not acknowledge local "
+                              "NAT_ARMED"
                         : "Adaptive NAT traversal stopped");
     }
 
