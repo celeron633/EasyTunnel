@@ -64,9 +64,9 @@ sequenceDiagram
     SA-->>B: XOR-MAPPED-ADDRESS A
     B->>SB: Binding Request
     SB-->>B: XOR-MAPPED-ADDRESS B
-    A->>R: NAT_INFO(session, attempt, mappings)
+    A->>R: NAT_INFO(session, attempt, mappings) (control socket)
     R-->>A: NAT_WAIT
-    B->>R: NAT_INFO(session, attempt, mappings)
+    B->>R: NAT_INFO(session, attempt, mappings) (control socket)
     R-->>A: NAT_PEER_INFO(B)
     R-->>B: NAT_PEER_INFO(A)
     A->>R: NAT_ARMED
@@ -82,9 +82,10 @@ attempt 1 直接进入屏障；attempt 2/3 的 receiver 分别以 TTL 7/TTL 4 �
 预打洞包，恢复 socket 原 TTL 后再发送 `NAT_ARMED`。收到 `NAT_START` 后，sender
 执行最多 1 秒且不超过剩余 attempt 时间四分之一的可取消延迟，然后进入正常 PUNCH。
 
-控制 socket 负责 REG/CONNECT；独立 punch socket 负责 STUN、`NAT_INFO` 和 Peer 打洞。
+控制 socket 负责 REG/CONNECT、NAT 信息交换、屏障和 attempt 重试；独立 punch socket
+只负责 STUN、预打洞和 Peer PUNCH。协议 v3 拒绝 punch socket 上的 NAT 同步消息。
 成功时关闭控制 socket，并让 punch socket 直接进入数据面；失败时关闭 punch socket，
-控制 socket 仍可继续 IPv6/Relay。
+控制 socket 仍可继续下一 attempt 或 IPv6/Relay。
 
 当前计划支持 easy/easy Direct、regular/easy Range、hard/hard regular dual-range，
 easy/random 的 bounded random sender/receiver，以及 regular/random 的 mixed random

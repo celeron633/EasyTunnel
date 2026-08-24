@@ -70,12 +70,12 @@ transaction ID，并包含合法的 `XOR-MAPPED-ADDRESS`。
 - 单调 `attempt_id`；
 - initiator/responder 角色；
 - 256-bit 随机 punch token；
-- punch protocol version `2`。
+- punch protocol version `3`。
 
 这些字段随扩展后的 `PEER` 返回。新客户端不接受旧格式 `PEER`，因此客户端和会合
 服务器需要一起升级。
 
-每端随后从独立 punch socket 发送：
+每端随后从已经完成注册和 Peer 选择的 control socket 发送：
 
 ```text
 NAT_INFO(room, self, peer, session, attempt, version,
@@ -83,12 +83,18 @@ NAT_INFO(room, self, peer, session, attempt, version,
          mapped_B_ip, mapped_B_port, local_candidates, auth_token)
 ```
 
-服务器只校验并转发双方报告，不预测端口。第一端收到 `NAT_WAIT`；两端报告完成后
-分别收到 `NAT_PEER_INFO`。客户端本地用相同输入运行 `BuildNatPunchPlan`。
+服务器要求 `NAT_INFO` 来自登记的 control endpoint，只校验并转发双方报告，不预测
+端口。第一端通过 control socket 收到 `NAT_WAIT`；两端报告完成后分别收到
+`NAT_PEER_INFO`。客户端本地用相同输入运行 `BuildNatPunchPlan`。
 
 计划就绪后双方发送 `NAT_ARMED`。服务器先向单独到达的一端返回
-`NAT_ARMED_ACK`，双方都 armed 后向两个 punch socket 发送 `NAT_START`。重复的
-`NAT_INFO`、`NAT_ARMED` 会重发当前响应，以覆盖 UDP 丢包。
+`NAT_ARMED_ACK`，双方都 armed 后向两个 control socket 发送 `NAT_START`。重复的
+`NAT_INFO`、`NAT_ARMED` 会重发当前响应，以覆盖 UDP 丢包。协议 v3 明确拒绝从
+punch socket 发来的 NAT 信息和屏障消息，不提供旧通道行为的兼容路径。
+
+punch socket 在完成 STUN B 后不再访问会合服务器；它的下一个公网目标直接来自打洞
+计划。这既避免依赖会合服务器到临时 punch 映射的回包路径，也避免 regular NAT 因访问
+额外目标消耗一次端口递增，使 `B + delta` 更接近真正的 Peer 映射。
 
 一次可重试失败后，双方从原控制 socket 重复发送：
 
@@ -267,7 +273,7 @@ Disconnect 会通过 winner socket 连续发送 3 份会话认证的 `PEER_CLOSE
 - `NAT mapping combination with multi-public-IP is unsupported`：两次 STUN 映射的公网
   IPv4 不同，当前无法按单地址预测或扫描，请启用 Relay。
 - `Timed out at the NAT synchronization barrier`：`barrier_armed_ack=false` 表示本端未收到
-  会合服务器确认，应检查版本和 punch socket 的 UDP 返回流量；值为 `true` 表示本端已
+  会合服务器确认，应检查版本和 control socket 的 UDP 返回流量；值为 `true` 表示本端已
   就绪但对端未在 8 秒内进入同一 attempt 的屏障。
 - `NAT punch protocol version mismatch`：客户端、对端或会合服务器版本不一致，需要同步
   升级；当前版本不会回退到旧 NAT/NAT4 协议。

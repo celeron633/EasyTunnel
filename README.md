@@ -39,7 +39,7 @@ EasyTunnel 是一个面向 IPv4 的点对点 TUN-over-UDP 隧道，支持通过�
 
 客户端使用两台独立公网 IPv4 STUN 服务从同一个 punch socket 探测映射；会合服务器只交换双方 STUN 结果、分配 session/attempt 并同步开始时间，不再预测 NAT 端口。收到合法 `PUNCH` 的 punch socket 直接接管隧道数据面。
 
-客户端代码中，`stun_client.cpp` 负责 RFC 8489 Binding，`nat_punch_plan.cpp` 负责动态计划，`adaptive_nat_traversal.cpp` 负责完整打洞状态机，`rendezvous_client.cpp` 负责会合协议。STUN 探测和 Peer 打洞复用 punch socket，注册/选 Peer 使用独立控制 socket。
+客户端代码中，`stun_client.cpp` 负责 RFC 8489 Binding，`nat_punch_plan.cpp` 负责动态计划，`adaptive_nat_traversal.cpp` 负责完整打洞状态机，`rendezvous_client.cpp` 负责会合协议。STUN 探测、Peer 打洞和成功后的数据面复用 punch socket；注册、Peer 选择、NAT 信息交换和开始屏障始终使用独立控制 socket。
 
 ## 构建
 

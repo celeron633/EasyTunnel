@@ -120,6 +120,8 @@ frp xTCP 的流程、五种模式和源码索引见
       punch token。
 - [x] 增加 `NAT_INFO` / `NAT_PEER_INFO`，交换双方 STUN 映射结果。
 - [x] 增加 `NAT_ARMED` / `NAT_START` 屏障，在双方准备完成后统一开始打洞。
+- [x] 协议 v3 将 `NAT_INFO`、`NAT_PEER_INFO` 和开始屏障固定在 control socket；
+      punch socket 只承担 STUN、预打洞、Peer PUNCH 和成功后的数据面。
 - [x] 为控制消息增加版本、字段长度、认证、会话、attempt 和来源端点校验。
 - [x] 会合服务器只保存短生命周期的 attempt 状态，不再分类 NAT 或推导打洞端口。
 - [x] 删除 `NAT4_JOIN` / `NAT4_WAIT` / `NAT4_PEER` 和服务端 NAT4 round 状态。
@@ -139,7 +141,7 @@ frp xTCP 的流程、五种模式和源码索引见
 
 #### 引擎、配置和测试
 
-- [x] 分离会合控制 socket 和 punch socket。
+- [x] 分离会合控制 socket 和 punch socket，并拒绝从 punch socket 发来的会合同步报文。
 - [x] 将旧 `nat`/`nat4` 能力收敛为一个 `nat_punch` 策略。
 - [x] 删除旧 NAT4 端口范围、offset、round timeout 和 round limit 配置。
 - [x] 失败后按照 `traversal_modes` 顺序继续尝试 IPv6 或 IPv4 Relay。
