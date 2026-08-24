@@ -169,6 +169,24 @@ int main() {
                && fields[1] == natAttempt,
            "first NAT report waits for its peer");
 
+    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields) && type == "ERROR"
+               && fields.size() == 1
+               && fields[0] == "invalid-nat-session",
+           "out-of-order NAT_ARMED is rejected before both NAT reports");
+
+    registry.Handle(aPunchEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt, "2",
+         "endpoint-independent", "198.51.100.10", "40000",
+         "198.51.100.10", "40000", "-", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_WAIT"
+               && fields.size() == 2 && fields[0] == natSession
+               && fields[1] == natAttempt,
+           "duplicate NAT_INFO resends NAT_WAIT after response loss");
+
     registry.Handle(bPunchEndpoint, "NAT_INFO",
         {"common", "b", "a", natSession, natAttempt, "2",
          "port-dependent-regular", "203.0.113.20", "41000",
@@ -187,12 +205,33 @@ int main() {
                && fields[9] == "responder",
            "responder receives the initiator's NAT report");
 
+    registry.Handle(aPunchEndpoint, "NAT_INFO",
+        {"common", "a", "b", natSession, natAttempt, "2",
+         "endpoint-independent", "198.51.100.10", "40000",
+         "198.51.100.10", "40000", "-", ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields)
+               && type == "NAT_PEER_INFO" && fields[0] == natSession
+               && fields[1] == natAttempt && fields[2] == "b",
+           "duplicate NAT_INFO restores lost initiator peer information");
+    Expect(ReceiveControl(bPunch, &type, &fields)
+               && type == "NAT_PEER_INFO" && fields[0] == natSession
+               && fields[1] == natAttempt && fields[2] == "a",
+           "duplicate NAT_INFO keeps both peer views synchronized");
+
     registry.Handle(aPunchEndpoint, "NAT_ARMED",
         {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
     Expect(ReceiveControl(aPunch, &type, &fields)
                && type == "NAT_ARMED_ACK",
            "first armed peer waits at the synchronization barrier");
+    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields)
+               && type == "NAT_ARMED_ACK"
+               && fields[0] == natSession && fields[1] == natAttempt,
+           "duplicate NAT_ARMED restores a lost barrier acknowledgement");
     registry.Handle(bPunchEndpoint, "NAT_ARMED",
         {"common", "b", "a", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
@@ -203,6 +242,16 @@ int main() {
                && fields[0] == natSession && fields[1] == natAttempt,
            "responder receives synchronized NAT start");
 
+    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields) && type == "NAT_START"
+               && fields[0] == natSession && fields[1] == natAttempt,
+           "duplicate NAT_ARMED restores a lost initiator NAT_START");
+    Expect(ReceiveControl(bPunch, &type, &fields) && type == "NAT_START"
+               && fields[0] == natSession && fields[1] == natAttempt,
+           "duplicate NAT_ARMED retransmits NAT_START to both peers");
+
     registry.Handle(aEndpoint, "NAT_RETRY",
         {"common", "a", "b", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
@@ -210,6 +259,13 @@ int main() {
                && fields.size() == 2 && fields[0] == natSession
                && fields[1] == natAttempt,
            "first retry request waits for its peer");
+    registry.Handle(aEndpoint, "NAT_RETRY",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(a, &type, &fields) && type == "NAT_RETRY_WAIT"
+               && fields.size() == 2 && fields[0] == natSession
+               && fields[1] == natAttempt,
+           "duplicate retry request keeps waiting on the same attempt");
     registry.Handle(bEndpoint, "NAT_RETRY",
         {"common", "b", "a", natSession, natAttempt, ""},
         std::chrono::steady_clock::now());
@@ -248,6 +304,14 @@ int main() {
                && fields[1] == nextAttempt,
            "stale retry request resends the current attempt");
 
+    registry.Handle(aPunchEndpoint, "NAT_ARMED",
+        {"common", "a", "b", natSession, natAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(aPunch, &type, &fields) && type == "ERROR"
+               && fields.size() == 1
+               && fields[0] == "invalid-nat-session",
+           "old attempt NAT_ARMED is rejected after retry synchronization");
+
     registry.Handle(aPunchEndpoint, "NAT_INFO",
         {"common", "a", "b", natSession, natAttempt, "2",
          "endpoint-independent", "198.51.100.10", "40000",
@@ -257,6 +321,16 @@ int main() {
                && fields.size() == 1
                && fields[0] == "invalid-nat-session",
            "old attempt NAT reports are rejected after retry synchronization");
+
+    const std::string futureAttempt = std::to_string(
+        std::stoull(nextAttempt) + 1);
+    registry.Handle(aEndpoint, "NAT_RETRY",
+        {"common", "a", "b", natSession, futureAttempt, ""},
+        std::chrono::steady_clock::now());
+    Expect(ReceiveControl(a, &type, &fields) && type == "ERROR"
+               && fields.size() == 1
+               && fields[0] == "invalid-nat-session",
+           "future retry attempt is rejected instead of skipping synchronization");
 
     Register(&registry, cEndpoint, "incompatible", "c", "ipv6");
     Register(&registry, dEndpoint, "incompatible", "d", "ipv4_relay");
