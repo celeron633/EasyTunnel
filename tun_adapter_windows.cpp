@@ -27,22 +27,32 @@ constexpr DWORD kWintunRingCapacity = 0x400000;
 constexpr DWORD kReadWaitMs = 500;
 
 std::string FormatNetworkError(NETIO_STATUS status) {
-	char* message = nullptr;
-	DWORD length = FormatMessageA(
+	wchar_t* message = nullptr;
+	DWORD length = FormatMessageW(
 		FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
 			FORMAT_MESSAGE_IGNORE_INSERTS,
 		nullptr, status, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-		reinterpret_cast<char*>(&message), 0, nullptr);
+		reinterpret_cast<wchar_t*>(&message), 0, nullptr);
 
 	std::string result = "error=" + std::to_string(status);
 	if (length != 0 && message != nullptr) {
 		while (length > 0 &&
-			   (message[length - 1] == '\r' || message[length - 1] == '\n')) {
-			message[--length] = '\0';
+			   (message[length - 1] == L'\r' || message[length - 1] == L'\n')) {
+			message[--length] = L'\0';
 		}
-		result += " (";
-		result += message;
-		result += ')';
+
+		const int utf8Length = WideCharToMultiByte(
+			CP_UTF8, 0, message, static_cast<int>(length),
+			nullptr, 0, nullptr, nullptr);
+		if (utf8Length > 0) {
+			std::string utf8Message(static_cast<size_t>(utf8Length), '\0');
+			WideCharToMultiByte(
+				CP_UTF8, 0, message, static_cast<int>(length),
+				utf8Message.data(), utf8Length, nullptr, nullptr);
+			result += " (";
+			result += utf8Message;
+			result += ')';
+		}
 	}
 	if (message != nullptr) {
 		LocalFree(message);
@@ -130,6 +140,9 @@ bool ConfigureTunMtu(const Config& cfg, const NET_LUID& adapterLuid) {
 		return false;
 	}
 
+	// GetIpInterfaceEntry may return a non-zero or sentinel site prefix for an
+	// IPv4 interface, but SetIpInterfaceEntry requires this field to be zero.
+	row.SitePrefixLength = 0;
 	row.NlMtu = cfg.tun_mtu;
 	status = SetIpInterfaceEntry(&row);
 	if (status != NO_ERROR) {
@@ -180,13 +193,11 @@ public:
 
 		if (cfg.auto_config_ipv4) {
 			if (!ConfigureTunIpv4(cfg, adapterLuid)) {
-				Log(LogLevel::Error,
-					"Failed to set adapter IPv4. Run as administrator.");
+				Log(LogLevel::Error, "Failed to set adapter IPv4.");
 				return false;
 			}
 			if (!ConfigureTunMtu(cfg, adapterLuid)) {
-				Log(LogLevel::Error,
-					"Failed to set adapter MTU. Run as administrator.");
+				Log(LogLevel::Error, "Failed to set adapter MTU.");
 				return false;
 			}
 		} else {
