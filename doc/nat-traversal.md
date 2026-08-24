@@ -250,6 +250,9 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
 每次 attempt 的 `punch_timeout` 和相邻 attempt 间的重试同步等待共同限制，实际发送量
 另受 profile 报文预算限制。
 
+结构化日志使用 `attempt_id` 表示会合服务器分配的单调 ID，使用 `attempt_index` 表示
+本地第几次尝试以及总尝试次数，二者不再共用 `attempt` 名称。
+
 `keepalive_interval` 和 `peer_timeout` 仅属于连接后的 NAT liveness，不参与打洞计划。
 
 ## 排障

@@ -168,6 +168,8 @@ frp xTCP 的流程、五种模式和源码索引见
       首批 ARMED 报文丢失重传、正常启动以及对端未就绪时的快速超时。
 - [x] 会合状态机测试覆盖提前/重复 `NAT_ARMED`、重复 `NAT_INFO`/`NAT_RETRY`、
       `NAT_START` 丢失重发，以及过期和未来 attempt 消息拒绝。
+- [x] 日志使用 `attempt_id` 表示服务端单调 ID，使用 `attempt_index` 表示本地尝试序号，
+      避免 `attempt 1/3` 与 `attempt=3` 同时出现造成歧义。
 
 ### 待完成
 

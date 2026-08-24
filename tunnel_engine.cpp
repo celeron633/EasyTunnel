@@ -193,12 +193,13 @@ void TunnelEngine::WorkerThread(Config cfg) {
 								"Trying NAT Punch attempt "
 								+ std::to_string(attemptNumber) + "/"
 								+ std::to_string(cfg.nat_punch_attempt_limit));
-							Log(LogLevel::Info, "Starting NAT punch attempt "
+							Log(LogLevel::Info, "Starting NAT punch attempt: session="
+								+ natPunchSession.sessionId
+								+ ", attempt_id="
+								+ std::to_string(natPunchSession.attemptId)
+								+ ", attempt_index="
 								+ std::to_string(attemptNumber) + "/"
-								+ std::to_string(cfg.nat_punch_attempt_limit)
-								+ "; session=" + natPunchSession.sessionId
-								+ ", attempt="
-								+ std::to_string(natPunchSession.attemptId));
+								+ std::to_string(cfg.nat_punch_attempt_limit));
 							NatPunchAttemptResult attemptResult;
 							traversalConnected = PunchAdaptiveNat(
 								&sock, cfg, server, running_, matchedPeerId,
@@ -211,8 +212,14 @@ void TunnelEngine::WorkerThread(Config cfg) {
 								break;
 							}
 
-							Log(LogLevel::Info, "Requesting another NAT punch attempt"
-								" after outcome="
+							Log(LogLevel::Info, "Requesting another NAT punch attempt:"
+								" session=" + natPunchSession.sessionId
+								+ ", attempt_id="
+								+ std::to_string(natPunchSession.attemptId)
+								+ ", attempt_index="
+								+ std::to_string(attemptNumber) + "/"
+								+ std::to_string(cfg.nat_punch_attempt_limit)
+								+ ", outcome="
 								+ std::string(NatPunchAttemptOutcomeName(
 									attemptResult.outcome)));
 							std::string retryError;

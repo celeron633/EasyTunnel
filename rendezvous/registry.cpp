@@ -340,7 +340,7 @@ struct RendezvousRegistry::Impl {
         }
 
         Log(LogLevel::Info, "NAT info ready room=" + fields[0]
-            + " session=" + fields[3] + " attempt=" + fields[4]
+            + " session=" + fields[3] + " attempt_id=" + fields[4]
             + " peer=" + current->first + " target=" + target->first);
         SendNatPeerInfo(&current->second, &target->second);
     }
@@ -375,7 +375,7 @@ struct RendezvousRegistry::Impl {
         SendMessage(sock, target->second.natPunch.endpoint,
                     "NAT_START", startFields);
         Log(LogLevel::Info, "NAT punch start room=" + fields[0]
-            + " session=" + fields[3] + " attempt=" + fields[4]);
+            + " session=" + fields[3] + " attempt_id=" + fields[4]);
     }
 
     void HandleNatRetry(Room& room, Room::iterator current,
@@ -435,8 +435,8 @@ struct RendezvousRegistry::Impl {
         SendNatAttempt(target->second);
         Log(LogLevel::Info, "NAT retry ready room=" + fields[0]
             + " session=" + fields[3]
-            + " previous_attempt=" + fields[4]
-            + " attempt=" + std::to_string(nextAttemptId));
+            + " previous_attempt_id=" + fields[4]
+            + " attempt_id=" + std::to_string(nextAttemptId));
     }
 
     void HandleConnect(Room& room, Room::iterator current,

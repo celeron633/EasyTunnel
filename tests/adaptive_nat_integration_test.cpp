@@ -585,9 +585,11 @@ int main() {
                     != std::string::npos
                && attemptSummary.find("barrier_elapsed_ms=")
                     != std::string::npos
-               && attemptSummary.find("attempt="
+               && attemptSummary.find("attempt_id="
                    + std::to_string(aSession.attemptId)) != std::string::npos,
            "formatted attempt summary exposes correlated result fields");
+    Expect(attemptSummary.find(", attempt=") == std::string::npos,
+           "attempt summary does not reuse attempt for two identifiers");
 
     NatPunchAttemptResult failureSummary;
     failureSummary.outcome = NatPunchAttemptOutcome::BarrierTimeout;

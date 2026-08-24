@@ -203,7 +203,7 @@ std::string FormatNatPunchAttemptResult(
         ? "-" : FormatUdpEndpoint(result.confirmedPeer);
     return "NAT punch attempt summary: session="
         + (result.sessionId.empty() ? "-" : result.sessionId)
-        + ", attempt=" + std::to_string(result.attemptId)
+        + ", attempt_id=" + std::to_string(result.attemptId)
         + ", attempt_index=" + std::to_string(result.attemptNumber)
         + ", local_peer="
         + (result.localPeerId.empty() ? "-" : result.localPeerId)
@@ -300,8 +300,8 @@ bool RequestNextNatPunchAttempt(socket_t sock, const Config& cfg,
         session->attemptId = event.attemptId;
         session->punchToken = event.natPunchToken;
         Log(LogLevel::Info, "NAT punch retry synchronized: session="
-            + session->sessionId + ", previous_attempt="
-            + std::to_string(previousAttemptId) + ", attempt="
+            + session->sessionId + ", previous_attempt_id="
+            + std::to_string(previousAttemptId) + ", attempt_id="
             + std::to_string(session->attemptId));
         return true;
     }
