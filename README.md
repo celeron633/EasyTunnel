@@ -107,6 +107,7 @@ make -f Makefile.rendezvous rendezvous
 - [TUN 数据面与 Windows/Linux 适配器](doc/tun.md)
 - [双 STUN、自适应 NAT Punch 与故障排查](doc/nat-traversal.md)
 - [新 NAT 穿透目的、开发 Roadmap、完成情况与后续 TODO](doc/新NAT穿透TODO.md)
+- [后续开发 Roadmap](doc/roadmap.md)
 - [IPv6 Fallback：启用条件、角色协商、协议与故障排查](doc/ipv6-fallback.md)
 - [IPv4 Relay Fallback：会话线程、协议、部署与故障排查](doc/ipv4-relay-fallback.md)
 
