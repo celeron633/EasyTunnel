@@ -46,7 +46,6 @@ const char* PhaseName(UiPhase phase) {
         case UiPhase::PollEvents: return "glfwPollEvents";
         case UiPhase::ProcessAutoWait: return "ProcessAutoWait";
         case UiPhase::WaitForNextFrame: return "wait-for-next-frame";
-        case UiPhase::WaitWhileHidden: return "wait-while-hidden";
         case UiPhase::OpenGLNewFrame: return "ImGui_ImplOpenGL3_NewFrame";
         case UiPhase::GlfwNewFrame: return "ImGui_ImplGlfw_NewFrame";
         case UiPhase::ImGuiNewFrame: return "ImGui::NewFrame";

@@ -20,7 +20,6 @@
 
 namespace {
 constexpr auto kVisibleFrameInterval = std::chrono::microseconds(16667);
-constexpr double kHiddenWindowWaitSeconds = 0.25;
 
 void GlfwErrorCallback(int error, const char* description) {
     Log(LogLevel::Error, "GLFW Error " + std::to_string(error) + ": " + description);
@@ -70,9 +69,7 @@ bool GuiApp::Init() {
         return false;
     }
     glfwMakeContextCurrent(window_);
-    // Some OpenGL drivers busy-wait for VSync, and some stop honoring VSync
-    // altogether while a window is hidden. Pace frames in Run() instead so a
-    // tray-resident client cannot consume a full CPU core.
+    // Some OpenGL drivers busy-wait for VSync. Pace frames in Run() instead.
     glfwSwapInterval(0);
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -107,24 +104,6 @@ void GuiApp::Run() {
         uiHeartbeat_->SetPhase(UiPhase::ProcessAutoWait);
         ProcessAutoWait();
 
-        int width = 0;
-        int height = 0;
-        glfwGetFramebufferSize(window_, &width, &height);
-        const bool windowVisible =
-            glfwGetWindowAttrib(window_, GLFW_VISIBLE) == GLFW_TRUE;
-        const bool windowIconified =
-            glfwGetWindowAttrib(window_, GLFW_ICONIFIED) == GLFW_TRUE;
-
-        if (!windowVisible || windowIconified || width <= 0 || height <= 0) {
-            uiHeartbeat_->UpdateWindowState(windowVisible, width, height, GL_NO_ERROR);
-            uiHeartbeat_->SetPhase(UiPhase::WaitWhileHidden);
-            glfwWaitEventsTimeout(kHiddenWindowWaitSeconds);
-            // Render immediately after a restore event rather than carrying a
-            // stale frame deadline over from the hidden state.
-            nextFrameAt = std::chrono::steady_clock::now();
-            continue;
-        }
-
         const auto now = std::chrono::steady_clock::now();
         if (now < nextFrameAt) {
             uiHeartbeat_->SetPhase(UiPhase::WaitForNextFrame);
@@ -147,6 +126,8 @@ void GuiApp::Run() {
         RenderFrame();
         uiHeartbeat_->SetPhase(UiPhase::ImGuiRender);
         ImGui::Render();
+        int width = 0;
+        int height = 0;
         uiHeartbeat_->SetPhase(UiPhase::GetFramebufferSize);
         glfwGetFramebufferSize(window_, &width, &height);
         uiHeartbeat_->SetPhase(UiPhase::OpenGLClear);
@@ -157,7 +138,8 @@ void GuiApp::Run() {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         const unsigned int glError = glGetError();
         uiHeartbeat_->UpdateWindowState(
-            windowVisible, width, height, glError);
+            glfwGetWindowAttrib(window_, GLFW_VISIBLE) == GLFW_TRUE,
+            width, height, glError);
         uiHeartbeat_->SetPhase(UiPhase::SwapBuffers);
         glfwSwapBuffers(window_);
         uiHeartbeat_->CompleteFrame();
