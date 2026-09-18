@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -154,6 +155,32 @@ void MainWindow::BuildTray() {
     trayDisconnectAction_ = menu->addAction(QStringLiteral("Disconnect"), this, [this] {
         Disconnect();
         stateDirty_.store(true);
+    });
+    menu->addSeparator();
+
+    // Mirrors of the Settings switches. Toggling one goes through the switch,
+    // so saving, the runtime auto-wait state and the scheduled task behave
+    // exactly as in Settings; the item then re-reads the switch, which the
+    // startup handler may have reverted.
+    auto addToggle = [this, menu](const QString& text, QCheckBox* source) {
+        QAction* action = menu->addAction(text);
+        action->setCheckable(true);
+        connect(action, &QAction::triggered, this, [action, source](bool checked) {
+            source->setChecked(checked);
+            action->setChecked(source->isChecked());
+        });
+        return action;
+    };
+    trayAutoWaitAction_ = addToggle(QStringLiteral("Auto wait for peer"), autoWaitCheck_);
+#ifdef _WIN32
+    trayStartWithWindowsAction_ =
+        addToggle(QStringLiteral("Start with Windows"), startWithWindowsCheck_);
+#endif
+    connect(menu, &QMenu::aboutToShow, this, [this] {
+        trayAutoWaitAction_->setChecked(autoWaitCheck_->isChecked());
+#ifdef _WIN32
+        trayStartWithWindowsAction_->setChecked(startWithWindowsCheck_->isChecked());
+#endif
     });
     menu->addSeparator();
     menu->addAction(QStringLiteral("Exit"), this, [this] { RequestExit(); });

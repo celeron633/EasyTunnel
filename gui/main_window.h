@@ -125,6 +125,7 @@ private:
 
     // Settings tab.
     std::vector<QWidget*> rendezvousIdentityFields_;
+    QCheckBox* autoWaitCheck_ = nullptr;
     QLabel* mtuWarning_ = nullptr;
     QTableWidget* traversalTable_ = nullptr;
     QPushButton* stunTestButton_ = nullptr;
@@ -143,6 +144,10 @@ private:
     QSystemTrayIcon* tray_ = nullptr;
     QLabel* trayStatusLabel_ = nullptr;
     QAction* trayDisconnectAction_ = nullptr;
+    QAction* trayAutoWaitAction_ = nullptr;
+#ifdef _WIN32
+    QAction* trayStartWithWindowsAction_ = nullptr;
+#endif
     std::array<QIcon, static_cast<std::size_t>(TrayMode::Count)> trayIcons_{};
     TrayMode trayMode_ = TrayMode::Count;
     bool exitConfirmed_ = false;

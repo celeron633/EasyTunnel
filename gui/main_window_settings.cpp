@@ -187,8 +187,9 @@ QWidget* MainWindow::BuildSettingsTab() {
                     autoWaitRetryDelaySecondsRuntime_.store(
                         config_.rendezvousRetryDelaySeconds);
                 });
-    AddCheckField(form, QStringLiteral("Auto wait for peer"), &config_.autoWaitForPeer,
-                  [this] { OnAutoWaitChanged(); });
+    autoWaitCheck_ = AddCheckField(form, QStringLiteral("Auto wait for peer"),
+                                   &config_.autoWaitForPeer,
+                                   [this] { OnAutoWaitChanged(); });
 
     // ---- NAT liveness ----
     form = AddSection(left, QStringLiteral("NAT liveness"));

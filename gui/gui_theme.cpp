@@ -40,7 +40,9 @@ public:
             DrawSwitch(option, painter);
             return;
         }
-        if (element == PE_IndicatorCheckBox || element == PE_IndicatorItemViewItemCheck) {
+        // Menu check marks too, so checkable tray items match the check boxes.
+        if (element == PE_IndicatorCheckBox || element == PE_IndicatorItemViewItemCheck
+            || element == PE_IndicatorMenuCheckMark) {
             DrawCheckBox(option, painter);
             return;
         }
