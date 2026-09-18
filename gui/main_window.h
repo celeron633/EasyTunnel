@@ -12,6 +12,7 @@
 
 #include <QIcon>
 #include <QMainWindow>
+#include <QStringList>
 
 #include "../client_config.h"
 #include "../rendezvous_client.h"
@@ -55,7 +56,7 @@ private:
     // moves the results into the widgets on the UI thread.
     void OnTick();
     void RefreshStateUi();
-    void UpdateLiveStats();
+    void UpdateActivity();
     void UpdateTrafficUi();
     void UpdateCharts();
     void UpdateTray(bool rxActive, bool txActive);
@@ -81,6 +82,8 @@ private:
                           std::function<void()> onChanged = {});
     QCheckBox* AddCheckField(QFormLayout* form, const QString& label, bool* target,
                              std::function<void()> onChanged = {});
+    void AddComboField(QFormLayout* form, const QString& label, const QStringList& items,
+                       int current, std::function<void(int)> onChanged);
     void RebuildTraversalTable();
     void OnAutoWaitChanged();
     void UpdateIdentityLabel();
@@ -144,10 +147,6 @@ private:
     QSystemTrayIcon* tray_ = nullptr;
     QLabel* trayStatusLabel_ = nullptr;
     QAction* trayDisconnectAction_ = nullptr;
-    QAction* trayAutoWaitAction_ = nullptr;
-#ifdef _WIN32
-    QAction* trayStartWithWindowsAction_ = nullptr;
-#endif
     std::array<QIcon, static_cast<std::size_t>(TrayMode::Count)> trayIcons_{};
     TrayMode trayMode_ = TrayMode::Count;
     bool exitConfirmed_ = false;
@@ -155,9 +154,8 @@ private:
     std::mutex statusMutex_;
     std::string statusMessage_ = "Disconnected";
     std::atomic<TunnelState> currentState_{TunnelState::Disconnected};
+    // Set by every state or status change; the tick then refreshes the UI.
     std::atomic<bool> stateDirty_{true};
-    TunnelState renderedState_ = TunnelState::Disconnected;
-    bool renderedWaiting_ = false;
 
     std::mutex logMutex_;
     std::vector<std::string> pendingLogLines_;
@@ -172,18 +170,12 @@ private:
 
     int statisticsTotalUnit_ = 0;
     int statisticsSpeedUnit_ = 0;
-    bool speedSampleInitialized_ = false;
-    uint64_t previousTxBytes_ = 0;
-    uint64_t previousRxBytes_ = 0;
-    double txBytesPerSecond_ = 0.0;
-    double rxBytesPerSecond_ = 0.0;
-    std::chrono::steady_clock::time_point lastSpeedSample_{};
     uint64_t observedTxPackets_ = 0;
     uint64_t observedRxPackets_ = 0;
     std::chrono::steady_clock::time_point lastTxActivity_{};
     std::chrono::steady_clock::time_point lastRxActivity_{};
+    // Per-second speed and latency samples for both the charts and the table.
     StatisticsHistory statisticsHistory_;
-    std::size_t renderedSampleCount_ = 0;
     std::chrono::system_clock::time_point renderedSampleTime_{};
 
     std::atomic<bool> autoWaitEnabledRuntime_{false};

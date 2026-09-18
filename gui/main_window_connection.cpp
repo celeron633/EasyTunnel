@@ -122,7 +122,6 @@ QWidget* MainWindow::BuildConnectionTab() {
     connect(waitButton_, &QPushButton::clicked, this, [this] {
         if (IsTunnelActive(currentState_.load())) Disconnect();
         else StartConnection("");
-        stateDirty_.store(true);
     });
     connect(connectButton_, &QPushButton::clicked, this, [this] { ConnectSelectedClient(); });
     connect(peerTable_, &QTableWidget::itemSelectionChanged, this,
@@ -237,6 +236,10 @@ void MainWindow::RebuildPeerTable() {
 void MainWindow::UpdateTrafficUi() {
     const auto& stats = engine_.GetStats();
     const auto now = std::chrono::steady_clock::now();
+    // Speeds come from the newest per-second sample, the same one the charts plot.
+    const auto& samples = statisticsHistory_.Samples();
+    const double txSpeed = samples.empty() ? 0.0 : samples.back().txKibPerSecond * 1024.0;
+    const double rxSpeed = samples.empty() ? 0.0 : samples.back().rxKibPerSecond * 1024.0;
     auto fill = [this, now](int row, const QColor& color,
                             std::chrono::steady_clock::time_point lastActivity,
                             uint64_t packets, uint64_t bytes, double bytesPerSecond) {
@@ -253,9 +256,9 @@ void MainWindow::UpdateTrafficUi() {
             FormatBytes(bytesPerSecond, statisticsSpeedUnit_, true));
     };
     fill(kTxRow, gui_theme::kTx, lastTxActivity_, stats.txPackets.load(),
-         stats.txBytes.load(), txBytesPerSecond_);
+         stats.txBytes.load(), txSpeed);
     fill(kRxRow, gui_theme::kRx, lastRxActivity_, stats.rxPackets.load(),
-         stats.rxBytes.load(), rxBytesPerSecond_);
+         stats.rxBytes.load(), rxSpeed);
 
     const int64_t rtt = stats.rttMilliseconds.load();
     const QString latency = rtt < 0 ? QStringLiteral("--") : QString::number(rtt);
@@ -267,10 +270,10 @@ void MainWindow::UpdateTrafficUi() {
 
 void MainWindow::UpdateCharts() {
     const auto& samples = statisticsHistory_.Samples();
+    // Every new sample carries a new timestamp, so the newest one identifies it.
     const auto newest = samples.empty()
         ? std::chrono::system_clock::time_point{} : samples.back().timestamp;
-    if (samples.size() == renderedSampleCount_ && newest == renderedSampleTime_) return;
-    renderedSampleCount_ = samples.size();
+    if (newest == renderedSampleTime_) return;
     renderedSampleTime_ = newest;
 
     std::vector<std::chrono::system_clock::time_point> times;
@@ -288,7 +291,9 @@ void MainWindow::UpdateCharts() {
     }
 }
 
-void MainWindow::UpdateLiveStats() {
+// Tracks when packets last moved in each direction, for the activity dots and
+// the tray icon.
+void MainWindow::UpdateActivity() {
     const auto& stats = engine_.GetStats();
     const auto now = std::chrono::steady_clock::now();
     const uint64_t txPackets = stats.txPackets.load();
@@ -301,25 +306,6 @@ void MainWindow::UpdateLiveStats() {
     const bool connected = currentState_.load() == TunnelState::Connected;
     UpdateTray(connected && now - lastRxActivity_ < kActivityWindow,
                connected && now - lastTxActivity_ < kActivityWindow);
-
-    const uint64_t txBytes = stats.txBytes.load();
-    const uint64_t rxBytes = stats.rxBytes.load();
-    if (!speedSampleInitialized_) {
-        previousTxBytes_ = txBytes;
-        previousRxBytes_ = rxBytes;
-        lastSpeedSample_ = now;
-        speedSampleInitialized_ = true;
-        return;
-    }
-    const double elapsed = std::chrono::duration<double>(now - lastSpeedSample_).count();
-    if (elapsed < 1.0) return;
-    const uint64_t txDelta = txBytes >= previousTxBytes_ ? txBytes - previousTxBytes_ : 0;
-    const uint64_t rxDelta = rxBytes >= previousRxBytes_ ? rxBytes - previousRxBytes_ : 0;
-    txBytesPerSecond_ = static_cast<double>(txDelta) / elapsed;
-    rxBytesPerSecond_ = static_cast<double>(rxDelta) / elapsed;
-    previousTxBytes_ = txBytes;
-    previousRxBytes_ = rxBytes;
-    lastSpeedSample_ = now;
 }
 
 bool MainWindow::StartConnection(const std::string& targetPeerId) {
@@ -334,6 +320,7 @@ bool MainWindow::StartConnection(const std::string& targetPeerId) {
     }
     const bool started = engine_.Start(ToEngineConfig(config_, targetPeerId));
     if (started) waitingForPeer_.store(targetPeerId.empty());
+    // waitingForPeer_ changes without a state callback; repaint explicitly.
     stateDirty_.store(true);
     return started;
 }

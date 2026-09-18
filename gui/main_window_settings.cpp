@@ -5,6 +5,7 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QEvent>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -18,7 +19,6 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
-#include <QWheelEvent>
 
 #include "../log.h"
 #include "../stun_client.h"
@@ -31,7 +31,6 @@ namespace {
 constexpr int kFormLabelWidth = 155;
 constexpr int kConfigSaveDelayMs = 400;
 constexpr int kConfigSaveMessageMs = 3000;
-const char* const kLogLevels[] = {"Debug", "Info", "Warn", "Error"};
 
 QFormLayout* AddSection(QVBoxLayout* column, const QString& title) {
     auto* box = new QGroupBox(title);
@@ -59,6 +58,7 @@ QLabel* MakeMessageLabel(const QColor& color) {
 
 // The settings page scrolls. Without this, a wheel turn that passes over a spin
 // box or combo box silently changes its value instead of scrolling the page.
+// Each guarded control owns its own filter.
 class WheelGuard : public QObject {
 public:
     using QObject::QObject;
@@ -74,16 +74,12 @@ protected:
     }
 };
 
-WheelGuard* wheelGuard = nullptr;
-
 template <typename Widget>
 Widget* GuardWheel(Widget* widget) {
     widget->setFocusPolicy(Qt::StrongFocus);
-    if (wheelGuard) widget->installEventFilter(wheelGuard);
+    widget->installEventFilter(new WheelGuard(widget));
     return widget;
 }
-
-QComboBox* MakeComboBox() { return GuardWheel(new QComboBox()); }
 
 QSpinBox* MakeSpinBox(int minimum, int maximum, int value) {
     auto* spin = GuardWheel(new QSpinBox());
@@ -137,10 +133,23 @@ QCheckBox* MainWindow::AddCheckField(QFormLayout* form, const QString& label,
     return check;
 }
 
+void MainWindow::AddComboField(QFormLayout* form, const QString& label,
+                               const QStringList& items, int current,
+                               std::function<void(int)> onChanged) {
+    auto* combo = GuardWheel(new QComboBox());
+    combo->addItems(items);
+    combo->setCurrentIndex(std::clamp(current, 0, static_cast<int>(items.size()) - 1));
+    connect(combo, &QComboBox::currentIndexChanged, this,
+            [this, onChanged = std::move(onChanged)](int index) {
+                onChanged(index);
+                ScheduleConfigSave();
+            });
+    AddRow(form, label, combo);
+}
+
 // Two balanced columns: session and timing settings on the left, the data path
 // on the right. Every accepted edit is saved through the shared config module.
 QWidget* MainWindow::BuildSettingsTab() {
-    wheelGuard = new WheelGuard(this);
     saveTimer_ = new QTimer(this);
     saveTimer_->setSingleShot(true);
     saveTimer_->setInterval(kConfigSaveDelayMs);
@@ -198,17 +207,12 @@ QWidget* MainWindow::BuildSettingsTab() {
     if (config_.stunServers.size() < 2) config_.stunServers.resize(2);
     AddIntField(form, QStringLiteral("Punch timeout (s)"), &config_.punchTimeout, 1, 600);
     AddIntField(form, QStringLiteral("Attempt limit"), &config_.natPunchAttemptLimit, 1, 10);
-    auto* profile = MakeComboBox();
-    profile->addItem(QString::fromLatin1(
-        NatPunchProfileDisplayName(NatPunchProfile::Balanced)));
-    profile->addItem(QString::fromLatin1(
-        NatPunchProfileDisplayName(NatPunchProfile::Aggressive)));
-    profile->setCurrentIndex(std::clamp(static_cast<int>(config_.natPunchProfile), 0, 1));
-    connect(profile, &QComboBox::currentIndexChanged, this, [this](int index) {
-        config_.natPunchProfile = static_cast<NatPunchProfile>(std::clamp(index, 0, 1));
-        ScheduleConfigSave();
-    });
-    AddRow(form, QStringLiteral("Profile"), profile);
+    AddComboField(form, QStringLiteral("Profile"),
+                  {QString::fromLatin1(NatPunchProfileDisplayName(NatPunchProfile::Balanced)),
+                   QString::fromLatin1(NatPunchProfileDisplayName(NatPunchProfile::Aggressive))},
+                  static_cast<int>(config_.natPunchProfile), [this](int index) {
+                      config_.natPunchProfile = static_cast<NatPunchProfile>(index);
+                  });
     const char* stunNames[] = {"STUN A", "STUN B"};
     for (std::size_t index = 0; index < 2; ++index) {
         const QString name = QString::fromLatin1(stunNames[index]);
@@ -235,14 +239,10 @@ QWidget* MainWindow::BuildSettingsTab() {
 
     // ---- Log and misc ----
     form = AddSection(left, QStringLiteral("Log and misc"));
-    auto* logLevel = MakeComboBox();
-    for (const char* level : kLogLevels) logLevel->addItem(QString::fromLatin1(level));
-    logLevel->setCurrentIndex(std::clamp(config_.logLevel, 0, 3));
-    connect(logLevel, &QComboBox::currentIndexChanged, this, [this](int index) {
-        config_.logLevel = std::clamp(index, 0, 3);
-        ScheduleConfigSave();
-    });
-    AddRow(form, QStringLiteral("Log level"), logLevel);
+    AddComboField(form, QStringLiteral("Log level"),
+                  {QStringLiteral("Debug"), QStringLiteral("Info"), QStringLiteral("Warn"),
+                   QStringLiteral("Error")},
+                  config_.logLevel, [this](int index) { config_.logLevel = index; });
     AddCheckField(form, QStringLiteral("1 KiB/s dummy traffic"),
                   &config_.dummyTrafficEnabled);
     if (QSystemTrayIcon::isSystemTrayAvailable()) {
@@ -280,7 +280,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     AddTextField(form, QStringLiteral("Adapter name"), &config_.adapterName);
     AddTextField(form, QStringLiteral("Local TUN IPv4"), &config_.localTunIpv4);
     AddIntField(form, QStringLiteral("TUN prefix"), &config_.tunPrefix, 0, 32);
-    mtuWarning_ = MakeMessageLabel(QColor(255, 204, 0));
+    mtuWarning_ = MakeMessageLabel(gui_theme::kWarning);
     mtuWarning_->setText(QStringLiteral("MTU > 1472 may cause outer IPv4 fragmentation"));
     AddIntField(form, QStringLiteral("TUN MTU"), &config_.tunMtu, 576, 9000,
                 [this] { mtuWarning_->setVisible(config_.tunMtu > 1472); });
@@ -307,6 +307,11 @@ QWidget* MainWindow::BuildSettingsTab() {
     traversalHeader->setSectionResizeMode(3, QHeaderView::Fixed);
     traversalHeader->resizeSection(3, 130);
     traversalTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    connect(traversalTable_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
+        if (item->column() != 0) return;
+        config_.traversalModes[item->row()].enabled = item->checkState() == Qt::Checked;
+        ScheduleConfigSave();
+    });
     traversalLayout->addWidget(traversalTable_);
     right->addWidget(traversalBox);
     RebuildTraversalTable();
@@ -335,23 +340,15 @@ QWidget* MainWindow::BuildSettingsTab() {
 }
 
 void MainWindow::RebuildTraversalTable() {
+    const QSignalBlocker blocker(traversalTable_);
     const int count = static_cast<int>(config_.traversalModes.size());
     traversalTable_->setRowCount(count);
     for (int row = 0; row < count; ++row) {
         const TraversalModeSetting& setting = config_.traversalModes[row];
-        // A real check box: item-view indicators vanish on the dark palette.
-        auto* enabledCell = new QWidget();
-        auto* enabledLayout = new QHBoxLayout(enabledCell);
-        enabledLayout->setContentsMargins(0, 0, 0, 0);
-        enabledLayout->setAlignment(Qt::AlignCenter);
-        auto* enabled = new QCheckBox(enabledCell);
-        enabled->setChecked(setting.enabled);
-        enabledLayout->addWidget(enabled);
-        connect(enabled, &QCheckBox::toggled, this, [this, row](bool checked) {
-            config_.traversalModes[row].enabled = checked;
-            ScheduleConfigSave();
-        });
-        traversalTable_->setCellWidget(row, 0, enabledCell);
+        auto* enabled = new QTableWidgetItem();
+        enabled->setFlags(Qt::ItemIsEnabled | Qt::ItemIsUserCheckable);
+        enabled->setCheckState(setting.enabled ? Qt::Checked : Qt::Unchecked);
+        traversalTable_->setItem(row, 0, enabled);
         auto* priority = new QTableWidgetItem(QString::number(row + 1));
         priority->setFlags(Qt::ItemIsEnabled);
         priority->setTextAlignment(Qt::AlignCenter);

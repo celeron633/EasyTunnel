@@ -18,10 +18,10 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidgetAction>
-#include <QWindowStateChangeEvent>
 
 #include "../log.h"
 #include "gui_theme.h"
+
 namespace {
 constexpr int kTickIntervalMs = 100;
 
@@ -152,10 +152,8 @@ void MainWindow::BuildTray() {
     menu->addAction(statusAction);
     menu->addSeparator();
     menu->addAction(QStringLiteral("Show window"), this, [this] { ShowFromTray(); });
-    trayDisconnectAction_ = menu->addAction(QStringLiteral("Disconnect"), this, [this] {
-        Disconnect();
-        stateDirty_.store(true);
-    });
+    trayDisconnectAction_ = menu->addAction(QStringLiteral("Disconnect"), this,
+                                            [this] { Disconnect(); });
     menu->addSeparator();
 
     // Mirrors of the Settings switches. Toggling one goes through the switch,
@@ -171,15 +169,15 @@ void MainWindow::BuildTray() {
         });
         return action;
     };
-    trayAutoWaitAction_ = addToggle(QStringLiteral("Auto wait for peer"), autoWaitCheck_);
+    QAction* autoWait = addToggle(QStringLiteral("Auto wait for peer"), autoWaitCheck_);
 #ifdef _WIN32
-    trayStartWithWindowsAction_ =
+    QAction* startWithWindows =
         addToggle(QStringLiteral("Start with Windows"), startWithWindowsCheck_);
 #endif
-    connect(menu, &QMenu::aboutToShow, this, [this] {
-        trayAutoWaitAction_->setChecked(autoWaitCheck_->isChecked());
+    connect(menu, &QMenu::aboutToShow, this, [=] {
+        autoWait->setChecked(autoWaitCheck_->isChecked());
 #ifdef _WIN32
-        trayStartWithWindowsAction_->setChecked(startWithWindowsCheck_->isChecked());
+        startWithWindows->setChecked(startWithWindowsCheck_->isChecked());
 #endif
     });
     menu->addSeparator();
@@ -223,16 +221,12 @@ void MainWindow::UpdateTray(bool rxActive, bool txActive) {
 
 void MainWindow::OnTick() {
     ProcessAutoWait();
-    if (stateDirty_.exchange(false)
-        || renderedState_ != currentState_.load()
-        || renderedWaiting_ != waitingForPeer_.load()) {
-        RefreshStateUi();
-    }
-    UpdateLiveStats();
+    if (stateDirty_.exchange(false)) RefreshStateUi();
+    const auto& stats = engine_.GetStats();
+    statisticsHistory_.Update(stats.txBytes.load(), stats.rxBytes.load(),
+                              stats.rttMilliseconds.load());
+    UpdateActivity();
     UpdateTrafficUi();
-    statisticsHistory_.Update(engine_.GetStats().txBytes.load(),
-                              engine_.GetStats().rxBytes.load(),
-                              engine_.GetStats().rttMilliseconds.load());
     UpdateCharts();
     DrainLog();
     if (stunDiagnosticDirty_.exchange(false)) UpdateStunDiagnosticUi();
@@ -241,8 +235,6 @@ void MainWindow::OnTick() {
 void MainWindow::RefreshStateUi() {
     const TunnelState state = currentState_.load();
     const bool waiting = IsTunnelActive(state) && waitingForPeer_.load();
-    renderedState_ = state;
-    renderedWaiting_ = waitingForPeer_.load();
 
     const gui_theme::StateStyle style = gui_theme::StyleFor(state);
     stateBadge_->setText(QString::fromLatin1(style.label));
