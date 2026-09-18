@@ -37,9 +37,11 @@ bool ReadStunServers(const Json::Value& root,
     }
 
     std::vector<StunServerConfig> parsed;
+    // An empty host is an unconfigured slot, which is also what the defaults
+    // save. ValidateClientConfig rejects it only when NAT Punch needs STUN.
     for (const auto& item : value) {
         if (!item.isObject() || !item.isMember("host")
-            || !item["host"].isString() || item["host"].asString().empty()
+            || !item["host"].isString()
             || !item.isMember("port") || !item["port"].isInt()) {
             *error = "Each STUN server must contain host and port";
             return false;

@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -133,6 +134,26 @@ int main(int argc, char** argv) {
                    && engine.nat_punch_profile == NatPunchProfile::Balanced
                    && engine.stun_servers.size() == 2,
                "engine config mapping");
+
+        // Defaults leave both STUN hosts empty; what is saved must load again.
+        const std::string roundTripPath = "config_stun_roundtrip_test.json";
+        ClientConfig unsetStun;
+        Expect(unsetStun.stunServers.size() == 2
+                   && unsetStun.stunServers[0].host.empty(),
+               "default STUN servers are unset");
+        Expect(SaveClientConfig(roundTripPath, unsetStun, &error),
+               "config with unset STUN servers saves");
+        ClientConfig reloaded;
+        existed = false;
+        Expect(LoadClientConfig(roundTripPath, &reloaded, &existed, &error)
+                   && existed,
+               "config with unset STUN servers loads again");
+        Expect(reloaded.stunServers.size() == 2
+                   && reloaded.stunServers[0].host.empty()
+                   && reloaded.stunServers[1].port == 3478,
+               "unset STUN servers round-trip");
+        std::remove(roundTripPath.c_str());
+
         example.natPunchAttemptLimit = 0;
         Expect(ToEngineConfig(example, "node-b").nat_punch_attempt_limit == 1,
                "NAT punch attempt limit clamps to its minimum");
