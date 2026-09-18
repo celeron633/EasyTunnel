@@ -1,6 +1,6 @@
 #include "gui_theme.h"
 
-#include <algorithm>
+#include <utility>
 
 #include <QApplication>
 #include <QPainter>
@@ -14,50 +14,94 @@
 
 namespace gui_theme {
 namespace {
+constexpr const char* kSwitchProperty = "md3Switch";
 
-// Check boxes are painted here rather than in the style sheet: a style sheet
-// indicator needs image files for the check mark, while this stays vector.
-class FlatStyle : public QProxyStyle {
+bool IsSwitch(const QWidget* widget) {
+    return widget && widget->property(kSwitchProperty).toBool();
+}
+
+// MD3 check boxes and switches are painted here rather than in the style
+// sheet: style sheet indicators need image files, while this stays vector.
+class MaterialStyle : public QProxyStyle {
 public:
-    FlatStyle() : QProxyStyle(QStyleFactory::create(QStringLiteral("Fusion"))) {}
+    MaterialStyle() : QProxyStyle(QStyleFactory::create(QStringLiteral("Fusion"))) {}
 
     int pixelMetric(PixelMetric metric, const QStyleOption* option,
                     const QWidget* widget) const override {
-        if (metric == PM_IndicatorWidth || metric == PM_IndicatorHeight) return 16;
+        if (metric == PM_IndicatorWidth) return IsSwitch(widget) ? 52 : 18;
+        if (metric == PM_IndicatorHeight) return IsSwitch(widget) ? 32 : 18;
         return QProxyStyle::pixelMetric(metric, option, widget);
     }
 
     void drawPrimitive(PrimitiveElement element, const QStyleOption* option,
                        QPainter* painter, const QWidget* widget) const override {
         if (element == PE_FrameFocusRect) return;
-        if (element != PE_IndicatorCheckBox && element != PE_IndicatorItemViewItemCheck) {
-            QProxyStyle::drawPrimitive(element, option, painter, widget);
+        if (element == PE_IndicatorCheckBox && IsSwitch(widget)) {
+            DrawSwitch(option, painter);
             return;
         }
-        const bool checked = option->state & State_On;
-        const bool enabled = option->state & State_Enabled;
-        const bool hovered = option->state & State_MouseOver;
-        const QRectF box = QRectF(option->rect).adjusted(1.0, 1.0, -1.0, -1.0);
+        if (element == PE_IndicatorCheckBox || element == PE_IndicatorItemViewItemCheck) {
+            DrawCheckBox(option, painter);
+            return;
+        }
+        QProxyStyle::drawPrimitive(element, option, painter, widget);
+    }
 
+private:
+    // 18 px box, 2 px corners; filled with primary and a white tick when on.
+    static void DrawCheckBox(const QStyleOption* option, QPainter* painter) {
+        const bool checked = option->state & State_On;
+        const QRectF box = QRectF(option->rect).adjusted(1.0, 1.0, -1.0, -1.0);
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
-        if (!enabled) painter->setOpacity(0.45);
+        if (!(option->state & State_Enabled)) painter->setOpacity(0.38);
         if (checked) {
             painter->setPen(Qt::NoPen);
-            painter->setBrush(hovered ? kAccent.lighter(115) : kAccent);
-        } else {
-            painter->setPen(QPen(hovered ? kAccent : QColor(0xb8, 0xbf, 0xca), 1.3));
-            painter->setBrush(kSurface);
-        }
-        painter->drawRoundedRect(box, 4.0, 4.0);
-        if (checked) {
-            QPainterPath mark;
-            mark.moveTo(box.left() + box.width() * 0.24, box.top() + box.height() * 0.52);
-            mark.lineTo(box.left() + box.width() * 0.43, box.top() + box.height() * 0.70);
-            mark.lineTo(box.left() + box.width() * 0.77, box.top() + box.height() * 0.32);
-            painter->setPen(QPen(Qt::white, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter->setBrush(kPrimary);
+            painter->drawRoundedRect(box, 2.0, 2.0);
+            QPainterPath tick;
+            tick.moveTo(box.left() + box.width() * 0.22, box.top() + box.height() * 0.52);
+            tick.lineTo(box.left() + box.width() * 0.42, box.top() + box.height() * 0.72);
+            tick.lineTo(box.left() + box.width() * 0.78, box.top() + box.height() * 0.30);
+            painter->setPen(QPen(kOnPrimary, 2.0, Qt::SolidLine, Qt::SquareCap, Qt::MiterJoin));
             painter->setBrush(Qt::NoBrush);
-            painter->drawPath(mark);
+            painter->drawPath(tick);
+        } else {
+            const QColor border = (option->state & State_MouseOver) ? kOnSurface
+                                                                    : kOnSurfaceVariant;
+            painter->setPen(QPen(border, 2.0));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawRoundedRect(box.adjusted(1.0, 1.0, -1.0, -1.0), 2.0, 2.0);
+        }
+        painter->restore();
+    }
+
+    // 52x32 track. Off: outlined track with a small outline-coloured thumb.
+    // On: primary track with a larger white thumb on the right.
+    static void DrawSwitch(const QStyleOption* option, QPainter* painter) {
+        const bool checked = option->state & State_On;
+        const bool hovered = option->state & State_MouseOver;
+        const QRectF track = QRectF(option->rect).adjusted(1.0, 1.0, -1.0, -1.0);
+        const double radius = track.height() / 2.0;
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        if (!(option->state & State_Enabled)) painter->setOpacity(0.38);
+        if (checked) {
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(kPrimary);
+            painter->drawRoundedRect(track, radius, radius);
+            const double thumb = hovered ? 13.0 : 12.0;
+            painter->setBrush(kOnPrimary);
+            painter->drawEllipse(QPointF(track.right() - radius, track.center().y()),
+                                 thumb, thumb);
+        } else {
+            painter->setPen(QPen(kOutline, 2.0));
+            painter->setBrush(kSurfaceContainerHighest);
+            painter->drawRoundedRect(track.adjusted(1.0, 1.0, -1.0, -1.0),
+                                     radius - 1.0, radius - 1.0);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(hovered ? kOnSurfaceVariant : kOutline);
+            painter->drawEllipse(QPointF(track.left() + radius, track.center().y()), 8.0, 8.0);
         }
         painter->restore();
     }
@@ -65,143 +109,176 @@ public:
 
 QString StyleSheet() {
     QString sheet = QStringLiteral(R"(
-QWidget { color: @text; }
-QMainWindow, QDialog, QMessageBox { background: @bg; }
+QWidget { color: @onSurface; }
+QMainWindow, QDialog, QMessageBox { background: @surface; }
 QToolTip {
-    color: @text; background: @raised; border: 1px solid @border;
-    border-radius: 4px; padding: 4px 6px;
+    color: @inverseOnSurface; background: @inverseSurface; border: none;
+    border-radius: 4px; padding: 4px 8px;
 }
 
-QTabWidget::pane { border: none; border-top: 1px solid @border; top: -1px; }
+/* Primary tabs */
+QTabWidget::pane { border: none; border-top: 1px solid @outlineVariant; top: -1px; }
 QTabBar::tab {
-    background: transparent; color: @muted; border: none;
-    border-bottom: 2px solid transparent; padding: 8px 18px; margin-right: 2px;
-    font-weight: 600;
+    background: transparent; color: @onSurfaceVariant; border: none;
+    border-bottom: 3px solid transparent; padding: 12px 22px 9px 22px;
+    min-width: 72px; font-weight: 600;
 }
-QTabBar::tab:hover { color: @text; }
-QTabBar::tab:selected { color: @text; border-bottom: 2px solid @accent; }
+QTabBar::tab:hover { color: @onSurface; background: rgba(25, 28, 32, 0.06); }
+QTabBar::tab:selected { color: @primary; border-bottom: 3px solid @primary; }
 
+/* Filled cards; the group title is the card headline. */
 QGroupBox {
-    background: @surface; border: 1px solid @border; border-radius: 8px;
-    margin-top: 4px; padding: 22px 2px 0 2px;
+    background: @surfaceContainerLow; border: none; border-radius: 12px;
+    margin-top: 4px; padding: 34px 6px 4px 6px; font-weight: 600;
 }
 QGroupBox::title {
     subcontrol-origin: border; subcontrol-position: top left;
-    left: 12px; top: 8px; color: @muted; font-weight: 600;
+    left: 16px; top: 12px; color: @onSurface;
 }
 
+/* Buttons: tonal by default, filled for the main action, text for minor ones. */
 QPushButton {
-    background: @raised; color: @text; border: 1px solid @border;
-    border-radius: 6px; padding: 6px 14px;
+    background: @secondaryContainer; color: @onSecondaryContainer; border: none;
+    /* Qt drops rounding whose radius reaches half the height; stay below. */
+    min-height: 20px; border-radius: 18px; padding: 10px 24px; font-weight: 600;
 }
-QPushButton:hover { background: @hover; border-color: @strong; }
-QPushButton:pressed { background: @pressed; }
-QPushButton:disabled { color: @disabled; background: @raised; border-color: @border; }
-QPushButton[variant="primary"] { background: @accent; border-color: @accent; color: white; }
-QPushButton[variant="primary"]:hover { background: #1d4fd8; border-color: #1d4fd8; }
-QPushButton[variant="primary"]:pressed { background: #1e40af; }
-QPushButton[variant="danger"] { background: #dc2626; border-color: #dc2626; color: white; }
-QPushButton[variant="danger"]:hover { background: #b91c1c; border-color: #b91c1c; }
-QPushButton[variant="primary"]:disabled, QPushButton[variant="danger"]:disabled {
-    background: @raised; border-color: @border; color: @disabled;
+QPushButton:hover { background: #cad6ea; }
+QPushButton:pressed { background: #c2cee2; }
+QPushButton[variant="primary"] { background: @primary; color: @onPrimary; }
+QPushButton[variant="primary"]:hover { background: #1a6fae; }
+QPushButton[variant="primary"]:pressed { background: #2b79b4; }
+QPushButton[variant="danger"] { background: @error; color: white; }
+QPushButton[variant="danger"]:hover { background: #c13030; }
+QPushButton[variant="danger"]:pressed { background: #c63d3d; }
+QPushButton[variant="text"] {
+    background: transparent; color: @primary; border-radius: 14px; padding: 6px 12px;
 }
-QPushButton[variant="compact"] { padding: 2px 10px; border-radius: 4px; }
+QPushButton[variant="text"]:hover { background: rgba(0, 97, 164, 0.08); }
+QPushButton[variant="text"]:pressed { background: rgba(0, 97, 164, 0.12); }
+QPushButton:disabled, QPushButton[variant="primary"]:disabled,
+QPushButton[variant="danger"]:disabled {
+    background: rgba(25, 28, 32, 0.12); color: rgba(25, 28, 32, 0.38);
+}
+QPushButton[variant="text"]:disabled { background: transparent; color: rgba(25, 28, 32, 0.38); }
 
+/* Outlined text fields */
 QLineEdit, QAbstractSpinBox, QComboBox {
-    background: @surface; border: 1px solid @border; border-radius: 6px;
-    padding: 5px 8px; selection-background-color: @accent;
+    background: transparent; border: 1px solid @outline; border-radius: 4px;
+    padding: 8px 12px; selection-background-color: @primaryContainer;
+    selection-color: @onSurface;
 }
-QLineEdit:hover, QAbstractSpinBox:hover, QComboBox:hover { border-color: @strong; }
-QLineEdit:focus, QAbstractSpinBox:focus, QComboBox:focus { border-color: @accent; }
+QLineEdit:hover, QAbstractSpinBox:hover, QComboBox:hover { border-color: @onSurface; }
+QLineEdit:focus, QAbstractSpinBox:focus, QComboBox:focus {
+    border: 2px solid @primary; padding: 7px 11px;
+}
 QLineEdit:disabled, QAbstractSpinBox:disabled, QComboBox:disabled {
-    color: @disabled; background: @raised;
+    border-color: rgba(25, 28, 32, 0.12); color: rgba(25, 28, 32, 0.38);
 }
-QComboBox::drop-down { border: none; width: 22px; }
+QComboBox::drop-down { border: none; width: 28px; }
 QComboBox QAbstractItemView {
-    background: @surface; border: 1px solid @border; outline: none;
-    selection-background-color: @accent; selection-color: white; padding: 2px;
+    background: @surfaceContainer; border: none; border-radius: 4px; outline: none;
+    selection-background-color: @secondaryContainer;
+    selection-color: @onSecondaryContainer; padding: 4px 0;
 }
 
-QCheckBox { spacing: 8px; }
+QCheckBox { spacing: 12px; }
 
+/* Lists */
 QTableView {
-    background: @surface; alternate-background-color: #f8f9fb;
-    border: 1px solid @border; border-radius: 6px; gridline-color: transparent;
-    selection-background-color: rgba(37, 99, 235, 0.14); selection-color: @text;
-    outline: none;
+    background: transparent; alternate-background-color: transparent;
+    border: none; gridline-color: transparent; outline: none;
+    selection-background-color: @secondaryContainer;
+    selection-color: @onSecondaryContainer;
 }
-QTableView::item { padding: 0 6px; border: none; }
+QTableView::item { padding: 0 8px; border: none; }
+QTableView::item:hover { background: rgba(25, 28, 32, 0.06); }
+QTableView::item:selected { background: @secondaryContainer; color: @onSecondaryContainer; }
+QHeaderView { background: transparent; }
 QHeaderView::section {
-    background: @surface; color: @muted; border: none;
-    border-bottom: 1px solid @border; padding: 6px 8px; font-weight: 600;
+    background: transparent; color: @onSurfaceVariant; border: none;
+    border-bottom: 1px solid @outlineVariant; padding: 8px; font-weight: 600;
 }
-QTableCornerButton::section { background: @surface; border: none; }
+QTableCornerButton::section { background: transparent; border: none; }
 
 QPlainTextEdit {
-    background: @surface; border: 1px solid @border; border-radius: 6px;
-    padding: 4px; selection-background-color: @accent;
+    background: @surfaceContainerLow; border: none; border-radius: 12px;
+    padding: 8px; selection-background-color: @primaryContainer;
+    selection-color: @onSurface;
 }
 
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }
-QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
-QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
-QScrollBar::handle { background: #c9ced6; border-radius: 3px; }
-QScrollBar::handle:vertical { min-height: 24px; }
-QScrollBar::handle:horizontal { min-width: 24px; }
-QScrollBar::handle:hover { background: #aab1bc; }
+QScrollBar:vertical { background: transparent; width: 12px; margin: 2px; }
+QScrollBar:horizontal { background: transparent; height: 12px; margin: 2px; }
+QScrollBar::handle { background: rgba(25, 28, 32, 0.24); border-radius: 4px; }
+QScrollBar::handle:vertical { min-height: 32px; }
+QScrollBar::handle:horizontal { min-width: 32px; }
+QScrollBar::handle:hover { background: rgba(25, 28, 32, 0.38); }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
-QStatusBar { background: @surface; border-top: 1px solid @border; }
+QStatusBar { background: @surfaceContainer; color: @onSurfaceVariant; }
 QStatusBar::item { border: none; }
+QStatusBar QLabel { padding: 4px 8px; }
 
-QMenu { background: @surface; border: 1px solid @border; border-radius: 6px; padding: 4px; }
-QMenu::item { padding: 6px 22px; border-radius: 4px; }
-QMenu::item:selected { background: @accent; color: white; }
-QMenu::separator { height: 1px; background: @border; margin: 4px 6px; }
+QMenu { background: @surfaceContainer; border: none; border-radius: 4px; padding: 8px 0; }
+QMenu::item { padding: 10px 28px 10px 16px; }
+QMenu::item:selected { background: rgba(25, 28, 32, 0.08); color: @onSurface; }
+QMenu::separator { height: 1px; background: @outlineVariant; margin: 8px 0; }
 )");
-    // Interaction shades derived from the surfaces.
-    sheet.replace(QStringLiteral("@hover"), QStringLiteral("#e7eaef"));
-    sheet.replace(QStringLiteral("@pressed"), QStringLiteral("#dde1e7"));
-    sheet.replace(QStringLiteral("@strong"), QStringLiteral("#c3c9d2"));
-    sheet.replace(QStringLiteral("@disabled"), QStringLiteral("#a0a7b2"));
-    sheet.replace(QStringLiteral("@bg"), kBackground.name());
-    sheet.replace(QStringLiteral("@surface"), kSurface.name());
-    sheet.replace(QStringLiteral("@raised"), kSurfaceRaised.name());
-    sheet.replace(QStringLiteral("@border"), kBorder.name());
-    sheet.replace(QStringLiteral("@text"), kText.name());
-    sheet.replace(QStringLiteral("@muted"), kMuted.name());
-    sheet.replace(QStringLiteral("@accent"), kAccent.name());
+    // Longest names first so no token is a prefix of one replaced later.
+    const std::pair<const char*, QColor> roles[] = {
+        {"@onSecondaryContainer", kOnSecondaryContainer},
+        {"@secondaryContainer", kSecondaryContainer},
+        {"@primaryContainer", kPrimaryContainer},
+        {"@surfaceContainerLow", kSurfaceContainerLow},
+        {"@surfaceContainer", kSurfaceContainer},
+        {"@inverseOnSurface", kInverseOnSurface},
+        {"@inverseSurface", kInverseSurface},
+        {"@onSurfaceVariant", kOnSurfaceVariant},
+        {"@onSurface", kOnSurface},
+        {"@outlineVariant", kOutlineVariant},
+        {"@outline", kOutline},
+        {"@onPrimary", kOnPrimary},
+        {"@primary", kPrimary},
+        {"@surface", kSurface},
+        {"@error", kError},
+    };
+    for (const auto& [token, color] : roles) {
+        sheet.replace(QLatin1String(token), color.name());
+    }
     return sheet;
 }
 
 }  // namespace
 
 void Apply(QApplication& app) {
-    app.setStyle(new FlatStyle());
+    app.setStyle(new MaterialStyle());
 
+    // MD3 specifies Roboto; fall back to the platform UI fonts (with CJK).
     QFont font = QApplication::font();
-    font.setPointSizeF(std::max(font.pointSizeF(), 9.5));
+    font.setFamilies({QStringLiteral("Roboto"), QStringLiteral("Segoe UI"),
+                      QStringLiteral("Microsoft YaHei UI"), font.family()});
+    font.setPointSizeF(10.0);
     app.setFont(font);
 
-    const QColor disabledText(0xa0, 0xa7, 0xb2);
+    const QColor disabledText(0xa0, 0xa3, 0xa8);
     QPalette palette;
-    palette.setColor(QPalette::Window, kBackground);
-    palette.setColor(QPalette::WindowText, kText);
-    palette.setColor(QPalette::Base, kSurface);
-    palette.setColor(QPalette::AlternateBase, QColor(0xf8, 0xf9, 0xfb));
-    palette.setColor(QPalette::ToolTipBase, kSurface);
-    palette.setColor(QPalette::ToolTipText, kText);
-    palette.setColor(QPalette::PlaceholderText, disabledText);
-    palette.setColor(QPalette::Text, kText);
-    palette.setColor(QPalette::Button, kSurfaceRaised);
-    palette.setColor(QPalette::ButtonText, kText);
+    palette.setColor(QPalette::Window, kSurface);
+    palette.setColor(QPalette::WindowText, kOnSurface);
+    palette.setColor(QPalette::Base, kSurfaceContainerLowest);
+    palette.setColor(QPalette::AlternateBase, kSurfaceContainerLow);
+    palette.setColor(QPalette::ToolTipBase, kInverseSurface);
+    palette.setColor(QPalette::ToolTipText, kInverseOnSurface);
+    palette.setColor(QPalette::PlaceholderText, kOnSurfaceVariant);
+    palette.setColor(QPalette::Text, kOnSurface);
+    palette.setColor(QPalette::Button, kSecondaryContainer);
+    palette.setColor(QPalette::ButtonText, kOnSecondaryContainer);
     palette.setColor(QPalette::BrightText, Qt::white);
-    palette.setColor(QPalette::Highlight, kAccent);
-    palette.setColor(QPalette::HighlightedText, Qt::white);
-    palette.setColor(QPalette::Link, kAccent);
-    palette.setColor(QPalette::Mid, kBorder);
-    palette.setColor(QPalette::Dark, QColor(0xa0, 0xa7, 0xb2));
+    palette.setColor(QPalette::Highlight, kPrimary);
+    palette.setColor(QPalette::HighlightedText, kOnPrimary);
+    palette.setColor(QPalette::Link, kPrimary);
+    palette.setColor(QPalette::Mid, kOutlineVariant);
+    palette.setColor(QPalette::Dark, kOutline);
     for (const QPalette::ColorRole role :
          {QPalette::WindowText, QPalette::Text, QPalette::ButtonText}) {
         palette.setColor(QPalette::Disabled, role, disabledText);
@@ -216,6 +293,12 @@ void SetButtonVariant(QWidget* button, const char* variant) {
     // Dynamic properties only take effect in the style sheet after a re-polish.
     button->style()->unpolish(button);
     button->style()->polish(button);
+}
+
+void MakeSwitch(QWidget* checkBox) {
+    checkBox->setProperty(kSwitchProperty, true);
+    checkBox->updateGeometry();
+    checkBox->update();
 }
 
 }  // namespace gui_theme

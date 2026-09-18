@@ -56,10 +56,11 @@ QPushButton* MakeUnitButton(QWidget* parent) {
     button->setCursor(Qt::PointingHandCursor);
     button->setToolTip(QStringLiteral("Click to switch unit"));
     button->setStyleSheet(QStringLiteral(
-        "QPushButton { background: transparent; border: none; padding: 2px 6px;"
+        "QPushButton { background: transparent; color: palette(window-text);"
+        " border: none; padding: 2px 6px; min-height: 0; font-weight: normal;"
         " text-align: left; }"
-        "QPushButton:hover { background: %1; border-radius: 4px; }")
-        .arg(gui_theme::kSurfaceRaised.name()));
+        "QPushButton:hover { background: %1; border-radius: 8px; }")
+        .arg(gui_theme::kSurfaceContainerHigh.name()));
     return button;
 }
 
@@ -109,9 +110,8 @@ QWidget* MainWindow::BuildConnectionTab() {
     peerTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     peerTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     peerTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    peerTable_->setAlternatingRowColors(true);
     peerTable_->verticalHeader()->setVisible(false);
-    peerTable_->verticalHeader()->setDefaultSectionSize(30);
+    peerTable_->verticalHeader()->setDefaultSectionSize(40);
     peerTable_->setShowGrid(false);
     peerTable_->setFocusPolicy(Qt::NoFocus);
     peerTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);

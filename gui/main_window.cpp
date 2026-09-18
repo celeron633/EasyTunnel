@@ -33,10 +33,10 @@ const char* const kTrayIconPaths[] = {
 
 QString BadgeStyle(const QColor& color) {
     QColor background = color;
-    background.setAlphaF(0.20f);
+    background.setAlphaF(0.14f);
     return QStringLiteral(
                "QLabel { color: %1; background-color: rgba(%2, %3, %4, %5);"
-               " border-radius: 9px; padding: 2px 9px; font-weight: bold; }")
+               " border-radius: 8px; padding: 4px 12px; font-weight: 600; }")
         .arg(color.name())
         .arg(background.red())
         .arg(background.green())
@@ -67,7 +67,7 @@ MainWindow::MainWindow() {
 
     auto* central = new QWidget(this);
     auto* layout = new QVBoxLayout(central);
-    layout->setContentsMargins(14, 12, 14, 8);
+    layout->setContentsMargins(16, 12, 16, 8);
     layout->addWidget(BuildHeader());
     auto* tabs = new QTabWidget(central);
     tabs->addTab(BuildConnectionTab(), QStringLiteral("Connection"));

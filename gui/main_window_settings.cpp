@@ -38,6 +38,8 @@ QFormLayout* AddSection(QVBoxLayout* column, const QString& title) {
     auto* form = new QFormLayout(box);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setHorizontalSpacing(16);
+    form->setVerticalSpacing(12);
     column->addWidget(box);
     return form;
 }
@@ -124,6 +126,7 @@ QSpinBox* MainWindow::AddIntField(QFormLayout* form, const QString& label, int* 
 QCheckBox* MainWindow::AddCheckField(QFormLayout* form, const QString& label,
                                      bool* target, std::function<void()> onChanged) {
     auto* check = new QCheckBox();
+    gui_theme::MakeSwitch(check);
     check->setChecked(*target);
     connect(check, &QCheckBox::toggled, this,
             [this, target, onChanged = std::move(onChanged)](bool checked) {
@@ -252,6 +255,7 @@ QWidget* MainWindow::BuildSettingsTab() {
         Log(LogLevel::Error, startupError);
     }
     startWithWindowsCheck_ = new QCheckBox();
+    gui_theme::MakeSwitch(startWithWindowsCheck_);
     startWithWindowsCheck_->setChecked(startWithWindows);
     startWithWindowsCheck_->setToolTip(
         QStringLiteral("Uses an elevated logon task in Windows Task Scheduler."));
@@ -292,7 +296,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     traversalTable_->setHorizontalHeaderLabels({QStringLiteral("Enabled"),
         QStringLiteral("Priority"), QStringLiteral("Mode"), QStringLiteral("Order")});
     traversalTable_->verticalHeader()->setVisible(false);
-    traversalTable_->verticalHeader()->setDefaultSectionSize(34);
+    traversalTable_->verticalHeader()->setDefaultSectionSize(44);
     traversalTable_->setShowGrid(false);
     traversalTable_->setSelectionMode(QAbstractItemView::NoSelection);
     traversalTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -302,7 +306,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     traversalHeader->setSectionResizeMode(2, QHeaderView::Stretch);
     // Cell widgets do not feed ResizeToContents; size the Up/Down column here.
     traversalHeader->setSectionResizeMode(3, QHeaderView::Fixed);
-    traversalHeader->resizeSection(3, 128);
+    traversalHeader->resizeSection(3, 150);
     traversalTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     traversalLayout->addWidget(traversalTable_);
     right->addWidget(traversalBox);
@@ -367,8 +371,7 @@ void MainWindow::RebuildTraversalTable() {
         up->setEnabled(row > 0);
         down->setEnabled(row + 1 < count);
         for (QPushButton* button : {up, down}) {
-            gui_theme::SetButtonVariant(button, "compact");
-            button->setMinimumWidth(52);
+            gui_theme::SetButtonVariant(button, "text");
             orderLayout->addWidget(button);
         }
         auto move = [this, row](int offset) {
