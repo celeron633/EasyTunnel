@@ -224,10 +224,18 @@ QStatusBar { background: @surfaceContainer; color: @onSurfaceVariant; }
 QStatusBar::item { border: none; }
 QStatusBar QLabel { padding: 4px 8px; }
 
-QMenu { background: @surfaceContainer; border: none; border-radius: 4px; padding: 8px 0; }
-QMenu::item { padding: 10px 28px 10px 16px; }
+/* Rounded corners need a translucent frameless popup; see PrepareMenu(). */
+QMenu {
+    background: @surfaceContainer; border: 1px solid @outlineVariant;
+    border-radius: 8px; padding: 6px 0;
+}
+QMenu::item {
+    background: transparent; padding: 8px 32px 8px 16px; min-width: 150px;
+    margin: 0 6px; border-radius: 4px;
+}
 QMenu::item:selected { background: rgba(25, 28, 32, 0.08); color: @onSurface; }
-QMenu::separator { height: 1px; background: @outlineVariant; margin: 8px 0; }
+QMenu::item:disabled { color: rgba(25, 28, 32, 0.38); }
+QMenu::separator { height: 1px; background: @outlineVariant; margin: 6px 0; }
 )");
     // Longest names first so no token is a prefix of one replaced later.
     const std::pair<const char*, QColor> roles[] = {
@@ -297,6 +305,14 @@ void SetButtonVariant(QWidget* button, const char* variant) {
     // Dynamic properties only take effect in the style sheet after a re-polish.
     button->style()->unpolish(button);
     button->style()->polish(button);
+}
+
+void PrepareMenu(QWidget* menu) {
+    // Without a translucent frameless window the rounded corners from the
+    // style sheet are painted over a square, shadowed rectangle.
+    menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint
+                         | Qt::NoDropShadowWindowHint);
+    menu->setAttribute(Qt::WA_TranslucentBackground);
 }
 
 void MakeSwitch(QWidget* checkBox) {

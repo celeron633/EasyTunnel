@@ -76,6 +76,9 @@ void Apply(QApplication& app);
 // "danger" (filled error), "text" (text button) or empty for a tonal button.
 void SetButtonVariant(QWidget* button, const char* variant);
 
+// Lets a QMenu show the style sheet's rounded corners.
+void PrepareMenu(QWidget* menu);
+
 // Renders a QCheckBox as an MD3 switch; use for on/off settings.
 void MakeSwitch(QWidget* checkBox);
 

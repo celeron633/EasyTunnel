@@ -19,6 +19,7 @@
 #include "../tunnel_engine.h"
 
 class HistoryChart;
+class QAction;
 class QCheckBox;
 class QFormLayout;
 class QLabel;
@@ -140,6 +141,8 @@ private:
 
     // Tray.
     QSystemTrayIcon* tray_ = nullptr;
+    QLabel* trayStatusLabel_ = nullptr;
+    QAction* trayDisconnectAction_ = nullptr;
     std::array<QIcon, static_cast<std::size_t>(TrayMode::Count)> trayIcons_{};
     TrayMode trayMode_ = TrayMode::Count;
     bool exitConfirmed_ = false;

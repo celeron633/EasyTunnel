@@ -16,6 +16,7 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWidgetAction>
 #include <QWindowStateChangeEvent>
 
 #include "../log.h"
@@ -141,7 +142,19 @@ void MainWindow::BuildTray() {
 
     tray_ = new QSystemTrayIcon(this);
     auto* menu = new QMenu(this);
-    menu->addAction(QStringLiteral("Show"), this, [this] { ShowFromTray(); });
+    gui_theme::PrepareMenu(menu);
+    // A read-only status line, so the state is visible without opening the window.
+    trayStatusLabel_ = new QLabel(menu);
+    trayStatusLabel_->setContentsMargins(16, 6, 16, 6);
+    auto* statusAction = new QWidgetAction(menu);
+    statusAction->setDefaultWidget(trayStatusLabel_);
+    menu->addAction(statusAction);
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("Show window"), this, [this] { ShowFromTray(); });
+    trayDisconnectAction_ = menu->addAction(QStringLiteral("Disconnect"), this, [this] {
+        Disconnect();
+        stateDirty_.store(true);
+    });
     menu->addSeparator();
     menu->addAction(QStringLiteral("Exit"), this, [this] { RequestExit(); });
     tray_->setContextMenu(menu);
@@ -226,6 +239,14 @@ void MainWindow::RefreshStateUi() {
         && !peerTable_->selectedItems().isEmpty();
     connectButton_->setEnabled(hasSelection && (!active || waiting));
     for (QWidget* field : rendezvousIdentityFields_) field->setEnabled(!active);
+
+    // The tray is built after the tabs, which already refresh this once.
+    if (trayStatusLabel_) {
+        trayStatusLabel_->setText(QString::fromLatin1(style.label));
+        trayStatusLabel_->setStyleSheet(gui_theme::TextColorStyle(style.color)
+            + QStringLiteral(" font-weight: 600;"));
+        trayDisconnectAction_->setEnabled(active);
+    }
 }
 
 void MainWindow::ShowFromTray() {
