@@ -112,6 +112,8 @@ QWidget* MainWindow::BuildConnectionTab() {
     peerTable_->setShowGrid(false);
     peerTable_->setFocusPolicy(Qt::NoFocus);
     peerTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    peerTable_->horizontalHeader()->setHighlightSections(false);
+    peerTable_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     peerTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     peersLayout->addWidget(peerTable_);
     layout->addWidget(peersBox);
