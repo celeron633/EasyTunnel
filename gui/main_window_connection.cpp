@@ -64,7 +64,7 @@ QPushButton* MakeUnitButton(QWidget* parent) {
 }
 
 QString DotStyle(bool active, const QColor& color) {
-    return gui_theme::TextColorStyle(active ? color : gui_theme::kBorder.lighter(130));
+    return gui_theme::TextColorStyle(active ? color : gui_theme::kBorder.darker(115));
 }
 
 // Empty cells show a muted placeholder when the server did not report a field.

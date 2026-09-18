@@ -18,6 +18,7 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 #include "../log.h"
 #include "../stun_client.h"
@@ -54,8 +55,34 @@ QLabel* MakeMessageLabel(const QColor& color) {
     return label;
 }
 
+// The settings page scrolls. Without this, a wheel turn that passes over a spin
+// box or combo box silently changes its value instead of scrolling the page.
+class WheelGuard : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() != QEvent::Wheel) return false;
+        auto* widget = qobject_cast<QWidget*>(watched);
+        if (!widget || widget->hasFocus()) return false;
+        // Ignored and filtered: the event goes on to the scroll area instead.
+        event->ignore();
+        return true;
+    }
+};
+
+WheelGuard* wheelGuard = nullptr;
+
+template <typename Widget>
+Widget* GuardWheel(Widget* widget) {
+    widget->setFocusPolicy(Qt::StrongFocus);
+    if (wheelGuard) widget->installEventFilter(wheelGuard);
+    return widget;
+}
+
 QSpinBox* MakeSpinBox(int minimum, int maximum, int value) {
-    auto* spin = new QSpinBox();
+    auto* spin = GuardWheel(new QSpinBox());
     spin->setRange(minimum, maximum);
     spin->setValue(std::clamp(value, minimum, maximum));
     // Commit on Enter, focus loss or the arrows rather than on every digit, so
@@ -111,6 +138,7 @@ QCheckBox* MainWindow::AddCheckField(QFormLayout* form, const QString& label,
 // Two balanced columns: session and timing settings on the left, the data path
 // on the right. Every accepted edit is saved through the shared config module.
 QWidget* MainWindow::BuildSettingsTab() {
+    wheelGuard = new WheelGuard(this);
     saveTimer_ = new QTimer(this);
     saveTimer_->setSingleShot(true);
     saveTimer_->setInterval(kConfigSaveDelayMs);
@@ -167,7 +195,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     if (config_.stunServers.size() < 2) config_.stunServers.resize(2);
     AddIntField(form, QStringLiteral("Punch timeout (s)"), &config_.punchTimeout, 1, 600);
     AddIntField(form, QStringLiteral("Attempt limit"), &config_.natPunchAttemptLimit, 1, 10);
-    auto* profile = new QComboBox();
+    auto* profile = GuardWheel(new QComboBox());
     profile->addItem(QString::fromLatin1(
         NatPunchProfileDisplayName(NatPunchProfile::Balanced)));
     profile->addItem(QString::fromLatin1(
@@ -204,7 +232,7 @@ QWidget* MainWindow::BuildSettingsTab() {
 
     // ---- Log and misc ----
     form = AddSection(left, QStringLiteral("Log and misc"));
-    auto* logLevel = new QComboBox();
+    auto* logLevel = GuardWheel(new QComboBox());
     for (const char* level : kLogLevels) logLevel->addItem(QString::fromLatin1(level));
     logLevel->setCurrentIndex(std::clamp(config_.logLevel, 0, 3));
     connect(logLevel, &QComboBox::currentIndexChanged, this, [this](int index) {

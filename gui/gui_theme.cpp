@@ -46,8 +46,8 @@ public:
             painter->setPen(Qt::NoPen);
             painter->setBrush(hovered ? kAccent.lighter(115) : kAccent);
         } else {
-            painter->setPen(QPen(hovered ? kAccent : QColor(0x4a, 0x51, 0x60), 1.3));
-            painter->setBrush(kSurfaceRaised);
+            painter->setPen(QPen(hovered ? kAccent : QColor(0xb8, 0xbf, 0xca), 1.3));
+            painter->setBrush(kSurface);
         }
         painter->drawRoundedRect(box, 4.0, 4.0);
         if (checked) {
@@ -94,40 +94,40 @@ QPushButton {
     background: @raised; color: @text; border: 1px solid @border;
     border-radius: 6px; padding: 6px 14px;
 }
-QPushButton:hover { background: #2f3440; border-color: #3a404c; }
-QPushButton:pressed { background: #232730; }
-QPushButton:disabled { color: #5c6370; background: @surface; border-color: @border; }
+QPushButton:hover { background: @hover; border-color: @strong; }
+QPushButton:pressed { background: @pressed; }
+QPushButton:disabled { color: @disabled; background: @raised; border-color: @border; }
 QPushButton[variant="primary"] { background: @accent; border-color: @accent; color: white; }
-QPushButton[variant="primary"]:hover { background: #4c8df7; border-color: #4c8df7; }
-QPushButton[variant="primary"]:pressed { background: #2f6fd8; }
-QPushButton[variant="danger"] { background: #dc3c3c; border-color: #dc3c3c; color: white; }
-QPushButton[variant="danger"]:hover { background: #e85555; border-color: #e85555; }
+QPushButton[variant="primary"]:hover { background: #1d4fd8; border-color: #1d4fd8; }
+QPushButton[variant="primary"]:pressed { background: #1e40af; }
+QPushButton[variant="danger"] { background: #dc2626; border-color: #dc2626; color: white; }
+QPushButton[variant="danger"]:hover { background: #b91c1c; border-color: #b91c1c; }
 QPushButton[variant="primary"]:disabled, QPushButton[variant="danger"]:disabled {
-    background: @surface; border-color: @border; color: #5c6370;
+    background: @raised; border-color: @border; color: @disabled;
 }
 QPushButton[variant="compact"] { padding: 2px 10px; border-radius: 4px; }
 
 QLineEdit, QAbstractSpinBox, QComboBox {
-    background: @raised; border: 1px solid @border; border-radius: 6px;
+    background: @surface; border: 1px solid @border; border-radius: 6px;
     padding: 5px 8px; selection-background-color: @accent;
 }
-QLineEdit:hover, QAbstractSpinBox:hover, QComboBox:hover { border-color: #3a404c; }
+QLineEdit:hover, QAbstractSpinBox:hover, QComboBox:hover { border-color: @strong; }
 QLineEdit:focus, QAbstractSpinBox:focus, QComboBox:focus { border-color: @accent; }
 QLineEdit:disabled, QAbstractSpinBox:disabled, QComboBox:disabled {
-    color: #5c6370; background: @surface;
+    color: @disabled; background: @raised;
 }
 QComboBox::drop-down { border: none; width: 22px; }
 QComboBox QAbstractItemView {
-    background: @raised; border: 1px solid @border; outline: none;
-    selection-background-color: @accent; padding: 2px;
+    background: @surface; border: 1px solid @border; outline: none;
+    selection-background-color: @accent; selection-color: white; padding: 2px;
 }
 
 QCheckBox { spacing: 8px; }
 
 QTableView {
-    background: @surface; alternate-background-color: #22262e;
+    background: @surface; alternate-background-color: #f8f9fb;
     border: 1px solid @border; border-radius: 6px; gridline-color: transparent;
-    selection-background-color: rgba(59, 130, 246, 0.28); selection-color: @text;
+    selection-background-color: rgba(37, 99, 235, 0.14); selection-color: @text;
     outline: none;
 }
 QTableView::item { padding: 0 6px; border: none; }
@@ -138,17 +138,17 @@ QHeaderView::section {
 QTableCornerButton::section { background: @surface; border: none; }
 
 QPlainTextEdit {
-    background: #121418; border: 1px solid @border; border-radius: 6px;
+    background: @surface; border: 1px solid @border; border-radius: 6px;
     padding: 4px; selection-background-color: @accent;
 }
 
 QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 2px; }
 QScrollBar:horizontal { background: transparent; height: 10px; margin: 2px; }
-QScrollBar::handle { background: #3a404c; border-radius: 3px; }
+QScrollBar::handle { background: #c9ced6; border-radius: 3px; }
 QScrollBar::handle:vertical { min-height: 24px; }
 QScrollBar::handle:horizontal { min-width: 24px; }
-QScrollBar::handle:hover { background: #4a5160; }
+QScrollBar::handle:hover { background: #aab1bc; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
@@ -160,6 +160,11 @@ QMenu::item { padding: 6px 22px; border-radius: 4px; }
 QMenu::item:selected { background: @accent; color: white; }
 QMenu::separator { height: 1px; background: @border; margin: 4px 6px; }
 )");
+    // Interaction shades derived from the surfaces.
+    sheet.replace(QStringLiteral("@hover"), QStringLiteral("#e7eaef"));
+    sheet.replace(QStringLiteral("@pressed"), QStringLiteral("#dde1e7"));
+    sheet.replace(QStringLiteral("@strong"), QStringLiteral("#c3c9d2"));
+    sheet.replace(QStringLiteral("@disabled"), QStringLiteral("#a0a7b2"));
     sheet.replace(QStringLiteral("@bg"), kBackground.name());
     sheet.replace(QStringLiteral("@surface"), kSurface.name());
     sheet.replace(QStringLiteral("@raised"), kSurfaceRaised.name());
@@ -179,13 +184,13 @@ void Apply(QApplication& app) {
     font.setPointSizeF(std::max(font.pointSizeF(), 9.5));
     app.setFont(font);
 
-    const QColor disabledText(0x5c, 0x63, 0x70);
+    const QColor disabledText(0xa0, 0xa7, 0xb2);
     QPalette palette;
     palette.setColor(QPalette::Window, kBackground);
     palette.setColor(QPalette::WindowText, kText);
-    palette.setColor(QPalette::Base, kSurfaceRaised);
-    palette.setColor(QPalette::AlternateBase, kSurface);
-    palette.setColor(QPalette::ToolTipBase, kSurfaceRaised);
+    palette.setColor(QPalette::Base, kSurface);
+    palette.setColor(QPalette::AlternateBase, QColor(0xf8, 0xf9, 0xfb));
+    palette.setColor(QPalette::ToolTipBase, kSurface);
     palette.setColor(QPalette::ToolTipText, kText);
     palette.setColor(QPalette::PlaceholderText, disabledText);
     palette.setColor(QPalette::Text, kText);
@@ -196,7 +201,7 @@ void Apply(QApplication& app) {
     palette.setColor(QPalette::HighlightedText, Qt::white);
     palette.setColor(QPalette::Link, kAccent);
     palette.setColor(QPalette::Mid, kBorder);
-    palette.setColor(QPalette::Dark, QColor(0x10, 0x12, 0x16));
+    palette.setColor(QPalette::Dark, QColor(0xa0, 0xa7, 0xb2));
     for (const QPalette::ColorRole role :
          {QPalette::WindowText, QPalette::Text, QPalette::ButtonText}) {
         palette.setColor(QPalette::Disabled, role, disabledText);
