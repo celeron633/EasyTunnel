@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
+#include <QStyledItemDelegate>
 #include <QSystemTrayIcon>
 #include <QTableWidget>
 #include <QTimer>
@@ -81,6 +82,13 @@ Widget* GuardWheel(Widget* widget) {
     widget->setFocusPolicy(Qt::StrongFocus);
     if (wheelGuard) widget->installEventFilter(wheelGuard);
     return widget;
+}
+
+QComboBox* MakeComboBox() {
+    auto* combo = GuardWheel(new QComboBox());
+    // The default delegate ignores ::item padding in the style sheet.
+    combo->setItemDelegate(new QStyledItemDelegate(combo));
+    return combo;
 }
 
 QSpinBox* MakeSpinBox(int minimum, int maximum, int value) {
@@ -198,7 +206,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     if (config_.stunServers.size() < 2) config_.stunServers.resize(2);
     AddIntField(form, QStringLiteral("Punch timeout (s)"), &config_.punchTimeout, 1, 600);
     AddIntField(form, QStringLiteral("Attempt limit"), &config_.natPunchAttemptLimit, 1, 10);
-    auto* profile = GuardWheel(new QComboBox());
+    auto* profile = MakeComboBox();
     profile->addItem(QString::fromLatin1(
         NatPunchProfileDisplayName(NatPunchProfile::Balanced)));
     profile->addItem(QString::fromLatin1(
@@ -235,7 +243,7 @@ QWidget* MainWindow::BuildSettingsTab() {
 
     // ---- Log and misc ----
     form = AddSection(left, QStringLiteral("Log and misc"));
-    auto* logLevel = GuardWheel(new QComboBox());
+    auto* logLevel = MakeComboBox();
     for (const char* level : kLogLevels) logLevel->addItem(QString::fromLatin1(level));
     logLevel->setCurrentIndex(std::clamp(config_.logLevel, 0, 3));
     connect(logLevel, &QComboBox::currentIndexChanged, this, [this](int index) {

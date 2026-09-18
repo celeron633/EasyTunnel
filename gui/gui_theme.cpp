@@ -174,12 +174,16 @@ QLineEdit:focus, QAbstractSpinBox:focus, QComboBox:focus {
 QLineEdit:disabled, QAbstractSpinBox:disabled, QComboBox:disabled {
     border-color: rgba(25, 28, 32, 0.12); color: rgba(25, 28, 32, 0.38);
 }
+/* combobox-popup: 0 gives a plain list popup; Fusion's default menu-style
+   popup is only a few rows tall with scroll arrows once a sheet applies. */
+QComboBox { combobox-popup: 0; }
 QComboBox::drop-down { border: none; width: 28px; }
 QComboBox QAbstractItemView {
-    background: @surfaceContainer; border: none; border-radius: 4px; outline: none;
+    background: @surfaceContainer; border: none; outline: none;
     selection-background-color: @secondaryContainer;
     selection-color: @onSecondaryContainer; padding: 4px 0;
 }
+QComboBox QAbstractItemView::item { min-height: 36px; padding: 0 12px; }
 
 QCheckBox { spacing: 12px; }
 

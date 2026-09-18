@@ -4,11 +4,11 @@
 #include <utility>
 
 #include <QApplication>
-#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QPainter>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QVBoxLayout>
@@ -48,24 +48,21 @@ QString FormatIdleTime(uint64_t seconds) {
     return QStringLiteral("%1h %2m").arg(seconds / 3600).arg((seconds % 3600) / 60);
 }
 
-// Value plus unit in one flat cell. It has to read as a number, not a button,
-// so the frame stays transparent until the pointer is over it.
-QPushButton* MakeUnitButton(QWidget* parent) {
-    auto* button = new QPushButton(parent);
-    button->setFlat(true);
-    button->setCursor(Qt::PointingHandCursor);
-    button->setToolTip(QStringLiteral("Click to switch unit"));
-    button->setStyleSheet(QStringLiteral(
-        "QPushButton { background: transparent; color: palette(window-text);"
-        " border: none; padding: 2px 6px; min-height: 0; font-weight: normal;"
-        " text-align: left; }"
-        "QPushButton:hover { background: %1; border-radius: 8px; }")
-        .arg(gui_theme::kSurfaceContainerHigh.name()));
-    return button;
-}
+enum TrafficColumn { kDirectionColumn, kPacketsColumn, kTotalColumn, kSpeedColumn };
+enum TrafficRowIndex { kTxRow, kRxRow };
 
-QString DotStyle(bool active, const QColor& color) {
-    return gui_theme::TextColorStyle(active ? color : gui_theme::kBorder.darker(115));
+// Activity dot for a traffic row: full colour while packets move, a neutral
+// grey otherwise. Drawn at 2x so it stays crisp on high-DPI screens.
+QIcon ActivityIcon(const QColor& color, bool active) {
+    QPixmap pixmap(24, 24);
+    pixmap.setDevicePixelRatio(2.0);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(active ? color : gui_theme::kOutlineVariant);
+    painter.drawEllipse(QRectF(1.0, 1.0, 10.0, 10.0));
+    return QIcon(pixmap);
 }
 
 // Empty cells show a muted placeholder when the server did not report a field.
@@ -130,48 +127,54 @@ QWidget* MainWindow::BuildConnectionTab() {
             [this] { RefreshStateUi(); });
 
     // Traffic: one row per direction keeps packets, totals and speed under
-    // shared headers instead of repeating the labels six times.
+    // shared headers. Clicking a Total or Speed cell (or its header) cycles
+    // the unit of that column.
     auto* trafficBox = new QGroupBox(QStringLiteral("Traffic"), tab);
     auto* trafficLayout = new QVBoxLayout(trafficBox);
-    auto* grid = new QGridLayout();
-    grid->setHorizontalSpacing(16);
-    const char* headers[] = {"", "Packets", "Total", "Speed"};
-    for (int column = 0; column < 4; ++column) {
-        auto* header = new QLabel(QString::fromLatin1(headers[column]), trafficBox);
-        header->setStyleSheet(gui_theme::TextColorStyle(gui_theme::kMuted));
-        grid->addWidget(header, 0, column);
+    trafficTable_ = new QTableWidget(2, 4, trafficBox);
+    trafficTable_->setHorizontalHeaderLabels({QStringLiteral("Direction"),
+        QStringLiteral("Packets"), QStringLiteral("Total"), QStringLiteral("Speed")});
+    trafficTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    trafficTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    trafficTable_->setFocusPolicy(Qt::NoFocus);
+    trafficTable_->setShowGrid(false);
+    trafficTable_->setIconSize(QSize(12, 12));
+    trafficTable_->verticalHeader()->setVisible(false);
+    trafficTable_->verticalHeader()->setDefaultSectionSize(40);
+    trafficTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    trafficTable_->horizontalHeader()->setHighlightSections(false);
+    trafficTable_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    trafficTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    const QString unitHint = QStringLiteral("Click to switch unit");
+    const char* directions[] = {"TX", "RX"};
+    for (int row = 0; row < 2; ++row) {
+        trafficTable_->setItem(row, kDirectionColumn,
+                               new QTableWidgetItem(QString::fromLatin1(directions[row])));
+        for (int column = kPacketsColumn; column <= kSpeedColumn; ++column) {
+            auto* item = new QTableWidgetItem();
+            if (column != kPacketsColumn) item->setToolTip(unitHint);
+            trafficTable_->setItem(row, column, item);
+        }
     }
-    auto addRow = [&](int row, const char* name, TrafficRow* target) {
-        auto* nameCell = new QWidget(trafficBox);
-        auto* nameLayout = new QHBoxLayout(nameCell);
-        nameLayout->setContentsMargins(0, 0, 0, 0);
-        nameLayout->setSpacing(6);
-        target->dot = new QLabel(QString(QChar(0x25CF)), nameCell);
-        nameLayout->addWidget(target->dot);
-        nameLayout->addWidget(new QLabel(QString::fromLatin1(name), nameCell));
-        nameLayout->addStretch(1);
-        grid->addWidget(nameCell, row, 0);
-        target->packets = new QLabel(trafficBox);
-        grid->addWidget(target->packets, row, 1);
-        target->total = MakeUnitButton(trafficBox);
-        grid->addWidget(target->total, row, 2, Qt::AlignLeft);
-        target->speed = MakeUnitButton(trafficBox);
-        grid->addWidget(target->speed, row, 3, Qt::AlignLeft);
-        connect(target->total, &QPushButton::clicked, this, [this] {
-            statisticsTotalUnit_ = (statisticsTotalUnit_ + 1) % 3;
-            UpdateTrafficUi();
-        });
-        connect(target->speed, &QPushButton::clicked, this, [this] {
-            statisticsSpeedUnit_ = (statisticsSpeedUnit_ + 1) % 3;
-            UpdateTrafficUi();
-        });
+    trafficTable_->horizontalHeaderItem(kTotalColumn)->setToolTip(unitHint);
+    trafficTable_->horizontalHeaderItem(kSpeedColumn)->setToolTip(unitHint);
+    trafficTable_->setFixedHeight(trafficTable_->horizontalHeader()->sizeHint().height()
+        + trafficTable_->verticalHeader()->defaultSectionSize() * 2
+        + trafficTable_->frameWidth() * 2);
+    auto cycleUnit = [this](int column) {
+        if (column == kTotalColumn) statisticsTotalUnit_ = (statisticsTotalUnit_ + 1) % 3;
+        else if (column == kSpeedColumn) statisticsSpeedUnit_ = (statisticsSpeedUnit_ + 1) % 3;
+        else return;
+        UpdateTrafficUi();
     };
-    addRow(1, "TX", &txRow_);
-    addRow(2, "RX", &rxRow_);
-    grid->setColumnMinimumWidth(0, 70);
-    for (int column = 1; column < 4; ++column) grid->setColumnStretch(column, 1);
-    trafficLayout->addLayout(grid);
+    connect(trafficTable_, &QTableWidget::cellClicked, this,
+            [cycleUnit](int, int column) { cycleUnit(column); });
+    connect(trafficTable_->horizontalHeader(), &QHeaderView::sectionClicked, this,
+            cycleUnit);
+    trafficLayout->addWidget(trafficTable_);
     latencyLabel_ = new QLabel(trafficBox);
+    latencyLabel_->setStyleSheet(gui_theme::TextColorStyle(gui_theme::kMuted)
+        + QStringLiteral(" padding: 4px 8px 0 8px;"));
     trafficLayout->addWidget(latencyLabel_);
     layout->addWidget(trafficBox);
 
@@ -232,26 +235,31 @@ void MainWindow::RebuildPeerTable() {
 void MainWindow::UpdateTrafficUi() {
     const auto& stats = engine_.GetStats();
     const auto now = std::chrono::steady_clock::now();
-    auto fill = [this, now](TrafficRow& row, const QColor& color,
+    auto fill = [this, now](int row, const QColor& color,
                             std::chrono::steady_clock::time_point lastActivity,
                             uint64_t packets, uint64_t bytes, double bytesPerSecond) {
-        // Re-polishing a style sheet is not free; only touch it on a change.
-        const QString dotStyle = DotStyle(now - lastActivity < kActivityWindow, color);
-        if (row.dot->styleSheet() != dotStyle) row.dot->setStyleSheet(dotStyle);
-        row.packets->setText(QString::number(packets));
-        row.total->setText(FormatBytes(static_cast<double>(bytes),
-                                       statisticsTotalUnit_, false));
-        row.speed->setText(FormatBytes(bytesPerSecond, statisticsSpeedUnit_, true));
+        // Icons are rebuilt only when the activity flips, not on every tick.
+        const int active = now - lastActivity < kActivityWindow ? 1 : 0;
+        if (trafficRowActive_[row] != active) {
+            trafficRowActive_[row] = active;
+            trafficTable_->item(row, kDirectionColumn)->setIcon(ActivityIcon(color, active));
+        }
+        trafficTable_->item(row, kPacketsColumn)->setText(QString::number(packets));
+        trafficTable_->item(row, kTotalColumn)->setText(
+            FormatBytes(static_cast<double>(bytes), statisticsTotalUnit_, false));
+        trafficTable_->item(row, kSpeedColumn)->setText(
+            FormatBytes(bytesPerSecond, statisticsSpeedUnit_, true));
     };
-    fill(txRow_, gui_theme::kTx, lastTxActivity_, stats.txPackets.load(),
+    fill(kTxRow, gui_theme::kTx, lastTxActivity_, stats.txPackets.load(),
          stats.txBytes.load(), txBytesPerSecond_);
-    fill(rxRow_, gui_theme::kRx, lastRxActivity_, stats.rxPackets.load(),
+    fill(kRxRow, gui_theme::kRx, lastRxActivity_, stats.rxPackets.load(),
          stats.rxBytes.load(), rxBytesPerSecond_);
 
     const int64_t rtt = stats.rttMilliseconds.load();
     const QString latency = rtt < 0 ? QStringLiteral("--") : QString::number(rtt);
-    latencyLabel_->setText(QStringLiteral("Latency  %1 ms      TUN ring drops  %2")
+    latencyLabel_->setText(QStringLiteral("Latency %1 ms   %2   TUN ring drops %3")
         .arg(latency)
+        .arg(QChar(0x00B7))
         .arg(stats.tunRingFullDrops.load()));
 }
 

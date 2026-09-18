@@ -42,13 +42,6 @@ protected:
 private:
     enum class TrayMode : std::size_t { Idle, Disconnected, Rx, Tx, RxTx, Count };
 
-    struct TrafficRow {
-        QLabel* dot = nullptr;
-        QLabel* packets = nullptr;
-        QPushButton* total = nullptr;
-        QPushButton* speed = nullptr;
-    };
-
     // Construction (main_window.cpp and the per-tab files).
     QWidget* BuildHeader();
     QWidget* BuildConnectionTab();
@@ -123,8 +116,9 @@ private:
     QPushButton* connectButton_ = nullptr;
     QLabel* onlineLabel_ = nullptr;
     QTableWidget* peerTable_ = nullptr;
-    TrafficRow txRow_;
-    TrafficRow rxRow_;
+    QTableWidget* trafficTable_ = nullptr;
+    // Activity shown by each row's dot icon: -1 unknown, 0 idle, 1 active.
+    std::array<int, 2> trafficRowActive_{-1, -1};
     QLabel* latencyLabel_ = nullptr;
     std::array<HistoryChart*, 3> charts_{};
 

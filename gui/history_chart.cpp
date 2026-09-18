@@ -65,7 +65,7 @@ HistoryChart::HistoryChart(QString title, QString unit, QColor color, int capaci
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 }
 
-QSize HistoryChart::minimumSizeHint() const { return {180, 130}; }
+QSize HistoryChart::minimumSizeHint() const { return {180, 100}; }
 
 void HistoryChart::SetData(std::vector<double> values,
                            std::vector<std::chrono::system_clock::time_point> times) {
