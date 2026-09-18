@@ -1,0 +1,3 @@
+// Elevation manifest for non-MSVC Windows builds of the GUI. MSVC generates
+// the same manifest itself from the /MANIFESTUAC linker option.
+1 24 "EasyTunnel_gui.manifest"

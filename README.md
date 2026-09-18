@@ -15,7 +15,7 @@ EasyTunnel 是一个面向 IPv4 的点对点 TUN-over-UDP 隧道，支持通过�
 - 对端超时检测和非预期 UDP 来源过滤
 - Windows Wintun 与 Linux TUN 支持
 - Windows/Linux Console 客户端
-- ImGui GUI 客户端
+- Qt 6 GUI 客户端（托盘、实时图表）
 - FTXUI TUI 客户端，支持 Windows/Linux 终端和 SSH 会话
 - Windows/Linux IPv4 会合服务器
 - GUI JSON 配置自动保存与内置日志页面
@@ -52,12 +52,24 @@ EasyTunnel 是一个面向 IPv4 的点对点 TUN-over-UDP 隧道，支持通过�
 
 ### Windows
 
+GUI 依赖 Qt 6（Widgets 模块），通过 `CMAKE_PREFIX_PATH` 指向 Qt 安装目录，编译器需与 Qt 套件一致。
+MSVC 套件：
+
 ```powershell
-cmake -S . -B build -DBUILD_GUI=ON -DBUILD_TUI=ON
+cmake -S . -B build -DBUILD_GUI=ON -DBUILD_TUI=ON -DCMAKE_PREFIX_PATH=C:/Qt/6.11.2/msvc2022_64
 cmake --build build --config Release
 ```
 
-Windows 构建会自动下载 Wintun SDK、GLFW、ImGui、ImPlot、FTXUI 和 JsonCpp（JSON 配置读写）。生成：
+MinGW 套件（使用 Qt 安装包自带的 MinGW 和 Ninja）：
+
+```powershell
+$env:PATH = "C:\Qt\Tools\mingw1310_64\bin;C:\Qt\Tools\Ninja;$env:PATH"
+cmake -S . -B build-qt -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=C:/Qt/6.11.2/mingw_64
+cmake --build build-qt
+```
+
+构建 GUI 后会自动运行 `windeployqt`，把 Qt 运行库复制到输出目录（`-DEASYTUNNEL_DEPLOY_QT=OFF` 可关闭）。
+Windows 构建会自动下载 Wintun SDK、FTXUI 和 JsonCpp（JSON 配置读写）。生成：
 
 - `EasyTunnel.exe`：Console 客户端
 - `EasyTunnel_gui.exe`：GUI 客户端
@@ -69,7 +81,7 @@ Windows 构建会自动下载 Wintun SDK、GLFW、ImGui、ImPlot、FTXUI 和 Jso
 
 ### Linux 会合服务器
 
-只部署服务端时建议关闭 GUI，避免安装 OpenGL/X11 依赖：
+只部署服务端时建议关闭 GUI，避免安装 Qt 依赖：
 
 ```bash
 cmake -S . -B build -DBUILD_GUI=OFF -DBUILD_TUI=OFF

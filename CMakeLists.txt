@@ -9,7 +9,7 @@ endif()
 
 include(FetchContent)
 
-option(BUILD_GUI "Build the ImGui NAT traversal client" ON)
+option(BUILD_GUI "Build the Qt NAT traversal client" ON)
 option(BUILD_TUI "Build the FTXUI terminal client and rendezvous server" ON)
 
 FetchContent_Declare(
@@ -470,78 +470,48 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/conf/EasyTunnel.json.example")
 endif()
 
 if(BUILD_GUI)
-    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-        glfw
-        GIT_REPOSITORY https://github.com/glfw/glfw.git
-        GIT_TAG 3.4
-    )
-    FetchContent_MakeAvailable(glfw)
-
-    FetchContent_Declare(
-        imgui
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG v1.91.8
-    )
-    FetchContent_MakeAvailable(imgui)
-
-    FetchContent_Declare(
-        implot
-        GIT_REPOSITORY https://github.com/epezent/implot.git
-        GIT_TAG v1.0
-    )
-    FetchContent_MakeAvailable(implot)
-
-    set(IMGUI_DIR ${imgui_SOURCE_DIR})
-    add_library(imgui_lib STATIC
-        ${IMGUI_DIR}/imgui.cpp
-        ${IMGUI_DIR}/imgui_draw.cpp
-        ${IMGUI_DIR}/imgui_tables.cpp
-        ${IMGUI_DIR}/imgui_widgets.cpp
-        ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
-        ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
-        ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
-    )
-    target_include_directories(imgui_lib PUBLIC
-        ${IMGUI_DIR} ${IMGUI_DIR}/backends ${IMGUI_DIR}/misc/cpp)
-    find_package(OpenGL REQUIRED)
-    target_link_libraries(imgui_lib PUBLIC glfw OpenGL::GL)
-
-    set(IMPLOT_DIR ${implot_SOURCE_DIR})
-    add_library(implot_lib STATIC
-        ${IMPLOT_DIR}/implot.cpp
-        ${IMPLOT_DIR}/implot_items.cpp
-    )
-    target_include_directories(implot_lib PUBLIC ${IMPLOT_DIR})
-    target_link_libraries(implot_lib PUBLIC imgui_lib)
+    # Qt 6 Widgets front-end. Point CMAKE_PREFIX_PATH at the Qt kit, e.g.
+    # -DCMAKE_PREFIX_PATH=C:/Qt/6.11.2/mingw_64 (the kit's compiler must match).
+    find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
 
     set(GUI_SOURCES
         gui/gui_main.cpp
-        gui/gui_app.cpp
-        gui/gui_app_connection.cpp
-        gui/gui_app_statistics.cpp
-        gui/gui_app_settings.cpp
-        gui/gui_app_log.cpp
-        statistics_history.cpp
-        gui/ui_heartbeat.cpp)
+        gui/gui_theme.cpp
+        gui/history_chart.cpp
+        gui/main_window.cpp
+        gui/main_window_connection.cpp
+        gui/main_window_settings.cpp
+        gui/main_window_log.cpp
+        statistics_history.cpp)
     if(WIN32)
-        list(APPEND GUI_SOURCES
-            gui/windows_startup.cpp
-            gui/windows_tray.cpp)
+        list(APPEND GUI_SOURCES gui/windows_startup.cpp)
+        # MSVC embeds the elevation manifest through /MANIFESTUAC below; other
+        # toolchains get it from a resource script.
+        if(NOT MSVC)
+            list(APPEND GUI_SOURCES res/EasyTunnel_gui_manifest.rc)
+        endif()
     endif()
     add_executable(EasyTunnel_gui ${GUI_SOURCES} ${COMMON_SOURCES} ${APP_ICON_RESOURCE})
+    set_target_properties(EasyTunnel_gui PROPERTIES WIN32_EXECUTABLE ON)
     target_include_directories(EasyTunnel_gui PRIVATE ${CMAKE_SOURCE_DIR})
     target_link_libraries(EasyTunnel_gui PRIVATE
-        spdlog::spdlog_header_only jsoncpp_static implot_lib Threads::Threads)
+        spdlog::spdlog_header_only jsoncpp_static Qt6::Widgets Threads::Threads)
+
+    # Tray and window icons, one per connection/traffic state.
+    qt_add_resources(EasyTunnel_gui "gui_icons"
+        PREFIX "/icons"
+        BASE "${CMAKE_SOURCE_DIR}/res"
+        FILES
+            res/EasyTunnel.ico
+            res/IconSets/EasyTunnelDisconnected.ico
+            res/IconSets/EasyTunnelRx.ico
+            res/IconSets/EasyTunnelTx.ico
+            res/IconSets/EasyTunnelRxTx.ico)
 
     if(MSVC)
         target_compile_options(EasyTunnel_gui PRIVATE /W4 /utf-8)
         target_link_options(EasyTunnel_gui PRIVATE
-            "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'"
-            "/SUBSYSTEM:WINDOWS" "/ENTRY:mainCRTStartup")
+            "/MANIFESTUAC:level='requireAdministrator' uiAccess='false'")
     else()
         target_compile_options(EasyTunnel_gui PRIVATE -Wall -Wextra -Wpedantic)
     endif()
@@ -555,6 +525,19 @@ if(BUILD_GUI)
                     "${WINTUN_DLL_PATH}"
                     "$<TARGET_FILE_DIR:EasyTunnel_gui>/wintun.dll"
             COMMENT "Copy wintun.dll to GUI output directory")
-    endif()
 
+        # Copy the Qt runtime next to the executable so it starts from the
+        # build tree without Qt on PATH.
+        option(EASYTUNNEL_DEPLOY_QT "Run windeployqt after building the GUI" ON)
+        get_target_property(_qt_qmake Qt6::qmake IMPORTED_LOCATION)
+        get_filename_component(_qt_bin_dir "${_qt_qmake}" DIRECTORY)
+        find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+        if(EASYTUNNEL_DEPLOY_QT AND WINDEPLOYQT_EXECUTABLE)
+            add_custom_command(TARGET EasyTunnel_gui POST_BUILD
+                COMMAND "${WINDEPLOYQT_EXECUTABLE}"
+                        --no-translations --no-system-d3d-compiler --no-opengl-sw
+                        "$<TARGET_FILE:EasyTunnel_gui>"
+                COMMENT "Deploy Qt runtime for EasyTunnel_gui")
+        endif()
+    endif()
 endif()

@@ -1,18 +1,18 @@
 // EasyTunnel GUI entry point
 
 #ifdef _WIN32
-#ifndef UNICODE
-#define UNICODE
-#endif
-#ifndef _UNICODE
-#define _UNICODE
+#ifndef NOMINMAX
+#define NOMINMAX
 #endif
 #include <winsock2.h>
 #include <windows.h>
 #endif
 
-#include "gui_app.h"
+#include <QApplication>
+
 #include "../log.h"
+#include "gui_theme.h"
+#include "main_window.h"
 
 namespace {
 std::string GuiLogPath() {
@@ -29,30 +29,31 @@ std::string GuiLogPath() {
 }
 }  // namespace
 
-int main() {
-	SetLogFilePath(GuiLogPath());
+int main(int argc, char* argv[]) {
+    SetLogFilePath(GuiLogPath());
 #ifdef _WIN32
-	WSADATA wsa{};
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		Log(LogLevel::Error, "WSAStartup failed");
-		return 1;
-	}
+    WSADATA wsa{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        Log(LogLevel::Error, "WSAStartup failed");
+        return 1;
+    }
 #endif
 
-	GuiApp app;
-	if (!app.Init()) {
-		Log(LogLevel::Error, "Failed to initialize GUI");
-#ifdef _WIN32
-		WSACleanup();
-#endif
-		return 1;
-	}
+    int result = 0;
+    {
+        QApplication app(argc, argv);
+        QApplication::setApplicationName(QStringLiteral("EasyTunnel"));
+        // The window may live in the notification area; exit is explicit.
+        QApplication::setQuitOnLastWindowClosed(false);
+        gui_theme::Apply(app);
 
-	app.Run();
-	app.Shutdown();
+        MainWindow window;
+        window.show();
+        result = app.exec();
+    }
 
 #ifdef _WIN32
-	WSACleanup();
+    WSACleanup();
 #endif
-	return 0;
+    return result;
 }

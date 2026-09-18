@@ -14,6 +14,22 @@
 #include <security.h>
 #include <taskschd.h>
 
+// MinGW-w64's taskschd.h stops short of ILogonTrigger. The declaration below
+// mirrors the Windows SDK vtable layout (ITrigger followed by four accessors).
+#if defined(__MINGW32__) && !defined(__ILogonTrigger_INTERFACE_DEFINED__)
+#define __ILogonTrigger_INTERFACE_DEFINED__
+MIDL_INTERFACE("72dade38-fae4-4b3e-baf4-5d009af02b1c")
+ILogonTrigger : public ITrigger {
+public:
+    virtual HRESULT STDMETHODCALLTYPE get_Delay(BSTR* delay) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_Delay(BSTR delay) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_UserId(BSTR* user) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_UserId(BSTR user) = 0;
+};
+static const IID IID_ILogonTrigger = {
+    0x72dade38, 0xfae4, 0x4b3e, {0xba, 0xf4, 0x5d, 0x00, 0x9a, 0xf0, 0x2b, 0x1c}};
+#endif
+
 #include <cstdio>
 #include <limits>
 #include <string>

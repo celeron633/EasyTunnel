@@ -1,80 +1,60 @@
 #pragma once
 
-#include "imgui.h"
+#include <QColor>
+#include <QString>
 
 #include "../tunnel_engine.h"
 
-// Shared visual language for the GUI client. The connection state pill, the
-// TX/RX activity dots and the chart accents all come from here so the three
-// tabs and the status bar stay consistent.
+class QApplication;
+class QWidget;
+
+// Shared visual language for the GUI client: a flat dark theme with one blue
+// accent. The connection state pill, the TX/RX activity dots and the chart
+// accents all come from here so the tabs and the status bar stay consistent.
 namespace gui_theme {
 
-inline const ImVec4 kTx(0.88f, 0.16f, 0.18f, 1.0f);
-inline const ImVec4 kRx(0.16f, 0.78f, 0.24f, 1.0f);
-inline const ImVec4 kLatency(0.95f, 0.76f, 0.12f, 1.0f);
+// Surfaces, from the window background up to raised controls.
+inline const QColor kBackground(0x16, 0x18, 0x1d);
+inline const QColor kSurface(0x1e, 0x21, 0x28);
+inline const QColor kSurfaceRaised(0x26, 0x2a, 0x33);
+inline const QColor kBorder(0x2e, 0x33, 0x3d);
+inline const QColor kText(0xe6, 0xe8, 0xeb);
+inline const QColor kMuted(0x8b, 0x93, 0xa1);
+inline const QColor kAccent(0x3b, 0x82, 0xf6);
+
+inline const QColor kTx(0xf0, 0x52, 0x52);
+inline const QColor kRx(0x34, 0xd3, 0x74);
+inline const QColor kLatency(0xf5, 0xb7, 0x2b);
+inline const QColor kSuccess(0x34, 0xd3, 0x74);
+inline const QColor kFailure(0xef, 0x44, 0x44);
+inline const QColor kWarning(0xf5, 0xb7, 0x2b);
 
 struct StateStyle {
     const char* label;
-    ImVec4 color;
+    QColor color;
 };
 
 inline StateStyle StyleFor(TunnelState state) {
     switch (state) {
-        case TunnelState::Connected:
-            return {"CONNECTED", ImVec4(0.24f, 0.85f, 0.38f, 1.0f)};
-        case TunnelState::Connecting:
-            return {"CONNECTING", ImVec4(1.00f, 0.80f, 0.20f, 1.0f)};
-        case TunnelState::Waiting:
-            return {"WAITING", ImVec4(0.36f, 0.68f, 1.00f, 1.0f)};
-        case TunnelState::Error:
-            return {"ERROR", ImVec4(1.00f, 0.38f, 0.38f, 1.0f)};
-        default:
-            return {"DISCONNECTED", ImVec4(0.58f, 0.58f, 0.58f, 1.0f)};
+        case TunnelState::Connected: return {"CONNECTED", kSuccess};
+        case TunnelState::Connecting: return {"CONNECTING", kWarning};
+        case TunnelState::Waiting: return {"WAITING", QColor(0x60, 0xa5, 0xfa)};
+        case TunnelState::Error: return {"ERROR", kFailure};
+        default: return {"DISCONNECTED", kMuted};
     }
 }
 
-// A rounded pill carrying the connection state. Drawn directly so it cannot be
-// mistaken for a button the user is supposed to press.
-inline void Badge(const char* label, const ImVec4& color) {
-    const ImVec2 padding(9.0f, 2.0f);
-    const ImVec2 textSize = ImGui::CalcTextSize(label);
-    const ImVec2 start = ImGui::GetCursorScreenPos();
-    const ImVec2 end(start.x + textSize.x + padding.x * 2.0f,
-                     start.y + textSize.y + padding.y * 2.0f);
-    ImVec4 background = color;
-    background.w = 0.20f;
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled(start, end, ImGui::GetColorU32(background),
-                        (end.y - start.y) * 0.5f);
-    draw->AddText(ImVec2(start.x + padding.x, start.y + padding.y),
-                  ImGui::GetColorU32(color), label);
-    ImGui::Dummy(ImVec2(end.x - start.x, end.y - start.y));
+// "color: #rrggbb;" fragment for label style sheets.
+inline QString TextColorStyle(const QColor& color) {
+    return QStringLiteral("color: %1;").arg(color.name());
 }
 
-// Traffic activity indicator: full colour while packets are moving, heavily
-// dimmed otherwise.
-inline void ActivityDot(bool active, const ImVec4& color) {
-    ImVec4 shade = color;
-    if (!active) {
-        shade.x *= 0.30f;
-        shade.y *= 0.30f;
-        shade.z *= 0.30f;
-    }
-    const float lineHeight = ImGui::GetTextLineHeight();
-    const float radius = lineHeight * 0.26f;
-    const ImVec2 start = ImGui::GetCursorScreenPos();
-    ImGui::GetWindowDrawList()->AddCircleFilled(
-        ImVec2(start.x + radius, start.y + lineHeight * 0.5f), radius,
-        ImGui::GetColorU32(shade));
-    ImGui::Dummy(ImVec2(radius * 2.0f, lineHeight));
-}
+// Fusion base, a flat proxy style for check boxes and the application style
+// sheet.
+void Apply(QApplication& app);
 
-// Right-aligns the next text item on the current line.
-inline void TextRightAligned(const char* text) {
-    const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x
-        - ImGui::CalcTextSize(text).x;
-    if (right > ImGui::GetCursorPosX()) ImGui::SetCursorPosX(right);
-    ImGui::TextDisabled("%s", text);
-}
+// Buttons carry a "variant" property the style sheet keys on: "primary" (accent
+// fill), "danger" (red fill), "compact" (small padding) or empty for default.
+void SetButtonVariant(QWidget* button, const char* variant);
 
 }  // namespace gui_theme

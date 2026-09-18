@@ -22,8 +22,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: win64_msvc2022_64
+          cache: true
+
       - name: Configure (CMake + MSVC)
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        shell: pwsh
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR"
 
       - name: Build Release (console + GUI + TUI + rendezvous TUI)
         run: |
@@ -48,6 +56,10 @@ jobs:
           Copy-Item "build/Release/EasyTunnel_gui.exe" "dist/EasyTunnel/EasyTunnel_gui.exe" -Force
           Copy-Item "build/Release/EasyTunnel_tui.exe" "dist/EasyTunnel/EasyTunnel_tui.exe" -Force
           Copy-Item "build/Release/EasyTunnel_rendezvous_tui.exe" "dist/EasyTunnel/EasyTunnel_rendezvous_tui.exe" -Force
+
+          # Qt runtime (DLLs and plugins) for the GUI.
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
+            "dist/EasyTunnel/EasyTunnel_gui.exe"
 
           if (Test-Path "build/Release/wintun.dll") {
             Copy-Item "build/Release/wintun.dll" "dist/EasyTunnel/wintun.dll" -Force
@@ -93,10 +105,7 @@ jobs:
             ninja-build \
             pkg-config \
             libgl1-mesa-dev \
-            libwayland-dev \
-            libxkbcommon-dev \
-            wayland-protocols \
-            xorg-dev
+            qt6-base-dev
 
       - name: Verify amd64 runner
         run: test "$(uname -m)" = "x86_64"
