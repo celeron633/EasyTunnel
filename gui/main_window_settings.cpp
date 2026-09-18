@@ -14,7 +14,6 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
-#include <QStyledItemDelegate>
 #include <QSystemTrayIcon>
 #include <QTableWidget>
 #include <QTimer>
@@ -39,8 +38,8 @@ QFormLayout* AddSection(QVBoxLayout* column, const QString& title) {
     auto* form = new QFormLayout(box);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    form->setHorizontalSpacing(16);
-    form->setVerticalSpacing(12);
+    form->setHorizontalSpacing(12);
+    form->setVerticalSpacing(8);
     column->addWidget(box);
     return form;
 }
@@ -84,12 +83,7 @@ Widget* GuardWheel(Widget* widget) {
     return widget;
 }
 
-QComboBox* MakeComboBox() {
-    auto* combo = GuardWheel(new QComboBox());
-    // The default delegate ignores ::item padding in the style sheet.
-    combo->setItemDelegate(new QStyledItemDelegate(combo));
-    return combo;
-}
+QComboBox* MakeComboBox() { return GuardWheel(new QComboBox()); }
 
 QSpinBox* MakeSpinBox(int minimum, int maximum, int value) {
     auto* spin = GuardWheel(new QSpinBox());
@@ -98,8 +92,6 @@ QSpinBox* MakeSpinBox(int minimum, int maximum, int value) {
     // Commit on Enter, focus loss or the arrows rather than on every digit, so
     // dependent clamps (peer timeout vs keepalive) do not fight the typing.
     spin->setKeyboardTracking(false);
-    // Flat field look; the wheel and the arrow keys still step the value.
-    spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
     return spin;
 }
 }  // namespace
@@ -134,7 +126,6 @@ QSpinBox* MainWindow::AddIntField(QFormLayout* form, const QString& label, int* 
 QCheckBox* MainWindow::AddCheckField(QFormLayout* form, const QString& label,
                                      bool* target, std::function<void()> onChanged) {
     auto* check = new QCheckBox();
-    gui_theme::MakeSwitch(check);
     check->setChecked(*target);
     connect(check, &QCheckBox::toggled, this,
             [this, target, onChanged = std::move(onChanged)](bool checked) {
@@ -264,7 +255,6 @@ QWidget* MainWindow::BuildSettingsTab() {
         Log(LogLevel::Error, startupError);
     }
     startWithWindowsCheck_ = new QCheckBox();
-    gui_theme::MakeSwitch(startWithWindowsCheck_);
     startWithWindowsCheck_->setChecked(startWithWindows);
     startWithWindowsCheck_->setToolTip(
         QStringLiteral("Uses an elevated logon task in Windows Task Scheduler."));
@@ -305,7 +295,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     traversalTable_->setHorizontalHeaderLabels({QStringLiteral("Enabled"),
         QStringLiteral("Priority"), QStringLiteral("Mode"), QStringLiteral("Order")});
     traversalTable_->verticalHeader()->setVisible(false);
-    traversalTable_->verticalHeader()->setDefaultSectionSize(44);
+    traversalTable_->verticalHeader()->setDefaultSectionSize(34);
     traversalTable_->setShowGrid(false);
     traversalTable_->setSelectionMode(QAbstractItemView::NoSelection);
     traversalTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -315,7 +305,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     traversalHeader->setSectionResizeMode(2, QHeaderView::Stretch);
     // Cell widgets do not feed ResizeToContents; size the Up/Down column here.
     traversalHeader->setSectionResizeMode(3, QHeaderView::Fixed);
-    traversalHeader->resizeSection(3, 150);
+    traversalHeader->resizeSection(3, 130);
     traversalTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     traversalLayout->addWidget(traversalTable_);
     right->addWidget(traversalBox);
@@ -380,7 +370,7 @@ void MainWindow::RebuildTraversalTable() {
         up->setEnabled(row > 0);
         down->setEnabled(row + 1 < count);
         for (QPushButton* button : {up, down}) {
-            gui_theme::SetButtonVariant(button, "text");
+            gui_theme::SetButtonVariant(button, "compact");
             orderLayout->addWidget(button);
         }
         auto move = [this, row](int offset) {

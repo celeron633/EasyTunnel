@@ -8,45 +8,32 @@
 class QApplication;
 class QWidget;
 
-// Shared visual language for the GUI client: Material Design 3, light scheme
-// generated from a blue seed (#0061A4). The connection state chip, the TX/RX
-// activity dots and the chart accents all come from here so the tabs and the
-// status bar stay consistent.
+// Shared visual language for the GUI client: a restrained light desktop theme
+// in the spirit of Windows 11 (neutral greys, one blue accent, small radii).
+// The connection state chip, the TX/RX activity dots and the chart accents all
+// come from here so the tabs and the status bar stay consistent.
 namespace gui_theme {
 
-// MD3 colour roles.
-inline const QColor kPrimary(0x00, 0x61, 0xa4);
-inline const QColor kOnPrimary(0xff, 0xff, 0xff);
-inline const QColor kPrimaryContainer(0xd1, 0xe4, 0xff);
-inline const QColor kSecondaryContainer(0xd7, 0xe3, 0xf7);
-inline const QColor kOnSecondaryContainer(0x10, 0x1c, 0x2b);
-inline const QColor kError(0xba, 0x1a, 0x1a);
-inline const QColor kSurface(0xf8, 0xf9, 0xff);
-inline const QColor kSurfaceContainerLowest(0xff, 0xff, 0xff);
-inline const QColor kSurfaceContainerLow(0xf2, 0xf3, 0xfa);
-inline const QColor kSurfaceContainer(0xec, 0xee, 0xf4);
-inline const QColor kSurfaceContainerHigh(0xe6, 0xe8, 0xee);
-inline const QColor kSurfaceContainerHighest(0xe1, 0xe2, 0xe8);
-inline const QColor kOnSurface(0x19, 0x1c, 0x20);
-inline const QColor kOnSurfaceVariant(0x42, 0x47, 0x4e);
-inline const QColor kOutline(0x73, 0x77, 0x7f);
-inline const QColor kOutlineVariant(0xc3, 0xc7, 0xcf);
-inline const QColor kInverseSurface(0x2e, 0x31, 0x35);
-inline const QColor kInverseOnSurface(0xef, 0xf0, 0xf7);
+// Neutral surfaces and lines.
+inline const QColor kWindow(0xf3, 0xf3, 0xf3);
+inline const QColor kSurface(0xff, 0xff, 0xff);
+inline const QColor kSurfaceAlt(0xf9, 0xf9, 0xf9);
+inline const QColor kBorder(0xe0, 0xe0, 0xe0);
+inline const QColor kBorderStrong(0xc4, 0xc4, 0xc4);
+inline const QColor kText(0x1b, 0x1b, 0x1b);
+inline const QColor kMuted(0x60, 0x60, 0x60);
 
-// Short names used by the widgets.
-inline const QColor& kAccent = kPrimary;
-inline const QColor& kText = kOnSurface;
-inline const QColor& kMuted = kOnSurfaceVariant;
-inline const QColor& kBorder = kOutlineVariant;
+// Single accent (Windows blue) and its tint for selections.
+inline const QColor kAccent(0x00, 0x67, 0xc0);
+inline const QColor kAccentTint(0xdb, 0xea, 0xf8);
 
-// Data and status accents, picked to stay legible on the light surfaces.
-inline const QColor kTx(0xc6, 0x28, 0x28);
-inline const QColor kRx(0x1b, 0x87, 0x3f);
-inline const QColor kLatency(0xb2, 0x6a, 0x00);
-inline const QColor kSuccess(0x1b, 0x87, 0x3f);
-inline const QColor kFailure = kError;
-inline const QColor kWarning(0xb2, 0x6a, 0x00);
+// Data and status colours from the Windows palette.
+inline const QColor kTx(0xd1, 0x34, 0x38);
+inline const QColor kRx(0x10, 0x7c, 0x10);
+inline const QColor kLatency(0xca, 0x50, 0x10);
+inline const QColor kSuccess(0x10, 0x7c, 0x10);
+inline const QColor kFailure(0xc4, 0x2b, 0x1c);
+inline const QColor kWarning(0x9d, 0x5d, 0x00);
 
 struct StateStyle {
     const char* label;
@@ -57,9 +44,9 @@ inline StateStyle StyleFor(TunnelState state) {
     switch (state) {
         case TunnelState::Connected: return {"CONNECTED", kSuccess};
         case TunnelState::Connecting: return {"CONNECTING", kWarning};
-        case TunnelState::Waiting: return {"WAITING", kPrimary};
-        case TunnelState::Error: return {"ERROR", kError};
-        default: return {"DISCONNECTED", kOnSurfaceVariant};
+        case TunnelState::Waiting: return {"WAITING", kAccent};
+        case TunnelState::Error: return {"ERROR", kFailure};
+        default: return {"DISCONNECTED", kMuted};
     }
 }
 
@@ -68,18 +55,16 @@ inline QString TextColorStyle(const QColor& color) {
     return QStringLiteral("color: %1;").arg(color.name());
 }
 
-// Fusion base with MD3 check boxes and switches, plus the application style
-// sheet.
+// Fusion base with flat check boxes and roomier input controls, plus the
+// application style sheet. Input controls are deliberately left out of the
+// style sheet so Fusion keeps drawing their spin arrows and drop-down buttons.
 void Apply(QApplication& app);
 
-// Buttons carry a "variant" property the style sheet keys on: "primary" (filled),
-// "danger" (filled error), "text" (text button) or empty for a tonal button.
+// Buttons carry a "variant" property the style sheet keys on: "primary" (accent
+// fill), "danger" (red fill), "compact" (small, for table rows) or empty.
 void SetButtonVariant(QWidget* button, const char* variant);
 
 // Lets a QMenu show the style sheet's rounded corners.
 void PrepareMenu(QWidget* menu);
-
-// Renders a QCheckBox as an MD3 switch; use for on/off settings.
-void MakeSwitch(QWidget* checkBox);
 
 }  // namespace gui_theme

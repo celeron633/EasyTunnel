@@ -35,10 +35,10 @@ const char* const kTrayIconPaths[] = {
 
 QString BadgeStyle(const QColor& color) {
     QColor background = color;
-    background.setAlphaF(0.14f);
+    background.setAlphaF(0.12f);
     return QStringLiteral(
                "QLabel { color: %1; background-color: rgba(%2, %3, %4, %5);"
-               " border-radius: 8px; padding: 4px 12px; font-weight: 600; }")
+               " border-radius: 4px; padding: 3px 8px; font-weight: 600; }")
         .arg(color.name())
         .arg(background.red())
         .arg(background.green())

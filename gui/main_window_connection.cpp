@@ -60,7 +60,7 @@ QIcon ActivityIcon(const QColor& color, bool active) {
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(active ? color : gui_theme::kOutlineVariant);
+    painter.setBrush(active ? color : gui_theme::kBorderStrong);
     painter.drawEllipse(QRectF(1.0, 1.0, 10.0, 10.0));
     return QIcon(pixmap);
 }
@@ -108,7 +108,7 @@ QWidget* MainWindow::BuildConnectionTab() {
     peerTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     peerTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     peerTable_->verticalHeader()->setVisible(false);
-    peerTable_->verticalHeader()->setDefaultSectionSize(40);
+    peerTable_->verticalHeader()->setDefaultSectionSize(32);
     peerTable_->setShowGrid(false);
     peerTable_->setFocusPolicy(Qt::NoFocus);
     peerTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -142,7 +142,7 @@ QWidget* MainWindow::BuildConnectionTab() {
     trafficTable_->setShowGrid(false);
     trafficTable_->setIconSize(QSize(12, 12));
     trafficTable_->verticalHeader()->setVisible(false);
-    trafficTable_->verticalHeader()->setDefaultSectionSize(40);
+    trafficTable_->verticalHeader()->setDefaultSectionSize(32);
     trafficTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     trafficTable_->horizontalHeader()->setHighlightSections(false);
     trafficTable_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
