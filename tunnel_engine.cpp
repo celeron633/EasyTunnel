@@ -68,6 +68,10 @@ bool TunnelEngine::Start(const Config& cfg) {
 		workerThread_.join();
 	}
 
+	// Apply before launching the worker so its config snapshot cannot overwrite
+	// a later log-level change from the UI.
+	SetLogLevel(cfg.log_level);
+
 	// Reset stats
 	stats_.txPackets.store(0);
 	stats_.rxPackets.store(0);
@@ -116,8 +120,6 @@ void TunnelEngine::SetState(TunnelState state, const std::string& msg) {
 }
 
 void TunnelEngine::WorkerThread(Config cfg) {
-	SetLogLevel(cfg.log_level);
-
 	Log(LogLevel::Info, "EasyTunnel engine starting... worker_thread="
 		+ CurrentThreadId());
 	Log(LogLevel::Info,

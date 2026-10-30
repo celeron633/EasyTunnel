@@ -240,6 +240,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     logLevel->setCurrentIndex(std::clamp(config_.logLevel, 0, 3));
     connect(logLevel, &QComboBox::currentIndexChanged, this, [this](int index) {
         config_.logLevel = std::clamp(index, 0, 3);
+        SetLogLevel(static_cast<LogLevel>(config_.logLevel));
         ScheduleConfigSave();
     });
     AddRow(form, QStringLiteral("Log level"), logLevel);
@@ -458,6 +459,7 @@ std::string MainWindow::LoadGuiConfig(bool* succeeded) {
         *succeeded = false;
         return error;
     }
+    SetLogLevel(static_cast<LogLevel>(config_.logLevel));
     const std::string message = existed
         ? "Configuration loaded from " + configFilePath_
         : "Configuration will be saved to " + configFilePath_;

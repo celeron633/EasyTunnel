@@ -59,7 +59,11 @@ ftxui::Component TuiApp::BuildSettingsTab() {
     auto autoWait = Checkbox("Auto wait for peer", &config_.autoWaitForPeer);
     // A horizontal toggle keeps the log level on a single row, which is what
     // lets the whole page fit a default-sized terminal window.
-    auto logLevel = Toggle(&logLevels_, &config_.logLevel);
+    auto logLevelOption = MenuOption::Toggle();
+    logLevelOption.on_change = [this] {
+        SetLogLevel(static_cast<LogLevel>(config_.logLevel));
+    };
+    auto logLevel = Menu(&logLevels_, &config_.logLevel, logLevelOption);
 
     const ButtonOption flatButton = tui_theme::FlatButton();
     auto stunDiagnostic = Button("Test STUN A/B", [this] {

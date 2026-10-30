@@ -35,6 +35,7 @@ bool TuiApp::Init() {
         configMessage_ = error;
         configSaveOk_ = false;
     }
+    SetLogLevel(static_cast<LogLevel>(config_.logLevel));
     SyncTextFromConfig();
     retryDelaySeconds_.store(config_.rendezvousRetryDelaySeconds);
     if (!existed) {

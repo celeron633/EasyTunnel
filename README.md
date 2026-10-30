@@ -248,6 +248,7 @@ Linux 客户端通常需要 root 或相应的 TUN/network capability。
 - 配置修改后自动保存到当前工作目录的 `EasyTunnel.json`。
 - 启动时自动加载配置，并在页面显示保存结果和绝对路径。
 - **Log** 页面显示实时日志，最多保留 2000 行。
+- Settings 中的 **Log level** 修改后立即影响后续日志（页面和日志文件），无需重启程序或重新连接；启动时也会应用已保存的级别。
 - 文件日志位于 `EasyTunnel_gui.exe` 同目录的 `EasyTunnel_gui.log`。
 - Connection 页面按 1 秒间隔显示最近 60 秒的 TX/RX 速度和延迟柱形图。
 - Settings → Rendezvous 中的 **Auto wait for peer** 默认关闭。启用后，GUI 会在启动、断开或错误退出连接后自动向会合服务器注册并等待其他 Peer。首次启动会立即注册；会合超时、其他错误或手动 Disconnect 后，会按同一区域的 **Retry Delay Seconds** 延迟重试（默认 5 秒，可配置 1–3600 秒）。
@@ -276,6 +277,7 @@ sudo ./build/EasyTunnel_tui
 - Windows 下提供托盘图标：单击切换终端窗口显示/隐藏，右键菜单可退出
 - Connection 页面提供与 GUI 一致的最近 60 秒速度和延迟历史图
 - 日志写入可执行文件目录的 `EasyTunnel_tui.log`
+- Settings 中切换 **Log level** 后立即影响后续页面日志和文件日志，无需重启或重新连接；启动时应用已保存的级别
 - Quit 会安全停止隧道并退出
 - Settings 中的 **Traversal strategy** 表同样支持逐项开关和 Up/Down 排序
 
