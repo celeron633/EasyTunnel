@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-inline constexpr uint16_t kNatPunchProtocolVersionNumber = 3;
-inline constexpr char kNatPunchProtocolVersion[] = "3";
+inline constexpr uint16_t kNatPunchProtocolVersionNumber = 4;
+inline constexpr char kNatPunchProtocolVersion[] = "4";
 
 std::string MakeControlMessage(const std::string& type,
                                const std::vector<std::string>& fields = {});

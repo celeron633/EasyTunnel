@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "nat_punch_transport.h"
+#include "nat_punch_handshake.h"
 #include "nat_protocol.h"
 #include "nat_traversal.h"
 
@@ -72,6 +73,49 @@ int main() {
     socket_t receiver = OpenBoundSocket(&receiverEndpoint);
     Expect(sender != kInvalidSocket && receiver != kInvalidSocket,
            "loopback UDP sockets open");
+
+    // Reproduce X's queued pre-punch racing a successful probe to Y.
+    NatPunchHandshake senderHandshake(NatPunchExecutionRole::Sender, "sender-nonce");
+    NatPunchHandshake receiverHandshake(NatPunchExecutionRole::Receiver, "receiver-nonce");
+    UdpEndpoint loserEndpoint{};
+    ParseUdpEndpoint("127.0.0.1", 12345, &loserEndpoint);
+    Expect(senderHandshake.Handle(sender, loserEndpoint, "PUNCH", "receiver-nonce")
+               == NatPunchReply::None && !senderHandshake.complete(),
+           "sender ignores queued receiver probes instead of selecting a loser");
+    Expect(receiverHandshake.Handle(receiver, senderEndpoint, "PUNCH_CONFIRM", "sender-nonce")
+               == NatPunchReply::None && !receiverHandshake.complete(),
+           "out-of-order confirmation cannot nominate a receiver socket");
+    Expect(receiverHandshake.Handle(receiver, senderEndpoint, "PUNCH", "sender-nonce")
+               == NatPunchReply::Ack && receiverHandshake.awaitingConfirmation(),
+           "receiver nominates the receiving socket but waits for confirmation");
+    Expect(receiverHandshake.Handle(sender, senderEndpoint, "PUNCH", "sender-nonce")
+               == NatPunchReply::None
+               && receiverHandshake.Handle(receiver, loserEndpoint, "PUNCH", "sender-nonce")
+                   == NatPunchReply::None,
+           "another socket or endpoint cannot replace the nominated path");
+    Expect(senderHandshake.Handle(sender, receiverEndpoint, "PUNCH_ACK", "old-nonce")
+               == NatPunchReply::None && !senderHandshake.complete(),
+           "ACK from an old probe cannot complete the sender");
+    // Drop the first ACK; the selected receiver must be able to resend it.
+    Expect(receiverHandshake.Handle(receiver, senderEndpoint, "PUNCH", "sender-nonce")
+               == NatPunchReply::Ack && !receiverHandshake.complete(),
+           "duplicate probe after lost ACK keeps the same receiver path");
+    Expect(senderHandshake.Handle(sender, receiverEndpoint, "PUNCH_ACK", "sender-nonce")
+               == NatPunchReply::Confirm && senderHandshake.complete()
+               && SameUdpEndpoint(senderHandshake.peer(), receiverEndpoint),
+           "sender confirms Y despite the earlier probe from X");
+    receiverHandshake.Handle(receiver, senderEndpoint, "PUNCH_CONFIRM", "old-nonce");
+    Expect(receiverHandshake.awaitingConfirmation(), "wrong confirmation nonce is ignored");
+    // Drop CONFIRM, then deliver the receiver's retried ACK.
+    Expect(senderHandshake.Handle(sender, receiverEndpoint, "PUNCH_ACK", "sender-nonce")
+               == NatPunchReply::Confirm,
+           "lost confirmation can be recovered without changing the winner");
+    receiverHandshake.Handle(receiver, senderEndpoint, "PUNCH_CONFIRM", "sender-nonce");
+    Expect(receiverHandshake.complete() && receiverHandshake.socket() == receiver,
+           "matching confirmation commits the nominated receiver socket");
+    Expect(senderHandshake.Handle(sender, loserEndpoint, "PUNCH_ACK", "sender-nonce")
+               == NatPunchReply::None && SameUdpEndpoint(senderHandshake.peer(), receiverEndpoint),
+           "late ACK from another candidate cannot change the committed sender path");
 
     int originalTtl = 0;
     int socketError = 0;
@@ -145,6 +189,29 @@ int main() {
     punchSession.punchToken =
         "0123456789abcdef0123456789abcdef"
         "0123456789abcdef0123456789abcdef";
+
+    const std::string retriedAck = MakeControlMessage("PUNCH_ACK",
+        {punchSession.sessionId, std::to_string(punchSession.attemptId),
+         "receiver", "sender-nonce", punchSession.punchToken});
+    const auto ackResult = HandlePeerControl(sender, senderConfig,
+        receiverEndpoint, receiverEndpoint, "receiver", punchSession,
+        reinterpret_cast<const uint8_t*>(retriedAck.data()), retriedAck.size());
+    std::vector<uint8_t> confirmBuffer(2048);
+    const int confirmLength = recvfrom(receiver,
+        reinterpret_cast<char*>(confirmBuffer.data()),
+        static_cast<int>(confirmBuffer.size()), 0, nullptr, nullptr);
+    std::string confirmType;
+    std::vector<std::string> confirmFields;
+    Expect(ackResult.peerSeen && confirmLength > 0
+               && ParseControlMessage(confirmBuffer.data(), confirmLength,
+                                      &confirmType, &confirmFields)
+               && confirmType == "PUNCH_CONFIRM" && confirmFields.size() == 5
+               && confirmFields[3] == "sender-nonce",
+           "data plane retransmits a lost confirmation on the selected path");
+    const auto wrongAck = HandlePeerControl(sender, senderConfig,
+        receiverEndpoint, loserEndpoint, "receiver", punchSession,
+        reinterpret_cast<const uint8_t*>(retriedAck.data()), retriedAck.size());
+    Expect(!wrongAck.peerSeen, "data plane rejects ACK from a losing candidate");
 
     Expect(SendPeerDisconnect(
                sender, senderConfig, receiverEndpoint, punchSession),

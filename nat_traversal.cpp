@@ -26,7 +26,7 @@ PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
     result.handled = true;
     if (!SameUdpEndpoint(source, peer)) return result;
 
-    if (type == "PUNCH" || type == "PUNCH_ACK") {
+    if (type == "PUNCH" || type == "PUNCH_ACK" || type == "PUNCH_CONFIRM") {
         const bool validPunch = fields.size() == 5
             && fields[0] == punchSession.sessionId
             && fields[1] == std::to_string(punchSession.attemptId)
@@ -36,6 +36,12 @@ PeerControlResult HandlePeerControl(socket_t sock, const Config& cfg,
         if (!validPunch) return result;
         if (type == "PUNCH") {
             Send(sock, peer, MakeControlMessage("PUNCH_ACK",
+                {punchSession.sessionId, std::to_string(punchSession.attemptId),
+                 cfg.peer_id, fields[3], punchSession.punchToken}));
+        } else if (type == "PUNCH_ACK") {
+            // The sender may have handed off before its CONFIRM arrived.
+            // Reconfirm only the already selected, authenticated endpoint.
+            Send(sock, peer, MakeControlMessage("PUNCH_CONFIRM",
                 {punchSession.sessionId, std::to_string(punchSession.attemptId),
                  cfg.peer_id, fields[3], punchSession.punchToken}));
         }

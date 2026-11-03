@@ -67,8 +67,9 @@ frp xTCP 的流程、五种模式和源码索引见
 - [x] 增加 `nat_punch_attempt_limit`（默认 3、最大 10）；双方同步重试后使用新的
       attempt ID 和 punch token，并拒绝旧 attempt 报文。
 - [x] 增加 balanced/aggressive profile，控制范围大小、发送间隔和单 attempt 报文预算。
-- [x] Direct 保持单目标；Range/dual-range 从首轮小范围开始，后续 attempt 逐步扩大，
-      达到上限后再进入 Random 或其他回退策略。
+- [x] Direct 保持单目标；Range/dual-range 从首轮小范围开始，后续 attempt 逐步扩大。
+      当前达到上限后仍保持原模式；耗尽 attempt 后才进入 IPv6/Relay 等后续策略。
+- [ ] 为 Range/dual-range 失败增加确定性的 Random/mixed 跨模式回退。
 
 ### 阶段 4：frp Mode 2 类 Random receiver
 
@@ -158,8 +159,8 @@ frp xTCP 的流程、五种模式和源码索引见
       继续使用单目标计划。
 - [x] 实现 easy/random 的 Mode 2 基线：random 端使用 32～256 个受限 receiver
       socket，easy 端按 profile 探测 256～1000 个不重复随机端口。
-- [x] 多 socket 使用系统 poll 等待首个认证 PUNCH/PUNCH_ACK；关闭所有 loser，
-      将 winner socket 原样交给 TUN 数据面。
+- [x] 多 socket 使用系统 poll 等待认证 PUNCH，锁定候选并完成 ACK/CONFIRM 后关闭 loser，
+      将 winner socket 原样交给 TUN 数据面；sender 仅凭匹配 nonce 的 ACK 确认。
 - [x] 集成测试覆盖 Aggressive 最大 256 socket、1000 随机目标、真实 registry 屏障、
       attempt/token 校验和 winner 接管。
 - [x] socket pool 测试连续 12 轮创建/释放 256 socket，并注入辅助 socket 创建失败；
@@ -180,8 +181,12 @@ frp xTCP 的流程、五种模式和源码索引见
 #### frp xTCP 困难 NAT 策略
 
 - [x] 实现 Mode 4 类 mixed random/range，并通过假 STUN + 真实 registry 双端集成测试。
-- [x] 实现低 TTL 预打洞以及 sender/receiver 延迟发送组合；TTL 设置/恢复、角色轮换、
+- [x] 实现低 TTL 预打洞以及 sender/receiver 延迟发送组合；TTL 设置/恢复、互补角色选择、
       短超时上限和取消等待均有 unit test。
+- [x] 修复 sender 普通 PUNCH 提前提交造成的 winner 不一致，补乱序/ACK 丢失及移交后
+      双向数据回归，详见 [2026-11-03 复核](frp-xtcp-nat-traversal.md#2026-11-03-实现复核)。
+- [ ] 调整低 TTL receiver 等待阶段，避免 sender 延时期间提前发送普通 TTL 探测包。
+- [ ] Direct/dual-range 增加 sender/receiver 方向轮换；当前只轮换 TTL 和延时。
 - [ ] 收集公网样本，评估低 TTL 与 sender delay 的实际收益并决定最终默认轮换顺序。
 
 #### 会合与候选地址

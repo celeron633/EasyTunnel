@@ -15,7 +15,7 @@ stateDiagram-v2
     SelectStrategy --> NatPunch: nat_punch
     SelectStrategy --> Ipv6: ipv6
     SelectStrategy --> Relay: ipv4_relay
-    NatPunch --> Connected: PUNCH/PUNCH_ACK
+    NatPunch --> Connected: PUNCH/ACK/CONFIRM 固定路径
     Ipv6 --> Connected: V6_HELLO/V6_HELLO_ACK
     Relay --> Connected: RELAY_READY
     NatPunch --> SelectStrategy: 失败
@@ -76,6 +76,7 @@ sequenceDiagram
     R-->>B: NAT_START
     A-->>B: PUNCH(session, attempt, nonce, token)
     B-->>A: PUNCH_ACK(echo nonce)
+    A-->>B: PUNCH_CONFIRM(echo nonce)
 ```
 
 attempt 1 直接进入屏障；attempt 2/3 的 receiver 分别以 TTL 7/TTL 4 发送一轮预算内

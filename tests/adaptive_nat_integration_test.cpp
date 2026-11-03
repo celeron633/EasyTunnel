@@ -181,6 +181,8 @@ struct InterruptedPunchResult {
     bool setup = false;
     bool peerInfoReceived = false;
     bool punched = false;
+    int acknowledgements = 0;
+    bool bidirectionalPayload = false;
     NatPunchAttemptResult attempt;
     std::string error;
 };
@@ -189,7 +191,11 @@ enum class InterruptedPunchMode {
     CancelAtBarrier,
     PunchTimeout,
     BarrierTimeout,
+    ConfirmationRetry,
 };
+
+bool ExchangePayload(socket_t from, const UdpEndpoint& destination,
+                     socket_t to, const UdpEndpoint& expectedSource);
 
 InterruptedPunchResult RunInterruptedRandomReceiver(
         Config easyConfig, Config randomConfig,
@@ -202,7 +208,8 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     randomConfig.room_id = easyConfig.room_id;
     randomConfig.peer_id = "random";
     randomConfig.target_peer_id = "easy";
-    randomConfig.punch_timeout = mode == InterruptedPunchMode::CancelAtBarrier
+    randomConfig.punch_timeout = (mode == InterruptedPunchMode::CancelAtBarrier
+        || mode == InterruptedPunchMode::ConfirmationRetry)
         ? 5 : mode == InterruptedPunchMode::PunchTimeout ? 2 : 30;
 
     socket_t easyControl = kInvalidSocket;
@@ -276,7 +283,8 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
         result.peerInfoReceived = WaitForNatPeerInfo(
             easyControl, &easyRendezvous, easySession, easyPeerId);
     }
-    if (mode == InterruptedPunchMode::PunchTimeout
+    if ((mode == InterruptedPunchMode::PunchTimeout
+         || mode == InterruptedPunchMode::ConfirmationRetry)
         && result.peerInfoReceived) {
         easyRendezvous.SendNatArmed(easyControl, easyPeerId,
             easySession.sessionId, easySession.attemptId);
@@ -285,7 +293,48 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         running.store(false);
     }
+    UdpEndpoint selectedReceiver{};
+    if (mode == InterruptedPunchMode::ConfirmationRetry && result.peerInfoReceived) {
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (std::chrono::steady_clock::now() < end) {
+            uint8_t data[2048]{};
+            sockaddr_storage source{};
+            socket_len_t length = sizeof(source);
+            const int n = recvfrom(easyPunch, reinterpret_cast<char*>(data), sizeof(data),
+                0, reinterpret_cast<sockaddr*>(&source), &length);
+            std::string type;
+            std::vector<std::string> fields;
+            if (n <= 0 || !ParseControlMessage(data, n, &type, &fields)
+                || fields.size() != 5) continue;
+            const auto endpoint = FromSockaddr(source, length);
+            if (type == "PUNCH" && selectedReceiver.family == AF_UNSPEC) {
+                selectedReceiver = endpoint;
+                const auto probe = MakeControlMessage("PUNCH",
+                    {easySession.sessionId, std::to_string(easySession.attemptId),
+                     easyConfig.peer_id, "retry-nonce", easySession.punchToken});
+                sendto(easyPunch, probe.data(), static_cast<int>(probe.size()), 0,
+                    reinterpret_cast<const sockaddr*>(&endpoint.addr), endpoint.addr_len);
+            } else if (type == "PUNCH_ACK" && fields[3] == "retry-nonce"
+                       && SameUdpEndpoint(endpoint, selectedReceiver)) {
+                ++result.acknowledgements;
+                // Lose the first ACK and withhold CONFIRM until the timer retries.
+                if (result.acknowledgements < 2) continue;
+                const auto confirm = MakeControlMessage("PUNCH_CONFIRM",
+                    {easySession.sessionId, std::to_string(easySession.attemptId),
+                     easyConfig.peer_id, "retry-nonce", easySession.punchToken});
+                sendto(easyPunch, confirm.data(), static_cast<int>(confirm.size()), 0,
+                    reinterpret_cast<const sockaddr*>(&endpoint.addr), endpoint.addr_len);
+                break;
+            }
+        }
+    }
     randomPunchThread.join();
+
+    if (result.punched && mode == InterruptedPunchMode::ConfirmationRetry) {
+        result.bidirectionalPayload =
+            ExchangePayload(easyPunch, selectedReceiver, randomPunch, randomPeer)
+            && ExchangePayload(randomPunch, randomPeer, easyPunch, selectedReceiver);
+    }
 
     running.store(false);
     UnregisterRendezvous(easyControl, easyConfig, easyServer);
@@ -297,11 +346,32 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     return result;
 }
 
+bool ExchangePayload(socket_t from, const UdpEndpoint& destination,
+                     socket_t to, const UdpEndpoint& expectedSource) {
+    const std::string payload = "winner-path-payload";
+    if (sendto(from, payload.data(), static_cast<int>(payload.size()), 0,
+               reinterpret_cast<const sockaddr*>(&destination.addr),
+               destination.addr_len) != static_cast<int>(payload.size())) return false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (std::chrono::steady_clock::now() < deadline) {
+        uint8_t data[2048]{};
+        sockaddr_storage source{};
+        socket_len_t length = sizeof(source);
+        const int received = recvfrom(to, reinterpret_cast<char*>(data), sizeof(data),
+            0, reinterpret_cast<sockaddr*>(&source), &length);
+        if (received == static_cast<int>(payload.size())
+            && std::memcmp(data, payload.data(), payload.size()) == 0
+            && SameUdpEndpoint(FromSockaddr(source, length), expectedSource)) return true;
+    }
+    return false;
+}
+
 struct PairedPunchResult {
     bool setup = false;
     bool selected = false;
     bool firstPunched = false;
     bool secondPunched = false;
+    bool bidirectionalPayload = false;
     NatPunchAttemptResult firstAttempt;
     NatPunchAttemptResult secondAttempt;
     std::string firstError;
@@ -366,6 +436,11 @@ PairedPunchResult RunPairedPunch(Config firstConfig, Config secondConfig,
         });
         firstPunchThread.join();
         secondPunchThread.join();
+        if (result.firstPunched && result.secondPunched) {
+            result.bidirectionalPayload =
+                ExchangePayload(firstPunch, firstPeer, secondPunch, secondPeer)
+                && ExchangePayload(secondPunch, secondPeer, firstPunch, firstPeer);
+        }
     }
 
     running.store(false);
@@ -640,6 +715,11 @@ int main() {
     }
     Expect(aPunched && bPunched,
            "two clients complete STUN, barrier and PUNCH");
+    if (aPunched && bPunched) {
+        Expect(ExchangePayload(aPunchSocket, aPeer, bPunchSocket, bPeer)
+                   && ExchangePayload(bPunchSocket, bPeer, aPunchSocket, aPeer),
+               "random strategy winner sockets carry payload in both directions");
+    }
     Expect(aPunchSocket != kInvalidSocket && bPunchSocket != kInvalidSocket
                && aPunchSocket != aSocket && bPunchSocket != bSocket,
            "punch sockets remain separate from rendezvous control sockets");
@@ -791,7 +871,7 @@ int main() {
     const PairedPunchResult mixed = RunPairedPunch(
         regularConfig, randomConfig, 2);
     Expect(mixed.setup && mixed.selected
-               && mixed.firstPunched && mixed.secondPunched,
+               && mixed.firstPunched && mixed.secondPunched && mixed.bidirectionalPayload,
            "regular/random peers complete mixed random-range punching");
     if (!mixed.firstPunched) {
         std::cerr << "Mixed regular error: " << mixed.firstError << '\n';
@@ -824,6 +904,19 @@ int main() {
                && mixed.firstAttempt.datagramsSent > 0
                && mixed.secondAttempt.datagramsSent > 0,
            "mixed attempt summaries expose complementary bounded plans");
+    const auto retriedConfirmation = RunInterruptedRandomReceiver(
+        aConfig, bConfig, rendezvousEndpoint, InterruptedPunchMode::ConfirmationRetry, 4);
+    Expect(retriedConfirmation.punched && retriedConfirmation.acknowledgements >= 2
+               && retriedConfirmation.bidirectionalPayload,
+           "receiver retries a lost ACK on one path and transfers bidirectional data");
+    Config directA = aConfig;
+    Config directB = aConfig;
+    directA.room_id = directB.room_id = "direct-confirmation";
+    directB.peer_id = "b";
+    directB.target_peer_id = "a";
+    const auto direct = RunPairedPunch(directA, directB, 1);
+    Expect(direct.firstPunched && direct.secondPunched && direct.bidirectionalPayload,
+           "first-attempt direct handshake preserves bidirectional data transfer");
     if (aPunched) {
         const std::string legacyPunch = MakeControlMessage(
             "PUNCH", {aConfig.room_id, aPeerId});

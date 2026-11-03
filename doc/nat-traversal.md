@@ -11,6 +11,7 @@ stun_client.cpp              RFC 8489 Binding 与映射分类
 nat_punch_plan.cpp           确定性的双方互补打洞计划
 nat_punch_socket_pool.cpp    多 socket 生命周期、轮询和 winner 移交
 nat_punch_transport.cpp      临时 IPv4 TTL 和可取消 sender delay
+nat_punch_handshake.cpp      固定候选路径的 PUNCH/ACK/CONFIRM 状态机
 adaptive_nat_traversal.cpp   STUN、会合屏障和 PUNCH 状态机
 rendezvous_client.cpp        新 NAT 控制消息的收发与校验
 rendezvous/registry.cpp      session/attempt 及短生命周期屏障状态
@@ -70,7 +71,7 @@ transaction ID，并包含合法的 `XOR-MAPPED-ADDRESS`。
 - 单调 `attempt_id`；
 - initiator/responder 角色；
 - 256-bit 随机 punch token；
-- punch protocol version `3`。
+- punch protocol version `4`（增加路径确认，客户端和会合服务器需同步升级）。
 
 这些字段随扩展后的 `PEER` 返回。新客户端不接受旧格式 `PEER`，因此客户端和会合
 服务器需要一起升级。
@@ -138,8 +139,8 @@ span = min(profile_max_span, initial_span * attempt_scale)
 
 双方都根据对端两次 STUN 映射的端口差计算预测中心，并同时执行上述 Range 扫描。
 每端第一 attempt 的范围半径最多为 10；后续 attempt 按 profile 扩大。所有目标仍由
-同一个 punch socket 发送。该策略是 frp Mode 3 的有界 dual-range 基线，暂不包含低 TTL
-预打洞和延迟发送变体。
+同一个 punch socket 发送。该策略是 frp Mode 3 的有界 dual-range 基线，第 2/3 次
+attempt 已包含下述低 TTL 预打洞和延迟发送变体，但双方执行角色尚未轮换。
 
 ### Profile 和资源上限
 
@@ -168,8 +169,8 @@ port-dependent-random 一端固定为 receiver，在发送 `NAT_ARMED` 前绑定
 先尝试对端两次 STUN 的已知端口，再使用 CSPRNG 生成的起点和互质步长，在
 1024～65535 内无重复探测限定数量的端口。
 
-receiver 同时轮询整个 socket pool，首个收到合法 session/attempt/token 报文的 socket
-成为 winner；其余 socket 立即关闭，winner 原样交给 TUN 数据面。sender 每个随机端口
+receiver 同时轮询整个 socket pool，首个收到合法 sender PUNCH 的 socket
+成为固定候选；收到该路径上的确认后关闭其余 socket，winner 原样交给 TUN 数据面。sender 每个随机端口
 只探测一次，receiver 的重复波次仍受 profile 报文预算限制。首轮保留无延迟基线，
 后续重试使用下述 receiver-first 变体。
 
@@ -235,11 +236,16 @@ random/random 和 multi-public-IP 仍在
 ```text
 PUNCH(session, attempt, sender, nonce, punch_token)
 PUNCH_ACK(session, attempt, sender, echoed_nonce, punch_token)
+PUNCH_CONFIRM(session, attempt, sender, echoed_nonce, punch_token)
 ```
 
 客户端只接受当前 session/attempt、指定 Peer ID、正确 token 且公网 IP 与对端 STUN
-报告相符的报文。ACK 还必须回显本端 nonce。旧的 room/peer 两字段 PUNCH 格式不再兼容。
-收到合法包的真实源端点成为最终 Peer，punch socket 原样交给现有 TUN 数据面。
+报告相符的报文。sender 忽略普通 PUNCH，只接受回显本端 nonce 的 ACK，然后向该端点
+发送 CONFIRM 并移交 socket。receiver 收到 PUNCH 后锁定 socket、来源端点和 nonce，
+停止扫描其他候选，每 100 ms 重发 ACK，直到收到同一路径、同一 nonce 的 CONFIRM。
+该等待受原 attempt deadline 和取消标志约束。已经移交的数据面会对选定 Peer 的重复
+ACK 重发 CONFIRM，以恢复确认包丢失；其他端点不能改变 winner。
+旧的 room/peer 两字段 PUNCH 格式及 v3 握手不兼容。
 
 Punch token 用于阻止无关 UDP 包误接管连接，不加密后续 TUN 流量。数据机密性仍需
 在上层或后续加密层解决。
@@ -260,6 +266,9 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
 本地第几次尝试以及总尝试次数，二者不再共用 `attempt` 名称。
 
 `keepalive_interval` 和 `peer_timeout` 仅属于连接后的 NAT liveness，不参与打洞计划。
+
+2026-11-03 的源码复核发现的成功端点竞态已通过 v4 握手修复；低 TTL 等待时序、跨模式回退和
+局域网候选仍有改进空间；详见 [frp 对照复核](frp-xtcp-nat-traversal.md#2026-11-03-实现复核)。
 Disconnect 会通过 winner socket 连续发送 3 份会话认证的 `PEER_CLOSE`，对端验证来源
 端点、session、attempt、Peer ID 和 punch token 后立即退出；全部丢包时继续由
 `peer_timeout` 兜底。

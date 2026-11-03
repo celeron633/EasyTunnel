@@ -159,6 +159,13 @@ int main() {
                     != std::string::npos,
            "client formats the server's protocol mismatch response");
 
+    const auto v3Registered = MakeControlMessage("REGISTERED", {"3"});
+    const auto v3Result = responseParser.HandlePacket(aEndpoint,
+        reinterpret_cast<const uint8_t*>(v3Registered.data()), v3Registered.size());
+    Expect(v3Result.type == RendezvousEventType::Error
+               && v3Result.error.find("received 3") != std::string::npos,
+           "v4 path confirmation rejects the old v3 server handshake");
+
     const std::string peerPacket = MakeControlMessage("PEER",
         {"203.0.113.20", "41000", "b", "nat_punch", "nat_punch",
          natSession, natAttempt, "initiator", kNatPunchProtocolVersion,

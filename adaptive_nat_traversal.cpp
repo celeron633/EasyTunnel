@@ -6,6 +6,7 @@
 
 #include "log.h"
 #include "nat_protocol.h"
+#include "nat_punch_handshake.h"
 #include "nat_punch_plan.h"
 #include "nat_punch_socket_pool.h"
 #include "nat_punch_transport.h"
@@ -661,9 +662,23 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
         + std::to_string(randomReceiver ? punchSockets.size() : 0));
     auto nextPunch = std::chrono::steady_clock::time_point{};
     size_t randomTargetIndex = 0;
+    NatPunchHandshake handshake(executionPolicy.role, nonce);
+    auto nextAck = std::chrono::steady_clock::time_point{};
+    const auto sendReply = [&](NatPunchReply reply) {
+        const std::string packet = MakeControlMessage(
+            reply == NatPunchReply::Ack ? "PUNCH_ACK" : "PUNCH_CONFIRM",
+            {session.sessionId, std::to_string(session.attemptId),
+             cfg.peer_id, handshake.nonce(), session.punchToken});
+        Send(handshake.socket(), handshake.peer(), packet);
+    };
     while (running.load() && std::chrono::steady_clock::now() < deadline) {
         const auto now = std::chrono::steady_clock::now();
-        if (now >= nextPunch && attempt.datagramsSent < policy.datagramBudget) {
+        if (handshake.awaitingConfirmation() && now >= nextAck) {
+            sendReply(NatPunchReply::Ack);
+            nextAck = now + std::chrono::milliseconds(100);
+        }
+        if (!handshake.awaitingConfirmation()
+            && now >= nextPunch && attempt.datagramsSent < policy.datagramBudget) {
             if (randomSender) {
                 if (randomTargetIndex < plan.targets.size()) {
                     Send(punchSocket, plan.targets[randomTargetIndex], punch);
@@ -718,29 +733,28 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
             || !IsSafeControlField(fields[3])
             || fields[4] != session.punchToken
             || !SameIpv4Address(source, peerObservation.mappedA)
-            || (type != "PUNCH" && type != "PUNCH_ACK")) {
+            || (type != "PUNCH" && type != "PUNCH_ACK"
+                && type != "PUNCH_CONFIRM")) {
             continue;
         }
-        if (type == "PUNCH_ACK" && fields[3] != nonce) continue;
-
-        if (type == "PUNCH") {
-            const std::string ack = MakeControlMessage("PUNCH_ACK",
-                {session.sessionId, std::to_string(session.attemptId),
-                 cfg.peer_id, fields[3], session.punchToken});
-            for (int repeat = 0; repeat < 5; ++repeat) {
-                Send(receivingSocket, source, ack);
-            }
+        const NatPunchReply reply = handshake.Handle(
+            receivingSocket, source, type, fields[3]);
+        if (reply != NatPunchReply::None) {
+            sendReply(reply);
+            nextAck = std::chrono::steady_clock::now()
+                + std::chrono::milliseconds(100);
         }
-        *peer = source;
-        receivingSocket = punchSockets.ReleaseWinner(receivingSocket);
+        if (!handshake.complete()) continue;
+        *peer = handshake.peer();
+        receivingSocket = punchSockets.ReleaseWinner(handshake.socket());
         if (receivingSocket == kInvalidSocket) {
             return fail(NatPunchAttemptOutcome::SocketError,
                         "NAT punch winner is not owned by the socket pool");
         }
         *punchSocketOut = receivingSocket;
         attempt.outcome = NatPunchAttemptOutcome::Success;
-        attempt.confirmedPeer = source;
-        attempt.detail = "Authenticated PUNCH/PUNCH_ACK confirmed";
+        attempt.confirmedPeer = *peer;
+        attempt.detail = "Authenticated PUNCH/ACK/CONFIRM path selected";
         Log(LogLevel::Info, "Adaptive NAT traversal confirmed with "
             + FormatUdpEndpoint(*peer));
         return true;
