@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <string>
 
 #include "util.h"
 
@@ -24,6 +25,22 @@ private:
     int originalTtl_ = 0;
     bool applied_ = false;
 };
+
+struct NatPunchSendResult {
+    bool sent = false;
+    bool ttlApplied = false;
+    bool ttlRestored = true;
+    int socketError = 0;
+};
+
+using NatPunchDatagramSender = bool (*)(
+    socket_t, const UdpEndpoint&, const std::string&);
+
+// A failed low-TTL application skips the probe, never silently sends it with
+// ordinary TTL. All paths restore TTL before an ACK or data-plane handoff.
+NatPunchSendResult SendNatPunchProbe(
+    socket_t socket, const UdpEndpoint& target, const std::string& packet,
+    uint8_t ttl, NatPunchDatagramSender sender = nullptr);
 
 // Returns false when shutdown interrupts the delay.
 bool WaitForNatPunchDelay(const std::atomic<bool>& running,

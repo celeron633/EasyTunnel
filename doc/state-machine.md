@@ -82,6 +82,8 @@ sequenceDiagram
 attempt 1 直接进入屏障；attempt 2/3 的 receiver 分别以 TTL 7/TTL 4 发送一轮预算内
 预打洞包，恢复 socket 原 TTL 后再发送 `NAT_ARMED`。收到 `NAT_START` 后，sender
 执行最多 1 秒且不超过剩余 attempt 时间四分之一的可取消延迟，然后进入正常 PUNCH。
+低 TTL receiver 在等待 sender 时只以低 TTL 刷新探测；收到 sender 的 PUNCH 后锁定
+路径，使用普通 TTL 重传 ACK，收到 CONFIRM 后移交。首轮无低 TTL 的策略保持不变。
 
 控制 socket 负责 REG/CONNECT、NAT 信息交换、屏障和 attempt 重试；独立 punch socket
 只负责 STUN、预打洞和 Peer PUNCH。协议 v3 拒绝 punch socket 上的 NAT 同步消息。

@@ -98,6 +98,7 @@ socket，再绑定同一个本地 UDP 地址创建打洞 socket。
 以下为修改前 `be190a3` 的审查记录。后续修复：v4 握手已固定候选路径，sender 只接受
 匹配 nonce 的 ACK，receiver 等待 CONFIRM，数据面支持确认重传；新增状态机回归及
 Direct/Random/mixed 移交后的双向 payload 测试。其余项目的进度见 NAT TODO。
+低 TTL receiver 的后续刷新也已改为低 TTL，确认报文使用恢复后的正常 TTL。
 
 ### 总体判断
 

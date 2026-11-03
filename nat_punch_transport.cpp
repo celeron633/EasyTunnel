@@ -5,6 +5,13 @@
 #include <thread>
 
 namespace {
+bool SendDatagram(socket_t socket, const UdpEndpoint& target,
+                  const std::string& packet) {
+    return sendto(socket, packet.data(), static_cast<int>(packet.size()), 0,
+        reinterpret_cast<const sockaddr*>(&target.addr), target.addr_len)
+        == static_cast<int>(packet.size());
+}
+
 bool SetIpv4SocketTtl(socket_t sock, int ttl, int* socketError) {
     if (setsockopt(sock, IPPROTO_IP, IP_TTL,
                    reinterpret_cast<const char*>(&ttl),
@@ -43,6 +50,21 @@ bool ScopedIpv4SocketTtl::Restore(int* socketError) {
     if (!SetIpv4SocketTtl(sock_, originalTtl_, socketError)) return false;
     applied_ = false;
     return true;
+}
+
+NatPunchSendResult SendNatPunchProbe(
+        socket_t socket, const UdpEndpoint& target, const std::string& packet,
+        uint8_t ttl, NatPunchDatagramSender sender) {
+    NatPunchSendResult result;
+    ScopedIpv4SocketTtl scope(socket, ttl, &result.socketError);
+    result.ttlApplied = scope.applied();
+    if (ttl != 0 && !result.ttlApplied) return result;
+    result.sent = (sender == nullptr ? SendDatagram : sender)(socket, target, packet);
+    if (!result.sent) result.socketError = GetSocketError();
+    int restoreError = 0;
+    result.ttlRestored = scope.Restore(&restoreError);
+    if (!result.ttlRestored) result.socketError = restoreError;
+    return result;
 }
 
 bool WaitForNatPunchDelay(const std::atomic<bool>& running,

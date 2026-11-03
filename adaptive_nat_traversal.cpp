@@ -105,22 +105,23 @@ bool SendPrePunchWave(const NatPunchSocketPool& sockets,
     int firstApplyError = 0;
     for (const socket_t sock : sockets.sockets()) {
         if (!running.load() || *sent >= datagramBudget) break;
-        int socketError = 0;
-        ScopedIpv4SocketTtl ttlScope(sock, ttl, &socketError);
-        if (!ttlScope.applied()) {
-            if (firstApplyError == 0) firstApplyError = socketError;
-            continue;
-        }
-        ++*ttlSocketCount;
+        bool applied = false;
         for (const UdpEndpoint& target : targets) {
             if (!running.load() || *sent >= datagramBudget) break;
-            if (Send(sock, target, punch)) ++*sent;
+            const auto result = SendNatPunchProbe(sock, target, punch, ttl);
+            if (!result.ttlRestored) {
+                *error = "Cannot restore NAT punch socket TTL. err="
+                    + std::to_string(result.socketError);
+                return false;
+            }
+            if (!result.ttlApplied) {
+                if (firstApplyError == 0) firstApplyError = result.socketError;
+                break;
+            }
+            applied = true;
+            if (result.sent) ++*sent;
         }
-        if (!ttlScope.Restore(&socketError)) {
-            *error = "Cannot restore NAT punch socket TTL. err="
-                + std::to_string(socketError);
-            return false;
-        }
+        if (applied) ++*ttlSocketCount;
     }
     if (!running.load()) return true;
     if (*ttlSocketCount == 0) {
@@ -224,6 +225,7 @@ std::string FormatNatPunchAttemptResult(
         + ", sender_delay_ms=" + std::to_string(result.senderDelayMs)
         + ", pre_punch_datagrams="
         + std::to_string(result.prePunchDatagrams)
+        + ", low_ttl_datagrams=" + std::to_string(result.lowTtlDatagrams)
         + ", barrier_armed_ack="
         + (result.barrierArmedAcknowledged ? "true" : "false")
         + ", barrier_elapsed_ms="
@@ -525,6 +527,7 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
         {session.sessionId, std::to_string(session.attemptId),
          cfg.peer_id, nonce, session.punchToken});
 
+    bool lowTtlReceiver = false;
     if (executionPolicy.role == NatPunchExecutionRole::Receiver
         && executionPolicy.prePunchTtl > 0) {
         size_t ttlSocketCount = 0;
@@ -534,6 +537,8 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
             return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
         attempt.datagramsSent = attempt.prePunchDatagrams;
+        attempt.lowTtlDatagrams = attempt.prePunchDatagrams;
+        lowTtlReceiver = ttlSocketCount != 0;
         Log(LogLevel::Info, "NAT pre-punch ttl="
             + std::to_string(executionPolicy.prePunchTtl)
             + ", sockets=" + std::to_string(ttlSocketCount)
@@ -671,6 +676,17 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
              cfg.peer_id, handshake.nonce(), session.punchToken});
         Send(handshake.socket(), handshake.peer(), packet);
     };
+    const auto sendProbe = [&](socket_t socket, const UdpEndpoint& target) {
+        const auto result = SendNatPunchProbe(socket, target, punch,
+            lowTtlReceiver ? executionPolicy.prePunchTtl : 0);
+        if (result.sent && result.ttlApplied) ++attempt.lowTtlDatagrams;
+        if (!result.ttlRestored) {
+            *error = "Cannot restore NAT punch socket TTL. err="
+                + std::to_string(result.socketError);
+            return false;
+        }
+        return true;
+    };
     while (running.load() && std::chrono::steady_clock::now() < deadline) {
         const auto now = std::chrono::steady_clock::now();
         if (handshake.awaitingConfirmation() && now >= nextAck) {
@@ -681,7 +697,9 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
             && now >= nextPunch && attempt.datagramsSent < policy.datagramBudget) {
             if (randomSender) {
                 if (randomTargetIndex < plan.targets.size()) {
-                    Send(punchSocket, plan.targets[randomTargetIndex], punch);
+                    if (!sendProbe(punchSocket, plan.targets[randomTargetIndex])) {
+                        return fail(NatPunchAttemptOutcome::SocketError, *error);
+                    }
                     ++randomTargetIndex;
                     ++attempt.datagramsSent;
                     nextPunch = now + punchInterval;
@@ -690,7 +708,9 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
                 for (const socket_t senderSocket : punchSockets.sockets()) {
                     for (const UdpEndpoint& target : plan.targets) {
                         if (attempt.datagramsSent >= policy.datagramBudget) break;
-                        Send(senderSocket, target, punch);
+                        if (!sendProbe(senderSocket, target)) {
+                            return fail(NatPunchAttemptOutcome::SocketError, *error);
+                        }
                         ++attempt.datagramsSent;
                     }
                     if (attempt.datagramsSent >= policy.datagramBudget) break;
@@ -699,7 +719,9 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
             } else {
                 for (const UdpEndpoint& target : plan.targets) {
                     if (attempt.datagramsSent >= policy.datagramBudget) break;
-                    Send(punchSocket, target, punch);
+                    if (!sendProbe(punchSocket, target)) {
+                        return fail(NatPunchAttemptOutcome::SocketError, *error);
+                    }
                     ++attempt.datagramsSent;
                 }
                 nextPunch = now + punchInterval;

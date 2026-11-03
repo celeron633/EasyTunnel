@@ -49,6 +49,18 @@ bool SocketTtl(socket_t sock, int* ttl) {
                       reinterpret_cast<char*>(ttl), &length) == 0;
 }
 
+std::vector<int> sentTtls;
+bool CaptureProbeTtl(socket_t sock, const UdpEndpoint&, const std::string&) {
+    int ttl = 0;
+    if (!SocketTtl(sock, &ttl)) return false;
+    sentTtls.push_back(ttl);
+    return true;
+}
+
+bool FailProbeSend(socket_t, const UdpEndpoint&, const std::string&) {
+    return false;
+}
+
 UdpEndpoint FromSockaddr(const sockaddr_storage& address, socket_len_t len) {
     UdpEndpoint endpoint{};
     endpoint.addr = address;
@@ -156,6 +168,27 @@ int main() {
     }
     Expect(SocketTtl(sender, &restoredTtl) && restoredTtl == originalTtl,
            "TTL scope destructor restores an early-return path");
+
+    const auto firstProbe = SendNatPunchProbe(sender, receiverEndpoint, "pre-punch",
+                                              7, CaptureProbeTtl);
+    const auto refreshProbe = SendNatPunchProbe(sender, receiverEndpoint, "refresh",
+                                                7, CaptureProbeTtl);
+    const auto normalReply = SendNatPunchProbe(sender, receiverEndpoint, "ack",
+                                               0, CaptureProbeTtl);
+    Expect(firstProbe.sent && refreshProbe.sent && normalReply.sent
+               && sentTtls == std::vector<int>({7, 7, originalTtl})
+               && SocketTtl(sender, &restoredTtl) && restoredTtl == originalTtl,
+           "pre-punch and refresh stay low TTL while confirmation uses original TTL");
+    const auto failedProbe = SendNatPunchProbe(sender, receiverEndpoint, "failed",
+                                               4, FailProbeSend);
+    Expect(!failedProbe.sent && failedProbe.ttlApplied && failedProbe.ttlRestored
+               && SocketTtl(sender, &restoredTtl) && restoredTtl == originalTtl,
+           "failed probe send restores TTL before subsequent confirmation");
+    const auto capturedCount = sentTtls.size();
+    const auto unavailableProbe = SendNatPunchProbe(kInvalidSocket, receiverEndpoint,
+                                                   "skip", 7, CaptureProbeTtl);
+    Expect(!unavailableProbe.sent && sentTtls.size() == capturedCount,
+           "TTL application failure never emits an ordinary-TTL probe");
 
     ScopedIpv4SocketTtl invalidScope(kInvalidSocket, 7, &socketError);
     Expect(!invalidScope.applied(), "invalid socket cannot acquire a TTL scope");

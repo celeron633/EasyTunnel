@@ -43,6 +43,7 @@ struct NatPunchAttemptResult {
     uint8_t prePunchTtl = 0;
     uint32_t senderDelayMs = 0;
     uint32_t prePunchDatagrams = 0;
+    uint32_t lowTtlDatagrams = 0;
     bool barrierArmedAcknowledged = false;
     uint32_t barrierElapsedMs = 0;
     uint32_t waveIntervalMs = 0;

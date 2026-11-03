@@ -830,7 +830,8 @@ int main() {
                       == NatPunchAttemptOutcome::PunchTimeout
                && timedOut.attempt.plan == "random-receiver"
                && timedOut.attempt.socketCount == 256
-               && timedOut.attempt.datagramsSent > 0,
+               && timedOut.attempt.lowTtlDatagrams == timedOut.attempt.datagramsSent
+               && timedOut.attempt.lowTtlDatagrams > timedOut.attempt.prePunchDatagrams,
            "PUNCH timeout closes a maximum random receiver pool");
     if (timedOut.attempt.outcome != NatPunchAttemptOutcome::PunchTimeout) {
         std::cerr << "Timeout error: " << timedOut.error << '\n';
@@ -917,6 +918,8 @@ int main() {
     const auto direct = RunPairedPunch(directA, directB, 1);
     Expect(direct.firstPunched && direct.secondPunched && direct.bidirectionalPayload,
            "first-attempt direct handshake preserves bidirectional data transfer");
+    Expect(direct.firstAttempt.lowTtlDatagrams == 0 && direct.secondAttempt.lowTtlDatagrams == 0,
+           "first-attempt baseline does not apply low TTL");
     if (aPunched) {
         const std::string legacyPunch = MakeControlMessage(
             "PUNCH", {aConfig.room_id, aPeerId});

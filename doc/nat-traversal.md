@@ -210,6 +210,12 @@ dual-range 使用 session initiator 作为 sender、responder 作为 receiver。
 attempt，避免低 TTL socket 进入 TUN 数据面。如果系统不能设置 TTL，则记录警告并继续
 正常屏障和 PUNCH，不让可选优化阻断回退链。
 
+在低 TTL 可用的 attempt 中，receiver 在 START 后等待 sender 时也使用同一低 TTL
+刷新映射，不提前发送普通 TTL 的探测包。锁定候选后停止探测，只以恢复后的正常 TTL
+发送 ACK 并等待 CONFIRM。单个探测的 TTL 设置失败时跳过该包；初始预打洞所有 socket
+均不支持 TTL 时才整体回到普通探测。`low_ttl_datagrams` 统计预打洞及后续刷新中实际
+成功发送的低 TTL 包，便于核对执行行为。
+
 sender delay 不超过 1000 ms，同时最多占用当前 attempt 剩余时间的四分之一。等待每
 25 ms 检查一次停止状态，关闭时不会睡满整个延迟。EasyTunnel 已有 `NAT_ARMED` 屏障，
 因此不使用 frp 固定 3 秒延迟。
@@ -267,8 +273,8 @@ IPv4 Relay。`nat_punch_profile` 选择 `balanced` 或 `aggressive`；总墙钟�
 
 `keepalive_interval` 和 `peer_timeout` 仅属于连接后的 NAT liveness，不参与打洞计划。
 
-2026-11-03 的源码复核发现的成功端点竞态已通过 v4 握手修复；低 TTL 等待时序、跨模式回退和
-局域网候选仍有改进空间；详见 [frp 对照复核](frp-xtcp-nat-traversal.md#2026-11-03-实现复核)。
+2026-11-03 的源码复核发现的成功端点竞态已通过 v4 握手修复，低 TTL 等待阶段也已调整；
+跨模式回退和局域网候选仍待实现；详见 [frp 对照复核](frp-xtcp-nat-traversal.md#2026-11-03-实现复核)。
 Disconnect 会通过 winner socket 连续发送 3 份会话认证的 `PEER_CLOSE`，对端验证来源
 端点、session、attempt、Peer ID 和 punch token 后立即退出；全部丢包时继续由
 `peer_timeout` 兜底。
