@@ -12,6 +12,7 @@ nat_punch_plan.cpp           确定性的双方互补打洞计划
 nat_punch_socket_pool.cpp    多 socket 生命周期、轮询和 winner 移交
 nat_punch_transport.cpp      临时 IPv4 TTL 和可取消 sender delay
 nat_punch_handshake.cpp      固定候选路径的 PUNCH/ACK/CONFIRM 状态机
+nat_punch_scheduler.cpp      分批探测、波次节流和收包等待时间计算
 adaptive_nat_traversal.cpp   STUN、会合屏障和 PUNCH 状态机
 rendezvous_client.cpp        新 NAT 控制消息的收发与校验
 rendezvous/registry.cpp      session/attempt 及短生命周期屏障状态
@@ -150,9 +151,21 @@ attempt 已包含下述低 TTL 预打洞和延迟发送变体，但双方执行�
 | `aggressive` | 1 / 4 / 8 / 16 | 128 | 75 ms | 131,072 |
 
 Direct 和 regular sender 仍只有一个目标，不会因为 profile 无意义地扩展。Range 与
-dual-range 首轮保持原来的小范围，只有同步到新 attempt 后才扩大。一次发送波次会
-遍历当前全部目标；如果 `punch_timeout` 很长，实际波次间隔会自动增加，保证发送量
-不超过对应 profile 的单 attempt 报文预算。
+dual-range 首轮保持原来的小范围，只有同步到新 attempt 后才扩大。一次发送波次按批次
+遍历 socket × 目标组合：balanced 每批最多 8 包，aggressive 每批最多 16 包，批次
+开始时间至少间隔 5 ms。批次间收包，每次发送前检查取消和原 attempt deadline；
+不为赶上落后的进度而连续补发多批。如果 `punch_timeout` 很长，波次间隔也会自动增加。
+随机 sender 继续逐目标发送，沿用下面的 15/5 ms 间隔；Direct 的单目标波次间隔保持不变。
+
+初始低 TTL 预打洞同样分批发送，检查取消和 deadline，完成后才进入 ARMED 屏障。
+预打洞期间尚未 START，不消费 socket 中可能提前排队的 Peer 包；START 后由握手状态机
+处理。每次探测调用均消耗单 attempt 预算，包括发送失败或 TTL 设置失败，避免错误时
+无限重试。ACK/CONFIRM 属于路径确认流量，不计入扫描预算，仍受 attempt deadline 约束。
+
+attempt 摘要中的 `datagrams` 是成功提交到 socket 的探测包数，不代表对端收到；
+`probe_attempts` 是消耗预算的探测次数，`probe_send_failures` 包含发送或 TTL 设置失败；
+`targets_probed` 是至少成功发送过一次的不同计划目标数。预打洞与常规扫描共用这些计数，
+不能将 `targets`（计划目标数）视为已经全部探测。
 
 Random sender/receiver 使用另一组受限资源：
 

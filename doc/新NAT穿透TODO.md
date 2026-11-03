@@ -186,6 +186,8 @@ frp xTCP 的流程、五种模式和源码索引见
 - [x] 修复 sender 普通 PUNCH 提前提交造成的 winner 不一致，补乱序/ACK 丢失及移交后
       双向数据回归，详见 [2026-11-03 复核](frp-xtcp-nat-traversal.md#2026-11-03-实现复核)。
 - [x] 调整低 TTL receiver 等待阶段，避免 sender 延时期间提前发送普通 TTL 探测包。
+- [x] 将范围、多 socket 及预打洞扫描分成有间隔的小批次；补预算、收包调度、延迟恢复
+      不突发、预打洞取消和 deadline 回归，并记录实际探测及发送失败计数。
 - [ ] Direct/dual-range 增加 sender/receiver 方向轮换；当前只轮换 TTL 和延时。
 - [ ] 收集公网样本，评估低 TTL 与 sender delay 的实际收益并决定最终默认轮换顺序。
 

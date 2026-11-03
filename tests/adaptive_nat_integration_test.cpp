@@ -192,6 +192,8 @@ enum class InterruptedPunchMode {
     PunchTimeout,
     BarrierTimeout,
     ConfirmationRetry,
+    CancelDuringPrePunch,
+    PrePunchTimeout,
 };
 
 bool ExchangePayload(socket_t from, const UdpEndpoint& destination,
@@ -209,8 +211,10 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
     randomConfig.peer_id = "random";
     randomConfig.target_peer_id = "easy";
     randomConfig.punch_timeout = (mode == InterruptedPunchMode::CancelAtBarrier
-        || mode == InterruptedPunchMode::ConfirmationRetry)
-        ? 5 : mode == InterruptedPunchMode::PunchTimeout ? 2 : 30;
+        || mode == InterruptedPunchMode::ConfirmationRetry
+        || mode == InterruptedPunchMode::CancelDuringPrePunch)
+        ? 5 : mode == InterruptedPunchMode::PunchTimeout ? 2
+        : mode == InterruptedPunchMode::PrePunchTimeout ? 1 : 30;
 
     socket_t easyControl = kInvalidSocket;
     socket_t randomControl = kInvalidSocket;
@@ -276,10 +280,19 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
             &randomPeer, &result.error, &result.attempt, attemptNumber);
     });
 
+    const bool largePrePunch = mode == InterruptedPunchMode::CancelDuringPrePunch
+        || mode == InterruptedPunchMode::PrePunchTimeout;
+    UdpEndpoint reportedA = easyPunchEndpoint;
+    if (largePrePunch) {
+        const uint16_t port = EndpointPort(easyPunchEndpoint);
+        reinterpret_cast<sockaddr_in*>(&reportedA.addr)->sin_port =
+            htons(port == 65535 ? port - 1 : port + 1);
+    }
     if (easyRendezvous.SendNatInfo(easyControl, easyPeerId,
             easySession.sessionId, easySession.attemptId,
-            NatMappingBehaviorName(NatMappingBehavior::EndpointIndependent),
-            easyPunchEndpoint, easyPunchEndpoint, "-")) {
+            NatMappingBehaviorName(largePrePunch ? NatMappingBehavior::PortDependentRegular
+                                                : NatMappingBehavior::EndpointIndependent),
+            reportedA, easyPunchEndpoint, "-")) {
         result.peerInfoReceived = WaitForNatPeerInfo(
             easyControl, &easyRendezvous, easySession, easyPeerId);
     }
@@ -289,7 +302,8 @@ InterruptedPunchResult RunInterruptedRandomReceiver(
         easyRendezvous.SendNatArmed(easyControl, easyPeerId,
             easySession.sessionId, easySession.attemptId);
     }
-    if (mode == InterruptedPunchMode::CancelAtBarrier) {
+    if (mode == InterruptedPunchMode::CancelAtBarrier
+        || mode == InterruptedPunchMode::CancelDuringPrePunch) {
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
         running.store(false);
     }
@@ -756,6 +770,9 @@ int main() {
                && aAttempt.profile == NatPunchProfile::Aggressive
                && aAttempt.waveIntervalMs == 5
                && aAttempt.datagramsSent > 0
+               && aAttempt.probeAttempts == aAttempt.datagramsSent + aAttempt.probeSendFailures
+               && aAttempt.targetsProbed > 0 && aAttempt.targetsProbed <= aAttempt.targetCount
+               && aAttempt.probeAttempts <= aAttempt.datagramBudget
                && aAttempt.confirmedPeer.family == AF_INET,
            "successful attempt summary retains mapping, plan and endpoint");
     const std::string attemptSummary = FormatNatPunchAttemptResult(aAttempt);
@@ -769,6 +786,9 @@ int main() {
                     != std::string::npos
                && attemptSummary.find("barrier_elapsed_ms=")
                     != std::string::npos
+               && attemptSummary.find("probe_attempts=") != std::string::npos
+               && attemptSummary.find("probe_send_failures=") != std::string::npos
+               && attemptSummary.find("targets_probed=") != std::string::npos
                && attemptSummary.find("attempt_id="
                    + std::to_string(aSession.attemptId)) != std::string::npos,
            "formatted attempt summary exposes correlated result fields");
@@ -910,6 +930,27 @@ int main() {
     Expect(retriedConfirmation.punched && retriedConfirmation.acknowledgements >= 2
                && retriedConfirmation.bidirectionalPayload,
            "receiver retries a lost ACK on one path and transfers bidirectional data");
+    const auto cancelledPrePunch = RunInterruptedRandomReceiver(
+        aConfig, bConfig, rendezvousEndpoint, InterruptedPunchMode::CancelDuringPrePunch, 5);
+    Expect(!cancelledPrePunch.punched
+               && cancelledPrePunch.attempt.outcome == NatPunchAttemptOutcome::Stopped
+               && cancelledPrePunch.attempt.plan == "mixed-random-receiver"
+               && cancelledPrePunch.attempt.probeAttempts > 0
+               && cancelledPrePunch.attempt.probeAttempts
+                    < cancelledPrePunch.attempt.socketCount * cancelledPrePunch.attempt.targetCount
+               && cancelledPrePunch.attempt.elapsedMs < 1500,
+           "cancellation interrupts a paced multi-socket pre-punch before its wave finishes");
+    const auto timedOutPrePunch = RunInterruptedRandomReceiver(
+        aConfig, bConfig, rendezvousEndpoint, InterruptedPunchMode::PrePunchTimeout, 6);
+    Expect(!timedOutPrePunch.punched
+               && timedOutPrePunch.attempt.outcome == NatPunchAttemptOutcome::PunchTimeout
+               && timedOutPrePunch.attempt.probeAttempts > 0
+               && timedOutPrePunch.attempt.probeAttempts
+                    < timedOutPrePunch.attempt.socketCount * timedOutPrePunch.attempt.targetCount
+               && timedOutPrePunch.attempt.elapsedMs < 1800
+               && timedOutPrePunch.attempt.probeAttempts
+                    == timedOutPrePunch.attempt.datagramsSent + timedOutPrePunch.attempt.probeSendFailures,
+           "pre-punch obeys the attempt deadline and counts partial scans consistently");
     Config directA = aConfig;
     Config directB = aConfig;
     directA.room_id = directB.room_id = "direct-confirmation";

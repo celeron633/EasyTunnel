@@ -97,6 +97,7 @@ NatPunchAttemptPolicy ResolveNatPunchAttemptPolicy(
         policy.randomTargetPortCount = static_cast<uint16_t>((std::min)(
             1000u, 256u << resourceShift));
         policy.randomPortIntervalMs = 5;
+        policy.scanBatchSize = 16;
         return policy;
     }
 

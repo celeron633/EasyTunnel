@@ -49,6 +49,9 @@ struct NatPunchAttemptResult {
     uint32_t waveIntervalMs = 0;
     uint32_t datagramBudget = 0;
     uint32_t datagramsSent = 0;
+    uint32_t probeAttempts = 0;
+    uint32_t probeSendFailures = 0;
+    size_t targetsProbed = 0;
     UdpEndpoint confirmedPeer{};
     int64_t elapsedMs = 0;
     std::string detail;

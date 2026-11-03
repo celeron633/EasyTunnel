@@ -7,6 +7,7 @@
 #include "log.h"
 #include "nat_protocol.h"
 #include "nat_punch_handshake.h"
+#include "nat_punch_scheduler.h"
 #include "nat_punch_plan.h"
 #include "nat_punch_socket_pool.h"
 #include "nat_punch_transport.h"
@@ -94,21 +95,52 @@ bool SameIpv4Address(const UdpEndpoint& first, const UdpEndpoint& second) {
     return firstAddress->sin_addr.s_addr == secondAddress->sin_addr.s_addr;
 }
 
+void RecordProbe(const NatPunchSendResult& result, size_t targetIndex,
+                 NatPunchAttemptResult* attempt, std::vector<bool>* probed) {
+    ++attempt->probeAttempts;
+    if (!result.sent) {
+        ++attempt->probeSendFailures;
+        return;
+    }
+    ++attempt->datagramsSent;
+    if (result.ttlApplied) ++attempt->lowTtlDatagrams;
+    if (!(*probed)[targetIndex]) {
+        (*probed)[targetIndex] = true;
+        ++attempt->targetsProbed;
+    }
+}
+
 bool SendPrePunchWave(const NatPunchSocketPool& sockets,
                       const std::vector<UdpEndpoint>& targets,
                       const std::string& punch, uint8_t ttl,
-                      uint32_t datagramBudget,
-                      const std::atomic<bool>& running, uint32_t* sent,
+                      const NatPunchAttemptPolicy& policy,
+                      NatPunchScheduler::TimePoint deadline,
+                      const std::atomic<bool>& running,
+                      NatPunchAttemptResult* attempt, std::vector<bool>* probed,
                       size_t* ttlSocketCount, std::string* error) {
-    *sent = 0;
     *ttlSocketCount = 0;
     int firstApplyError = 0;
-    for (const socket_t sock : sockets.sockets()) {
-        if (!running.load() || *sent >= datagramBudget) break;
-        bool applied = false;
-        for (const UdpEndpoint& target : targets) {
-            if (!running.load() || *sent >= datagramBudget) break;
-            const auto result = SendNatPunchProbe(sock, target, punch, ttl);
+    std::vector<bool> applied(sockets.size(), false);
+    NatPunchScheduler scheduler(sockets.size() * targets.size(),
+        policy.scanBatchSize, policy.scanBatchIntervalMs, 0, false);
+    while (running.load() && std::chrono::steady_clock::now() < deadline
+           && !scheduler.finished() && attempt->probeAttempts < policy.datagramBudget) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto batch = scheduler.TakeBatch(now,
+            policy.datagramBudget - attempt->probeAttempts);
+        if (batch.count == 0) {
+            WaitForNatPunchDelay(running, static_cast<uint32_t>(
+                NatPunchPollTimeoutMs(now, scheduler.nextSend(), deadline, 25)));
+            continue;
+        }
+        for (size_t i = batch.offset; i < batch.offset + batch.count; ++i) {
+            if (!running.load() || std::chrono::steady_clock::now() >= deadline) break;
+            const size_t socketIndex = i / targets.size();
+            const size_t targetIndex = i % targets.size();
+            const auto result = SendNatPunchProbe(
+                sockets.sockets()[socketIndex], targets[targetIndex], punch, ttl);
+            RecordProbe(result, targetIndex, attempt, probed);
+            if (result.sent) ++attempt->prePunchDatagrams;
             if (!result.ttlRestored) {
                 *error = "Cannot restore NAT punch socket TTL. err="
                     + std::to_string(result.socketError);
@@ -116,12 +148,11 @@ bool SendPrePunchWave(const NatPunchSocketPool& sockets,
             }
             if (!result.ttlApplied) {
                 if (firstApplyError == 0) firstApplyError = result.socketError;
-                break;
+            } else if (!applied[socketIndex]) {
+                applied[socketIndex] = true;
+                ++*ttlSocketCount;
             }
-            applied = true;
-            if (result.sent) ++*sent;
         }
-        if (applied) ++*ttlSocketCount;
     }
     if (!running.load()) return true;
     if (*ttlSocketCount == 0) {
@@ -233,6 +264,9 @@ std::string FormatNatPunchAttemptResult(
         + ", wave_interval_ms=" + std::to_string(result.waveIntervalMs)
         + ", datagrams=" + std::to_string(result.datagramsSent)
         + "/" + std::to_string(result.datagramBudget)
+        + ", probe_attempts=" + std::to_string(result.probeAttempts)
+        + ", probe_send_failures=" + std::to_string(result.probeSendFailures)
+        + ", targets_probed=" + std::to_string(result.targetsProbed)
         + ", endpoint=" + endpoint
         + ", elapsed_ms=" + std::to_string(result.elapsedMs)
         + ", detail=" + SingleLine(result.detail.empty() ? "-" : result.detail);
@@ -528,16 +562,15 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
          cfg.peer_id, nonce, session.punchToken});
 
     bool lowTtlReceiver = false;
+    std::vector<bool> probedTargets(plan.targets.size(), false);
     if (executionPolicy.role == NatPunchExecutionRole::Receiver
         && executionPolicy.prePunchTtl > 0) {
         size_t ttlSocketCount = 0;
         if (!SendPrePunchWave(punchSockets, plan.targets, punch,
-                executionPolicy.prePunchTtl, policy.datagramBudget, running,
-                &attempt.prePunchDatagrams, &ttlSocketCount, error)) {
+                executionPolicy.prePunchTtl, policy, deadline, running,
+                &attempt, &probedTargets, &ttlSocketCount, error)) {
             return fail(NatPunchAttemptOutcome::SocketError, *error);
         }
-        attempt.datagramsSent = attempt.prePunchDatagrams;
-        attempt.lowTtlDatagrams = attempt.prePunchDatagrams;
         lowTtlReceiver = ttlSocketCount != 0;
         Log(LogLevel::Info, "NAT pre-punch ttl="
             + std::to_string(executionPolicy.prePunchTtl)
@@ -547,6 +580,10 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
         if (!running.load()) {
             return fail(NatPunchAttemptOutcome::Stopped,
                         "Adaptive NAT traversal stopped during pre-punch");
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return fail(NatPunchAttemptOutcome::PunchTimeout,
+                        "Adaptive NAT traversal timed out during pre-punch");
         }
     }
 
@@ -647,17 +684,15 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
         ? punchSockets.size() * plan.targets.size()
         : plan.targets.size();
     NatPunchAttemptPolicy remainingPolicy = policy;
-    remainingPolicy.datagramBudget = attempt.datagramsSent
+    remainingPolicy.datagramBudget = attempt.probeAttempts
             >= policy.datagramBudget
-        ? 0 : policy.datagramBudget - attempt.datagramsSent;
+        ? 0 : policy.datagramBudget - attempt.probeAttempts;
     attempt.waveIntervalMs = randomSender
         ? policy.randomPortIntervalMs
         : ComputeNatPunchWaveIntervalMs(
             remainingPolicy, datagramsPerWave,
             static_cast<uint64_t>((std::max)(
                 int64_t{1}, punchBudget.count())));
-    const auto punchInterval = std::chrono::milliseconds(
-        attempt.waveIntervalMs);
     Log(LogLevel::Info, "NAT punch send interval="
         + std::to_string(attempt.waveIntervalMs)
         + "ms, datagram_budget=" + std::to_string(policy.datagramBudget)
@@ -665,8 +700,10 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
         + std::to_string(randomSender ? plan.targets.size() : 0)
         + ", receiver_sockets="
         + std::to_string(randomReceiver ? punchSockets.size() : 0));
-    auto nextPunch = std::chrono::steady_clock::time_point{};
-    size_t randomTargetIndex = 0;
+    NatPunchScheduler scheduler(datagramsPerWave,
+        randomSender ? 1 : policy.scanBatchSize,
+        randomSender ? policy.randomPortIntervalMs : policy.scanBatchIntervalMs,
+        attempt.waveIntervalMs, !randomSender);
     NatPunchHandshake handshake(executionPolicy.role, nonce);
     auto nextAck = std::chrono::steady_clock::time_point{};
     const auto sendReply = [&](NatPunchReply reply) {
@@ -676,10 +713,10 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
              cfg.peer_id, handshake.nonce(), session.punchToken});
         Send(handshake.socket(), handshake.peer(), packet);
     };
-    const auto sendProbe = [&](socket_t socket, const UdpEndpoint& target) {
-        const auto result = SendNatPunchProbe(socket, target, punch,
+    const auto sendProbe = [&](socket_t socket, size_t targetIndex) {
+        const auto result = SendNatPunchProbe(socket, plan.targets[targetIndex], punch,
             lowTtlReceiver ? executionPolicy.prePunchTtl : 0);
-        if (result.sent && result.ttlApplied) ++attempt.lowTtlDatagrams;
+        RecordProbe(result, targetIndex, &attempt, &probedTargets);
         if (!result.ttlRestored) {
             *error = "Cannot restore NAT punch socket TTL. err="
                 + std::to_string(result.socketError);
@@ -694,49 +731,27 @@ bool PunchAdaptiveNat(socket_t controlSocket, socket_t* punchSocketOut,
             nextAck = now + std::chrono::milliseconds(100);
         }
         if (!handshake.awaitingConfirmation()
-            && now >= nextPunch && attempt.datagramsSent < policy.datagramBudget) {
-            if (randomSender) {
-                if (randomTargetIndex < plan.targets.size()) {
-                    if (!sendProbe(punchSocket, plan.targets[randomTargetIndex])) {
-                        return fail(NatPunchAttemptOutcome::SocketError, *error);
-                    }
-                    ++randomTargetIndex;
-                    ++attempt.datagramsSent;
-                    nextPunch = now + punchInterval;
+            && attempt.probeAttempts < policy.datagramBudget) {
+            const auto batch = scheduler.TakeBatch(now,
+                policy.datagramBudget - attempt.probeAttempts);
+            for (size_t i = batch.offset; i < batch.offset + batch.count; ++i) {
+                if (!running.load() || std::chrono::steady_clock::now() >= deadline) break;
+                const size_t socketIndex = i / plan.targets.size();
+                const size_t targetIndex = i % plan.targets.size();
+                if (!sendProbe(punchSockets.sockets()[socketIndex], targetIndex)) {
+                    return fail(NatPunchAttemptOutcome::SocketError, *error);
                 }
-            } else if (randomReceiver) {
-                for (const socket_t senderSocket : punchSockets.sockets()) {
-                    for (const UdpEndpoint& target : plan.targets) {
-                        if (attempt.datagramsSent >= policy.datagramBudget) break;
-                        if (!sendProbe(senderSocket, target)) {
-                            return fail(NatPunchAttemptOutcome::SocketError, *error);
-                        }
-                        ++attempt.datagramsSent;
-                    }
-                    if (attempt.datagramsSent >= policy.datagramBudget) break;
-                }
-                nextPunch = now + punchInterval;
-            } else {
-                for (const UdpEndpoint& target : plan.targets) {
-                    if (attempt.datagramsSent >= policy.datagramBudget) break;
-                    if (!sendProbe(punchSocket, target)) {
-                        return fail(NatPunchAttemptOutcome::SocketError, *error);
-                    }
-                    ++attempt.datagramsSent;
-                }
-                nextPunch = now + punchInterval;
             }
         }
 
         UdpEndpoint source{};
         int received = -1;
         socket_t receivingSocket = kInvalidSocket;
-        const int receiveTimeoutMs = randomSender
-                && randomTargetIndex < plan.targets.size()
-            ? static_cast<int>((std::min)(
-                static_cast<uint32_t>(kReceiveTimeoutMs),
-                attempt.waveIntervalMs))
-            : kReceiveTimeoutMs;
+        if (!running.load() || std::chrono::steady_clock::now() >= deadline) break;
+        const auto nextEvent = handshake.awaitingConfirmation() ? nextAck
+            : attempt.probeAttempts < policy.datagramBudget ? scheduler.nextSend() : deadline;
+        const int receiveTimeoutMs = NatPunchPollTimeoutMs(
+            std::chrono::steady_clock::now(), nextEvent, deadline, kReceiveTimeoutMs);
         if (!punchSockets.Receive(
                 receiveTimeoutMs, &buffer,
                 &receivingSocket, &source, &received, error)) {

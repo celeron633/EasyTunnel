@@ -8,6 +8,7 @@
 
 #include "nat_punch_transport.h"
 #include "nat_punch_handshake.h"
+#include "nat_punch_scheduler.h"
 #include "nat_protocol.h"
 #include "nat_traversal.h"
 
@@ -68,9 +69,69 @@ UdpEndpoint FromSockaddr(const sockaddr_storage& address, socket_len_t len) {
     endpoint.family = address.ss_family;
     return endpoint;
 }
+
+void TestScheduling() {
+    using namespace std::chrono;
+    const NatPunchScheduler::TimePoint start{};
+    // A full mixed wave covers every socket/target pair exactly once, with a
+    // bounded burst even if the receive side has no packets to process.
+    NatPunchScheduler mixed(128 * 17, 8, 5, 200, false);
+    size_t total = 0;
+    for (int tick = 0; !mixed.finished() && tick < 10000; ++tick) {
+        const auto now = start + milliseconds(tick);
+        const auto batch = mixed.TakeBatch(now, 16384 - total);
+        if (batch.count == 0) continue;
+        Expect(batch.offset == total && batch.count <= 8,
+               "mixed batches preserve all pairs without duplicates or bursts");
+        total += batch.count;
+        Expect(mixed.TakeBatch(now, 16384 - total).count == 0,
+               "multiple polls at the same time cannot bypass batch pacing");
+    }
+    Expect(total == 128 * 17 && mixed.finished(), "entire mixed wave is eventually probed");
+
+    NatPunchScheduler budget(17, 8, 5, 200, true);
+    Expect(budget.TakeBatch(start, 10).count == 8
+               && budget.TakeBatch(start + milliseconds(5), 2).count == 2
+               && budget.TakeBatch(start + milliseconds(10), 0).count == 0,
+           "partial batches obey the remaining budget, including failed sends");
+
+    NatPunchScheduler waves(9, 4, 5, 200, true);
+    Expect(waves.TakeBatch(start, 100).count == 4
+               && waves.TakeBatch(start + milliseconds(5), 100).offset == 4
+               && waves.TakeBatch(start + milliseconds(10), 100).count == 1
+               && waves.TakeBatch(start + milliseconds(199), 100).count == 0,
+           "wave pacing remains in force after its last partial batch");
+    const auto afterStall = start + milliseconds(500);
+    Expect(waves.TakeBatch(afterStall, 100).offset == 0
+               && waves.TakeBatch(afterStall, 100).count == 0
+               && waves.nextSend() == afterStall + milliseconds(5),
+           "a stalled receive loop resumes without catching up in a burst");
+
+    NatPunchScheduler random(1000, 1, 15, 0, false);
+    for (size_t i = 0; i < 1000; ++i) {
+        const auto now = start + milliseconds(15 * i);
+        const auto batch = random.TakeBatch(now, 1000 - i);
+        Expect(batch.offset == i && batch.count == 1,
+               "random targets remain unique and paced one at a time");
+        if (i < 999) Expect(random.TakeBatch(now + milliseconds(14), 1000).count == 0,
+                            "random interval is not shortened by repeated polling");
+    }
+    Expect(random.finished() && random.TakeBatch(start + seconds(60), 1000).count == 0,
+           "completed random scan never restarts or busy-sends");
+    Expect(NatPunchPollTimeoutMs(start, start + milliseconds(5), start + seconds(1)) == 5
+               && NatPunchPollTimeoutMs(start, start + seconds(1), start + milliseconds(3)) == 3
+               && NatPunchPollTimeoutMs(start, start + microseconds(100), start + seconds(1)) == 1
+               && NatPunchPollTimeoutMs(start, start, start + seconds(1)) == 0
+               && NatPunchPollTimeoutMs(start, (NatPunchScheduler::TimePoint::max)(), start + seconds(1)) == 100,
+           "poll wakes for the next batch or deadline without truncating sub-ms waits");
+    NatPunchScheduler empty(0, 8, 5, 200, true);
+    Expect(empty.finished() && empty.TakeBatch(start, 100).count == 0,
+           "empty schedule has no work");
+}
 }  // namespace
 
 int main() {
+    TestScheduling();
 #ifdef _WIN32
     WSADATA winsockData{};
     if (WSAStartup(MAKEWORD(2, 2), &winsockData) != 0) {

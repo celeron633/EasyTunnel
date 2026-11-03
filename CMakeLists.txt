@@ -130,6 +130,7 @@ if(BUILD_TESTING)
         tests/adaptive_nat_integration_test.cpp
         adaptive_nat_traversal.cpp
         nat_punch_handshake.cpp
+        nat_punch_scheduler.cpp
         nat_punch_plan.cpp
         nat_punch_socket_pool.cpp
         nat_punch_transport.cpp
@@ -177,6 +178,7 @@ if(BUILD_TESTING)
     add_executable(EasyTunnel_nat_punch_transport_tests
         tests/nat_punch_transport_test.cpp
         nat_punch_handshake.cpp
+        nat_punch_scheduler.cpp
         nat_punch_transport.cpp
         nat_traversal.cpp
         nat_protocol.cpp
@@ -214,6 +216,7 @@ set(COMMON_SOURCES
     nat_punch_transport.cpp
     adaptive_nat_traversal.cpp
     nat_punch_handshake.cpp
+    nat_punch_scheduler.cpp
     rendezvous_client.cpp
     peer_selection.cpp
     nat_traversal.cpp

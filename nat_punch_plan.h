@@ -52,6 +52,8 @@ struct NatPunchAttemptPolicy {
     uint16_t randomReceiverSocketCount = 32;
     uint16_t randomTargetPortCount = 256;
     uint16_t randomPortIntervalMs = 15;
+    uint16_t scanBatchSize = 8;
+    uint16_t scanBatchIntervalMs = 5;
 };
 
 // Converts the user-facing resource profile and one-based local attempt
