@@ -60,7 +60,7 @@ MainWindow::MainWindow() {
     const std::string loadMessage = LoadGuiConfig(&configLoaded);
 
     setWindowTitle(QStringLiteral("EasyTunnel"));
-    // Wide enough for the two-column settings page without horizontal scrolling.
+    // Room for the connection overview and settings navigation.
     resize(1040, 680);
 
     // Created first: building the tabs already refreshes the state widgets.

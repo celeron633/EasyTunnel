@@ -11,6 +11,8 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QStackedWidget>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSpinBox>
@@ -28,18 +30,21 @@
 #endif
 
 namespace {
-constexpr int kFormLabelWidth = 155;
+constexpr int kFormLabelWidth = 170;
 constexpr int kConfigSaveDelayMs = 400;
 constexpr int kConfigSaveMessageMs = 3000;
 const char* const kLogLevels[] = {"Debug", "Info", "Warn", "Error"};
 
 QFormLayout* AddSection(QVBoxLayout* column, const QString& title) {
     auto* box = new QGroupBox(title);
+    box->setProperty("settingsCard", true);
     auto* form = new QFormLayout(box);
+    form->setContentsMargins(20, 12, 20, 18);
     form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     form->setHorizontalSpacing(12);
-    form->setVerticalSpacing(8);
+    form->setVerticalSpacing(14);
+    form->setRowWrapPolicy(QFormLayout::WrapLongRows);
     column->addWidget(box);
     return form;
 }
@@ -137,8 +142,7 @@ QCheckBox* MainWindow::AddCheckField(QFormLayout* form, const QString& label,
     return check;
 }
 
-// Two balanced columns: session and timing settings on the left, the data path
-// on the right. Every accepted edit is saved through the shared config module.
+// Each category scrolls independently; save feedback stays visible below it.
 QWidget* MainWindow::BuildSettingsTab() {
     wheelGuard = new WheelGuard(this);
     saveTimer_ = new QTimer(this);
@@ -147,20 +151,65 @@ QWidget* MainWindow::BuildSettingsTab() {
     connect(saveTimer_, &QTimer::timeout, this, [this] { SaveGuiConfig(); });
     saveMessageTimer_ = new QTimer(this);
     saveMessageTimer_->setSingleShot(true);
-    connect(saveMessageTimer_, &QTimer::timeout, this, [this] { configSaveLabel_->clear(); });
+    connect(saveMessageTimer_, &QTimer::timeout, this, [this] {
+        configSaveLabel_->setStyleSheet(gui_theme::TextColorStyle(gui_theme::kMuted));
+        configSaveLabel_->setText(QStringLiteral("Changes are saved automatically."));
+    });
 
     auto* page = new QWidget();
     auto* pageLayout = new QVBoxLayout(page);
-    auto* columns = new QHBoxLayout();
-    auto* left = new QVBoxLayout();
-    auto* right = new QVBoxLayout();
-    columns->addLayout(left, 1);
-    columns->addSpacing(8);
-    columns->addLayout(right, 1);
-    pageLayout->addLayout(columns);
+    pageLayout->setContentsMargins(8, 18, 8, 8);
+    pageLayout->setSpacing(16);
+    auto* heading = new QLabel(QStringLiteral("Settings"));
+    heading->setObjectName(QStringLiteral("settingsHeading"));
+    pageLayout->addWidget(heading);
+
+    auto* body = new QHBoxLayout();
+    body->setSpacing(20);
+    auto* navigation = new QListWidget(page);
+    navigation->setObjectName(QStringLiteral("settingsNavigation"));
+    navigation->setAccessibleName(QStringLiteral("Settings categories"));
+    navigation->setFixedWidth(172);
+    navigation->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto* stack = new QStackedWidget(page);
+    body->addWidget(navigation);
+    body->addWidget(stack, 1);
+    pageLayout->addLayout(body, 1);
+
+    auto addCategory = [&](const QString& title, const QString& description) {
+        auto* item = new QListWidgetItem(title, navigation);
+        item->setSizeHint(QSize(0, 44));
+        auto* content = new QWidget();
+        auto* column = new QVBoxLayout(content);
+        column->setContentsMargins(0, 0, 12, 0);
+        column->setSpacing(16);
+        auto* hint = new QLabel(description);
+        hint->setWordWrap(true);
+        hint->setStyleSheet(gui_theme::TextColorStyle(gui_theme::kMuted));
+        column->addWidget(hint);
+        auto* scroll = new QScrollArea();
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidget(content);
+        stack->addWidget(scroll);
+        return column;
+    };
+    auto* rendezvous = addCategory(QStringLiteral("Rendezvous"),
+        QStringLiteral("Server address, peer identity and rendezvous behavior."));
+    auto* connection = addCategory(QStringLiteral("Connection"),
+        QStringLiteral("Configure the local tunnel adapter."));
+    auto* nat = addCategory(QStringLiteral("NAT traversal"),
+        QStringLiteral("Keep peers reachable and tune UDP hole punching."));
+    auto* routing = addCategory(QStringLiteral("Connection modes"),
+        QStringLiteral("Choose connection methods in priority order and configure IPv6."));
+    auto* general = addCategory(QStringLiteral("General"),
+        QStringLiteral("Logging, background traffic and application behavior."));
+    connect(navigation, &QListWidget::currentRowChanged,
+            stack, &QStackedWidget::setCurrentIndex);
+    navigation->setCurrentRow(0);
 
     // ---- Rendezvous ----
-    QFormLayout* form = AddSection(left, QStringLiteral("Rendezvous"));
+    QFormLayout* form = AddSection(rendezvous, QStringLiteral("Rendezvous"));
     auto identityChanged = [this](QLineEdit* edit) {
         connect(edit, &QLineEdit::textEdited, this, [this] { UpdateIdentityLabel(); });
         rendezvousIdentityFields_.push_back(edit);
@@ -183,7 +232,7 @@ QWidget* MainWindow::BuildSettingsTab() {
                                    [this] { OnAutoWaitChanged(); });
 
     // ---- NAT liveness ----
-    form = AddSection(left, QStringLiteral("NAT liveness"));
+    form = AddSection(nat, QStringLiteral("NAT liveness"));
     config_.peerTimeout = std::max(config_.peerTimeout, config_.keepaliveInterval + 1);
     QSpinBox* keepalive = AddIntField(form, QStringLiteral("Keepalive (s)"),
                                       &config_.keepaliveInterval, 1, 300);
@@ -194,7 +243,7 @@ QWidget* MainWindow::BuildSettingsTab() {
             [peerTimeout](int value) { peerTimeout->setMinimum(value + 1); });
 
     // ---- NAT punch ----
-    form = AddSection(left, QStringLiteral("NAT Punch"));
+    form = AddSection(nat, QStringLiteral("NAT Punch"));
     if (config_.stunServers.size() < 2) config_.stunServers.resize(2);
     AddIntField(form, QStringLiteral("Punch timeout (s)"), &config_.punchTimeout, 1, 600);
     AddIntField(form, QStringLiteral("Attempt limit"), &config_.natPunchAttemptLimit, 1, 10);
@@ -234,7 +283,7 @@ QWidget* MainWindow::BuildSettingsTab() {
     UpdateStunDiagnosticUi();
 
     // ---- Log and misc ----
-    form = AddSection(left, QStringLiteral("Log and misc"));
+    form = AddSection(general, QStringLiteral("Application preferences"));
     auto* logLevel = MakeComboBox();
     for (const char* level : kLogLevels) logLevel->addItem(QString::fromLatin1(level));
     logLevel->setCurrentIndex(std::clamp(config_.logLevel, 0, 3));
@@ -274,14 +323,13 @@ QWidget* MainWindow::BuildSettingsTab() {
     });
     AddRow(form, QStringLiteral("Start with Windows"), startWithWindowsCheck_);
 #endif
-    left->addStretch(1);
 
     // ---- TUN adapter ----
-    form = AddSection(right, QStringLiteral("TUN adapter"));
+    form = AddSection(connection, QStringLiteral("TUN adapter"));
     AddTextField(form, QStringLiteral("Adapter name"), &config_.adapterName);
     AddTextField(form, QStringLiteral("Local TUN IPv4"), &config_.localTunIpv4);
     AddIntField(form, QStringLiteral("TUN prefix"), &config_.tunPrefix, 0, 32);
-    mtuWarning_ = MakeMessageLabel(QColor(255, 204, 0));
+    mtuWarning_ = MakeMessageLabel(gui_theme::kWarning);
     mtuWarning_->setText(QStringLiteral("MTU > 1472 may cause outer IPv4 fragmentation"));
     AddIntField(form, QStringLiteral("TUN MTU"), &config_.tunMtu, 576, 9000,
                 [this] { mtuWarning_->setVisible(config_.tunMtu > 1472); });
@@ -291,12 +339,19 @@ QWidget* MainWindow::BuildSettingsTab() {
 
     // ---- Traversal strategy ----
     auto* traversalBox = new QGroupBox(QStringLiteral("Traversal strategy"));
+    traversalBox->setProperty("settingsCard", true);
     auto* traversalLayout = new QVBoxLayout(traversalBox);
+    traversalLayout->setContentsMargins(20, 12, 20, 18);
+    traversalLayout->setSpacing(12);
+    auto* traversalHint = new QLabel(QStringLiteral("Enabled modes are tried from top to bottom."));
+    traversalHint->setWordWrap(true);
+    traversalHint->setStyleSheet(gui_theme::TextColorStyle(gui_theme::kMuted));
+    traversalLayout->addWidget(traversalHint);
     traversalTable_ = new QTableWidget(0, 4, traversalBox);
     traversalTable_->setHorizontalHeaderLabels({QStringLiteral("Enabled"),
         QStringLiteral("Priority"), QStringLiteral("Mode"), QStringLiteral("Order")});
     traversalTable_->verticalHeader()->setVisible(false);
-    traversalTable_->verticalHeader()->setDefaultSectionSize(34);
+    traversalTable_->verticalHeader()->setDefaultSectionSize(42);
     traversalTable_->setShowGrid(false);
     traversalTable_->setSelectionMode(QAbstractItemView::NoSelection);
     traversalTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -309,11 +364,11 @@ QWidget* MainWindow::BuildSettingsTab() {
     traversalHeader->resizeSection(3, 130);
     traversalTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     traversalLayout->addWidget(traversalTable_);
-    right->addWidget(traversalBox);
+    routing->addWidget(traversalBox);
     RebuildTraversalTable();
 
     // ---- IPv6 direct connection ----
-    form = AddSection(right, QStringLiteral("IPv6 direct connection"));
+    form = AddSection(routing, QStringLiteral("IPv6 direct connection"));
     AddCheckField(form, QStringLiteral("Accept inbound UDP"), &config_.ipv6AcceptInbound);
     AddIntField(form, QStringLiteral("Listen port (0=auto)"), &config_.ipv6ListenPort,
                 0, 65535);
@@ -321,18 +376,14 @@ QWidget* MainWindow::BuildSettingsTab() {
     AddIntField(form, QStringLiteral("Probe TCP port"), &config_.ipv6ProbePort, 1, 65535);
     AddIntField(form, QStringLiteral("Probe timeout (s)"), &config_.ipv6FallbackTimeout,
                 1, 120);
-    right->addStretch(1);
+    for (auto* column : {rendezvous, connection, nat, routing, general}) column->addStretch(1);
 
-    configSaveLabel_ = new QLabel();
+    configSaveLabel_ = new QLabel(QStringLiteral("Changes are saved automatically."));
     configSaveLabel_->setWordWrap(true);
+    configSaveLabel_->setMinimumHeight(32);
+    configSaveLabel_->setContentsMargins(8, 4, 8, 4);
     pageLayout->addWidget(configSaveLabel_);
-    pageLayout->addStretch(1);
-
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    scroll->setWidget(page);
-    return scroll;
+    return page;
 }
 
 void MainWindow::RebuildTraversalTable() {

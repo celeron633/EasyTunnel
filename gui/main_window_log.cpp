@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QDateTime>
 #include <QFontDatabase>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -98,7 +99,19 @@ void MainWindow::DrainLog() {
 // Called from any thread; the UI tick appends the buffered lines.
 void MainWindow::OnLog(LogLevel /*level*/, const std::string& message) {
     std::lock_guard<std::mutex> lock(logMutex_);
-    pendingLogLines_.push_back(message);
+    const std::string timestamp = QDateTime::currentDateTime()
+        .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz ")).toStdString();
+    // Prefix continuation lines too, using the same arrival time for one message.
+    std::size_t start = 0;
+    do {
+        const auto end = message.find('\n', start);
+        std::string line = message.substr(start, end == std::string::npos
+            ? std::string::npos : end - start);
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        pendingLogLines_.push_back(timestamp + line);
+        if (end == std::string::npos) break;
+        start = end + 1;
+    } while (start < message.size());
     if (pendingLogLines_.size() > kMaxLogLines) {
         pendingLogLines_.erase(pendingLogLines_.begin(),
                                pendingLogLines_.end() - kMaxLogLines);

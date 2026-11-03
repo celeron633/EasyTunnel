@@ -113,6 +113,25 @@ QGroupBox::title {
     left: 12px; top: 9px; color: @text;
 }
 
+/* Settings-only rules keep the connection page's existing appearance. */
+QLabel#settingsHeading { font-size: 20px; font-weight: 600; color: @text; }
+QListWidget#settingsNavigation {
+    background: transparent; border: none; outline: none;
+}
+QListWidget#settingsNavigation::item {
+    color: @muted; padding: 12px 10px; margin-bottom: 6px;
+    border: 1px solid transparent; border-radius: 6px;
+}
+QListWidget#settingsNavigation::item:hover { background: @surface; color: @text; }
+QListWidget#settingsNavigation::item:selected {
+    background: @accentTint; color: @accent; font-weight: 600;
+}
+QListWidget#settingsNavigation::item:focus { border-color: @accent; }
+QGroupBox[settingsCard="true"] {
+    border-radius: 8px; margin-top: 0; padding: 40px 0 0 0;
+}
+QGroupBox[settingsCard="true"]::title { left: 20px; top: 16px; }
+
 QPushButton {
     background: @surface; color: @text; border: 1px solid @borderStrong;
     border-radius: 4px; padding: 5px 16px; min-height: 18px;
